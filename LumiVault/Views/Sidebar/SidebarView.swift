@@ -20,18 +20,38 @@ struct SidebarView: View {
     }
 
     var body: some View {
-        List(selection: $selectedAlbum) {
-            ForEach(sortedYears, id: \.self) { year in
-                Section(year) {
-                    ForEach(albumsByYear[year] ?? [], id: \.persistentModelID) { album in
-                        NavigationLink(value: album) {
-                            AlbumRow(album: album)
+        Group {
+            if albums.isEmpty {
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.tertiary)
+                    Text("No albums yet")
+                        .font(Constants.Design.monoHeadline)
+                        .foregroundStyle(.secondary)
+                    Text("Import albums from your\nPhotos library to get started.")
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            } else {
+                List(selection: $selectedAlbum) {
+                    ForEach(sortedYears, id: \.self) { year in
+                        Section(year) {
+                            ForEach(albumsByYear[year] ?? [], id: \.persistentModelID) { album in
+                                NavigationLink(value: album) {
+                                    AlbumRow(album: album)
+                                }
+                            }
                         }
                     }
                 }
+                .searchable(text: $searchText, prompt: "Search albums")
             }
         }
-        .searchable(text: $searchText, prompt: "Search albums")
         .navigationTitle("Library")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

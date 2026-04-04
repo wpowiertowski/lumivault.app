@@ -14,11 +14,11 @@ struct ExportSettingsView: View {
 
                 HStack(spacing: 12) {
                     TextField("Year", text: $settings.year)
-                        .frame(width: 60)
+                        .frame(minWidth: 70)
                     TextField("Month", text: $settings.month)
-                        .frame(width: 40)
+                        .frame(minWidth: 55)
                     TextField("Day", text: $settings.day)
-                        .frame(width: 40)
+                        .frame(minWidth: 55)
                 }
                 .font(Constants.Design.monoBody)
             }
