@@ -20,6 +20,9 @@ struct LumiVaultApp: App {
                 .tint(Constants.Design.accentColor)
         }
         .modelContainer(container)
+        .commands {
+            ImportFromPhotosCommands()
+        }
 
         Settings {
             SettingsView()

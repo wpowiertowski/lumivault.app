@@ -15,7 +15,11 @@ struct SettingsView: View {
                 .tabItem {
                     Label("iCloud", systemImage: "icloud")
                 }
+            B2SettingsView()
+                .tabItem {
+                    Label("B2", systemImage: "cloud")
+                }
         }
-        .frame(width: 480, height: 320)
+        .frame(width: 480, height: 360)
     }
 }

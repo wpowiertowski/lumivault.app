@@ -5,6 +5,7 @@ struct ContentView: View {
     @State private var selectedAlbum: AlbumRecord?
     @State private var selectedImage: ImageRecord?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var showingPhotosImport = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -24,6 +25,21 @@ struct ContentView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingPhotosImport = true
+                } label: {
+                    Label("Import from Photos", systemImage: "photo.badge.arrow.down")
+                }
+            }
+        }
+        .sheet(isPresented: $showingPhotosImport) {
+            PhotosExportSheet()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showPhotosImport)) { _ in
+            showingPhotosImport = true
+        }
     }
 }
 

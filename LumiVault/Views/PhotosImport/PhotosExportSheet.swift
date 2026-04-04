@@ -1,0 +1,269 @@
+import SwiftUI
+import SwiftData
+
+struct PhotosExportSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @State private var step: ExportStep = .pickAlbum
+    @State private var selectedAlbumId: String?
+    @State private var selectedAlbumTitle: String = ""
+    @State private var settings = ExportSettings(
+        albumName: "",
+        year: "",
+        month: "",
+        day: ""
+    )
+    @State private var progress = ExportProgress()
+    @State private var isExporting = false
+
+    private let catalogService = CatalogService()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Step indicator
+            StepIndicator(current: step)
+                .padding()
+
+            Divider()
+
+            // Content
+            Group {
+                switch step {
+                case .pickAlbum:
+                    albumPickerStep
+                case .configure:
+                    configureStep
+                case .exporting:
+                    exportingStep
+                case .complete:
+                    completeStep
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Divider()
+
+            // Navigation buttons
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                switch step {
+                case .pickAlbum:
+                    Button("Next") { goToSettings() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(selectedAlbumId == nil)
+
+                case .configure:
+                    Button("Back") { step = .pickAlbum }
+                    Button("Start Export") { startExport() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(settings.albumName.isEmpty)
+
+                case .exporting:
+                    EmptyView()
+
+                case .complete:
+                    Button("Done") { dismiss() }
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding()
+        }
+        .frame(width: 600, height: 500)
+    }
+
+    // MARK: - Steps
+
+    private var albumPickerStep: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Select a Photos Album")
+                .font(Constants.Design.monoTitle3)
+                .padding(.horizontal)
+                .padding(.top, 12)
+
+            PhotosAlbumPicker(selectedAlbumId: $selectedAlbumId)
+        }
+    }
+
+    private var configureStep: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Export Settings")
+                .font(Constants.Design.monoTitle3)
+                .padding(.horizontal)
+                .padding(.top, 12)
+
+            ExportSettingsView(settings: $settings)
+        }
+    }
+
+    private var exportingStep: some View {
+        VStack(spacing: 20) {
+            Text(progress.phase.rawValue)
+                .font(Constants.Design.monoHeadline)
+
+            ProgressView(value: progress.fraction) {
+                if !progress.currentFilename.isEmpty {
+                    Text(progress.currentFilename)
+                        .font(Constants.Design.monoCaption)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .padding(.horizontal, 40)
+
+            HStack(spacing: 24) {
+                ExportStat(label: "Hashed", value: progress.filesHashed)
+                ExportStat(label: "Deduped", value: progress.filesDeduplicated)
+                ExportStat(label: "Copied", value: progress.filesCopied)
+                ExportStat(label: "Uploaded", value: progress.filesUploaded)
+            }
+            .font(Constants.Design.monoCaption)
+
+            if !progress.errors.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(progress.errors, id: \.self) { error in
+                            Text(error)
+                                .font(Constants.Design.monoCaption)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
+                .frame(maxHeight: 80)
+                .padding(.horizontal)
+            }
+        }
+        .padding()
+    }
+
+    private var completeStep: some View {
+        VStack(spacing: 16) {
+            Image(systemName: progress.errors.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(progress.errors.isEmpty ? .green : .orange)
+
+            Text(progress.errors.isEmpty ? "Export Complete" : "Export Completed with Errors")
+                .font(Constants.Design.monoTitle3)
+
+            VStack(spacing: 4) {
+                Text("\(progress.filesHashed) files processed")
+                if progress.filesDeduplicated > 0 {
+                    Text("\(progress.filesDeduplicated) duplicates skipped")
+                }
+                if progress.filesCopied > 0 {
+                    Text("\(progress.filesCopied) copied to volumes")
+                }
+                if progress.filesUploaded > 0 {
+                    Text("\(progress.filesUploaded) uploaded to B2")
+                }
+            }
+            .font(Constants.Design.monoBody)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Actions
+
+    private func goToSettings() {
+        guard let albumId = selectedAlbumId else { return }
+
+        // Pre-fill settings from the selected album
+        let service = PhotosImportService()
+        Task {
+            let albums = await service.fetchAlbums()
+            if let album = albums.first(where: { $0.id == albumId }) {
+                selectedAlbumTitle = album.title
+                settings.albumName = album.title
+
+                let date = album.startDate ?? .now
+                let calendar = Calendar.current
+                settings.year = String(calendar.component(.year, from: date))
+                settings.month = String(format: "%02d", calendar.component(.month, from: date))
+                settings.day = String(format: "%02d", calendar.component(.day, from: date))
+            }
+            step = .configure
+        }
+    }
+
+    private func startExport() {
+        guard let albumId = selectedAlbumId else { return }
+        step = .exporting
+        isExporting = true
+
+        Task {
+            let coordinator = ExportCoordinator(catalogService: catalogService)
+            do {
+                try await coordinator.export(
+                    photosAlbumId: albumId,
+                    settings: settings,
+                    modelContext: modelContext,
+                    progress: progress
+                )
+            } catch {
+                await MainActor.run {
+                    progress.errors.append("Export failed: \(error.localizedDescription)")
+                    progress.phase = .failed
+                }
+            }
+            isExporting = false
+            step = .complete
+        }
+    }
+}
+
+// MARK: - Supporting Views
+
+private enum ExportStep: Int, CaseIterable {
+    case pickAlbum, configure, exporting, complete
+
+    var label: String {
+        switch self {
+        case .pickAlbum: "Select Album"
+        case .configure: "Settings"
+        case .exporting: "Exporting"
+        case .complete: "Done"
+        }
+    }
+}
+
+private struct StepIndicator: View {
+    let current: ExportStep
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(ExportStep.allCases, id: \.rawValue) { step in
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(step.rawValue <= current.rawValue ? Constants.Design.accentColor : Color.secondary.opacity(0.3))
+                        .frame(width: 8, height: 8)
+                    Text(step.label)
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(step.rawValue <= current.rawValue ? .primary : .secondary)
+                }
+                if step != ExportStep.allCases.last {
+                    Rectangle()
+                        .fill(step.rawValue < current.rawValue ? Constants.Design.accentColor : Color.secondary.opacity(0.3))
+                        .frame(height: 1)
+                        .frame(maxWidth: 40)
+                }
+            }
+        }
+    }
+}
+
+private struct ExportStat: View {
+    let label: String
+    let value: Int
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("\(value)")
+                .fontWeight(.medium)
+            Text(label)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
