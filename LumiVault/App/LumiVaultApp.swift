@@ -1,0 +1,29 @@
+import SwiftUI
+import SwiftData
+import AppKit
+
+final class AppActivationDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+@main
+struct LumiVaultApp: App {
+    let container = SwiftDataContainer.create()
+    @NSApplicationDelegateAdaptor(AppActivationDelegate.self) private var appDelegate
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .tint(Constants.Design.accentColor)
+        }
+        .modelContainer(container)
+
+        Settings {
+            SettingsView()
+        }
+        .modelContainer(container)
+    }
+}
