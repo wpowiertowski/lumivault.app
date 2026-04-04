@@ -12,6 +12,8 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 
 ## Features
 
+- **Apple Photos Import** — browse and select albums from your Photos library, export originals via PhotoKit, and archive them in one step
+- **Backblaze B2 Cloud Upload** — upload photos and PAR2 recovery data to B2 cloud storage via the REST API with SHA-1 verification
 - **iCloud Catalog Sync** — catalog.json syncs across devices via iCloud Drive with conflict-free merge (union by SHA-256, newest timestamp wins)
 - **Thumbnail Generation** — HEIC/RAW/CR2/CR3/NEF/ARW/DNG support with a multi-resolution cache (256px grid, 64px list) keyed by content hash
 - **Deduplication** — exact (SHA-256) and near-duplicate (perceptual hash) detection across all connected volumes
@@ -27,9 +29,11 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 | --------------- | -------------------------------------------------- |
 | UI              | SwiftUI 7 (NavigationSplitView, @Observable)       |
 | Data            | SwiftData                                          |
-| Cloud           | CloudKit + NSUbiquitousKeyValueStore               |
+| Photos Import   | PhotoKit (Photos, PhotosUI)                        |
+| Cloud Sync      | CloudKit + NSUbiquitousKeyValueStore               |
+| Cloud Storage   | URLSession + Backblaze B2 REST API                 |
 | Image Pipeline  | Core Image, ImageIO, vImage                        |
-| Hashing         | CryptoKit (SHA-256)                                |
+| Hashing         | CryptoKit (SHA-256, SHA-1)                         |
 | Redundancy      | Accelerate (Reed-Solomon via vDSP)                 |
 | Concurrency     | Swift Concurrency (async/await, TaskGroup, actors) |
 | Search          | Core Spotlight                                     |
@@ -51,12 +55,15 @@ Photos are organized into date-based albums, deduplicated across multiple extern
           │  (actors / @Observable) │
           ├─────────────────────────┤
           │ CatalogService          │  read/write/merge catalog.json
+          │ PhotosImportService     │  PhotoKit album export
           │ ThumbnailService        │  generate, cache, LRU eviction
           │ DeduplicationService    │  SHA-256 + perceptual hash index
           │ RedundancyService       │  Reed-Solomon ECC encode/verify
+          │ B2Service               │  Backblaze B2 cloud upload
           │ SyncService             │  iCloud push/pull, conflicts
           │ VolumeService           │  external disk discovery/bookmarks
           │ IntegrityService        │  scheduled verification sweeps
+          │ ExportCoordinator       │  orchestrates full export pipeline
           └────────────┬────────────┘
                        │
           ┌────────────┴────────────┐
@@ -71,16 +78,18 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 ## Project Structure
 
 ```text
-PhotoVault/
-├── App/                  App entry point and root state
-├── Models/               Codable catalog structs + SwiftData models
-├── Services/             Actor-based domain services
+LumiVault/
+├── App/                  App entry point, root state, menu commands
+├── Models/               Codable catalog structs, SwiftData models, B2 credentials
+├── Services/             Actor-based domain services + export coordinator
+│   └── Persistence/      SwiftData container factory
 ├── Views/
 │   ├── Sidebar/          Year/month/day/album tree + volume status
 │   ├── Grid/             LazyVGrid thumbnail browser
 │   ├── Detail/           Full-resolution preview + metadata inspector
 │   ├── Import/           Drag-and-drop import with progress/dedup stats
-│   └── Settings/         Catalog path, volumes, iCloud sync config
+│   ├── PhotosImport/     Photos library album picker + export wizard
+│   └── Settings/         General, Volumes, iCloud, B2 config
 └── Utilities/            Perceptual hashing, file coordination, bookmarks
 ```
 
@@ -93,6 +102,7 @@ LumiVault automatically detects an existing `~/.photovault/catalog.json` on firs
 - macOS 26 or later
 - Xcode 26 or later (to build from source)
 - iCloud account (optional, for catalog sync)
+- Backblaze B2 account (optional, for cloud uploads)
 
 ## License
 

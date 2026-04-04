@@ -32,6 +32,8 @@
 | Redundancy | Accelerate (Reed-Solomon via vDSP) | PAR2-equivalent error correction |
 | Spotlight | Core Spotlight | System-wide photo search by album/date/hash |
 | Background Work | BackgroundTasks framework | Scheduled verification & thumbnail warm-up |
+| Photos Import | PhotoKit (Photos framework) | Apple Photos album enumeration & asset export |
+| Cloud Storage | URLSession | Backblaze B2 REST API uploads |
 | Drag & Drop | UniformTypeIdentifiers, Transferable | Native drag-in import, drag-out export |
 
 ---
@@ -53,12 +55,15 @@
           │  (actors / @Observable) │
           ├─────────────────────────┤
           │ CatalogService          │  ← catalog.json read/write/merge
+          │ PhotosImportService     │  ← PhotoKit album export
           │ ThumbnailService        │  ← generate, cache, LRU eviction
           │ DeduplicationService    │  ← SHA-256 + perceptual hash index
           │ RedundancyService       │  ← Reed-Solomon ECC encode/verify/repair
+          │ B2Service               │  ← Backblaze B2 cloud upload
           │ SyncService             │  ← iCloud push/pull, conflict resolution
           │ VolumeService           │  ← discover, bookmark, mirror external disks
           │ IntegrityService        │  ← scheduled verification sweeps
+          │ ExportCoordinator       │  ← orchestrates full export pipeline
           └────────────┬────────────┘
                        │
           ┌────────────┴────────────┐
@@ -193,7 +198,74 @@ Original file
 - Background `TaskGroup` processes imports in parallel (concurrency = `ProcessInfo.activeProcessorCount`).
 - Cache eviction: LRU by access date, triggered when cache exceeds 2 GB.
 
-### 5.3 Deduplication Across External Volumes
+### 5.3 Apple Photos Import
+
+**Mechanism**: PhotoKit (`Photos` framework) for album enumeration and `PHAssetResourceManager` for original file export.
+
+**Authorization flow**:
+
+1. Check `PHPhotoLibrary.authorizationStatus(for: .readWrite)`
+2. If `.notDetermined`, request via `PHPhotoLibrary.requestAuthorization(for:)`
+3. If `.denied`, direct user to System Settings > Privacy > Photos
+
+**Album enumeration**:
+
+```text
+PHAssetCollection.fetchAssetCollections(with: .album)     → user albums
+PHAssetCollection.fetchAssetCollections(with: .smartAlbum) → Favorites, Recents, etc.
+```
+
+**Export pipeline** (per album):
+
+```text
+1. User selects album in PhotosAlbumPicker
+2. Configure: album name, date, PAR2 toggle, volume targets, B2 toggle
+3. ExportCoordinator orchestrates:
+   Photos export → staging dir
+     → SHA-256 hash + dedup check
+     → Thumbnail generation
+     → Perceptual hash
+     → PAR2 generation (optional)
+     → Copy to external volumes
+     → Upload to B2 (optional)
+     → Update SwiftData index + catalog.json
+4. Cleanup staging directory
+```
+
+Each `PHAsset` is exported via `PHAssetResourceManager.writeData(for:toFile:)` with
+`isNetworkAccessAllowed = true` to handle iCloud-originals transparently.
+
+### 5.4 Backblaze B2 Cloud Upload
+
+**Mechanism**: `URLSession` + B2 REST API v2. Zero third-party dependencies.
+
+| Endpoint               | Purpose                                                        |
+| ---------------------- | -------------------------------------------------------------- |
+| `b2_authorize_account` | Authenticate with application key, obtain API URL + auth token |
+| `b2_get_upload_url`    | Get single-use upload URL for a bucket                         |
+| `b2_upload_file`       | Upload file data with SHA-1 verification header                |
+
+**Upload flow** (per file):
+
+```text
+1. Authorize (cached across uploads in a session)
+2. Get upload URL (refreshed after each upload — single-use)
+3. Upload file with headers:
+     X-Bz-File-Name: year/month/day/album/filename
+     X-Bz-Content-Sha1: SHA-1 of file data
+     Content-Type: b2/x-auto
+4. Store returned fileId in ImageRecord.b2FileId
+5. Upload corresponding .par2 file
+```
+
+**Remote path convention**: `{year}/{month}/{day}/{albumName}/{filename}` — mirrors
+the local volume layout for consistency.
+
+**Credentials**: Stored locally via `UserDefaults` (application key ID, key, bucket ID,
+bucket name). Settings UI includes a "Test Connection" button that calls
+`b2_authorize_account` to validate credentials.
+
+### 5.5 Deduplication Across External Volumes
 
 **Two-tier dedup**:
 
@@ -246,10 +318,16 @@ PhotoVault/
 │   ├── Catalog.swift                    // Codable structs mirroring catalog.json
 │   ├── ImageRecord.swift                // SwiftData @Model
 │   ├── AlbumRecord.swift                // SwiftData @Model
-│   └── VolumeRecord.swift               // SwiftData @Model
+│   ├── VolumeRecord.swift               // SwiftData @Model
+│   └── B2Credentials.swift              // B2 auth + API response types
 │
 ├── Services/
+│   ├── Persistence/
+│   │   └── SwiftDataContainer.swift     // ModelContainer factory
 │   ├── CatalogService.swift             // Load/save/merge catalog.json
+│   ├── PhotosImportService.swift        // PhotoKit album enumeration + export
+│   ├── B2Service.swift                  // Backblaze B2 REST API uploads
+│   ├── ExportCoordinator.swift          // Orchestrates full export pipeline
 │   ├── SyncService.swift                // iCloud coordination
 │   ├── ThumbnailService.swift           // Generate + cache thumbnails
 │   ├── DeduplicationService.swift       // SHA-256 + perceptual hash index
@@ -271,10 +349,15 @@ PhotoVault/
 │   ├── Import/
 │   │   ├── ImportSheet.swift            // Drag-and-drop / folder picker
 │   │   └── ImportProgressView.swift     // Per-file progress with dedup stats
+│   ├── PhotosImport/
+│   │   ├── PhotosAlbumPicker.swift      // Photos library album browser
+│   │   ├── ExportSettingsView.swift     // Export configuration form
+│   │   └── PhotosExportSheet.swift      // Multi-step export wizard
 │   └── Settings/
 │       ├── GeneralSettingsView.swift     // Catalog path, redundancy %
 │       ├── VolumesSettingsView.swift     // Manage external disks
-│       └── CloudSettingsView.swift       // iCloud sync toggle + status
+│       ├── CloudSettingsView.swift       // iCloud sync toggle + status
+│       └── B2SettingsView.swift          // Backblaze B2 credentials + test
 │
 └── Utilities/
     ├── PerceptualHash.swift             // dHash via Core Image
@@ -389,7 +472,6 @@ remains fully functional alongside the macOS app.
 
 ## 11. Non-Goals (v1)
 
-- B2 cloud integration (defer to CLI; may add in v2 via URLSession)
 - iOS / iPadOS companion app (catalog is viewable via iCloud, but no native app yet)
 - AI-based tagging or face detection
 - Photo editing or RAW development
@@ -399,9 +481,9 @@ remains fully functional alongside the macOS app.
 
 ## 12. Open Questions
 
-| # | Question | Options |
-|---|----------|---------|
-| 1 | Should the app also manage B2 uploads natively? | URLSession + B2 REST API vs. defer to CLI |
-| 2 | Perceptual hash threshold for "near duplicate" | Hamming distance 5 is conservative; may need tuning |
-| 3 | iCloud container type | Documents (user-visible) vs. app container (hidden) |
-| 4 | Redundancy format | Strict PAR2 interop vs. simplified RS with custom header |
+| #   | Question                                              | Status                                                   |
+| --- | ----------------------------------------------------- | -------------------------------------------------------- |
+| 1   | ~~Should the app also manage B2 uploads natively?~~   | Resolved: Yes, via URLSession + B2 REST API              |
+| 2   | Perceptual hash threshold for "near duplicate"        | Hamming distance 5 is conservative; may need tuning      |
+| 3   | iCloud container type                                 | Documents (user-visible) vs. app container (hidden)      |
+| 4   | Redundancy format                                     | Strict PAR2 interop vs. simplified RS with custom header |
