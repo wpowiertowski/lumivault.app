@@ -1,27 +1,71 @@
-name: CI
+name: Build
 
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  push:
+    branches:
+      - main
 
 jobs:
-  test:
-    name: Build & Test
-    runs-on: macos-15
+  build:
+    name: Build (macOS)
+    runs-on: macos-26
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_26.0.app/Contents/Developer
+      - name: Cache SwiftPM and SourcePackages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.swiftpm
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/Developer/Xcode/DerivedData/*/SourcePackages
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-
 
-      - name: Build
-        run: swift build
+      - name: Show Xcode version
+        run: xcodebuild -version
 
-      - name: Test
+      - name: Verify Xcode 26+
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE_MAJOR="$(xcodebuild -version | awk '/Xcode/ { split($2, parts, "."); print parts[1] }')"
+          if [[ "${XCODE_MAJOR}" -lt 26 ]]; then
+            echo "Xcode 26+ is required to build macOS 26 targets. Found Xcode ${XCODE_MAJOR}."
+            exit 1
+          fi
+
+      - name: Build macOS target
+        run: |
+          xcodebuild \
+            -scheme LumiVault \
+            -destination "generic/platform=macOS" \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+  test:
+    name: Unit Tests
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.swiftpm
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-swiftpm-test-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-test-
+            ${{ runner.os }}-swiftpm-
+
+      - name: Run tests
         run: swift test
