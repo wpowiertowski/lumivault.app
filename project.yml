@@ -21,7 +21,7 @@ settings:
 targets:
   LumiVault:
     type: application
-    platform: [macOS]
+    platform: macOS
     sources:
       - path: LumiVault
         excludes:
@@ -46,7 +46,7 @@ targets:
           CODE_SIGN_ENTITLEMENTS: LumiVault/LumiVault.entitlements
   LumiVaultTests:
     type: bundle.unit-test
-    platform: [macOS]
+    platform: macOS
     sources:
       - path: Tests
     dependencies:

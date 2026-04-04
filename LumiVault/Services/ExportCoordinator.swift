@@ -13,7 +13,7 @@ struct ExportSettings: Sendable {
 }
 
 @Observable
-class ExportProgress {
+final class ExportProgress: @unchecked Sendable {
     var phase: ExportPhase = .exporting
     var totalFiles: Int = 0
     var currentFile: Int = 0

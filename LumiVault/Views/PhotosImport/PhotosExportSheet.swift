@@ -193,20 +193,23 @@ struct PhotosExportSheet: View {
         step = .exporting
         isExporting = true
 
-        Task {
-            let coordinator = ExportCoordinator(catalogService: catalogService)
+        let ctx = modelContext
+        let prog = progress
+        let sett = settings
+        let catSvc = catalogService
+
+        Task { @MainActor in
+            let coordinator = ExportCoordinator(catalogService: catSvc)
             do {
                 try await coordinator.export(
                     photosAlbumId: albumId,
-                    settings: settings,
-                    modelContext: modelContext,
-                    progress: progress
+                    settings: sett,
+                    modelContext: ctx,
+                    progress: prog
                 )
             } catch {
-                await MainActor.run {
-                    progress.errors.append("Export failed: \(error.localizedDescription)")
-                    progress.phase = .failed
-                }
+                prog.errors.append("Export failed: \(error.localizedDescription)")
+                prog.phase = .failed
             }
             isExporting = false
             step = .complete

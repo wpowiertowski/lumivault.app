@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-enum DuplicateResult: Sendable {
+enum DuplicateResult {
     case unique
     case exactMatch(ImageRecord)
     case nearMatch(ImageRecord, hammingDistance: Int)
