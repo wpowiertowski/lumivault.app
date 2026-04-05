@@ -20,15 +20,17 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 ## Features
 
 - **Apple Photos Import** — browse and select albums from your Photos library, export originals via PhotoKit, and archive them in one step
-- **Backblaze B2 Cloud Upload** — upload photos and PAR2 recovery data to B2 cloud storage via the REST API with SHA-1 verification
+- **Backblaze B2 Cloud Upload** — upload photos and PAR2 recovery data to B2 cloud storage via the REST API with SHA-1 verification; existence checks prevent duplicate uploads
 - **iCloud Catalog Sync** — catalog.json syncs across devices via iCloud Drive with conflict-free merge (union by SHA-256, newest timestamp wins)
 - **Thumbnail Generation** — HEIC/RAW/CR2/CR3/NEF/ARW/DNG support with a multi-resolution cache (256px grid, 64px list) keyed by content hash
 - **Deduplication** — exact (SHA-256) and near-duplicate (perceptual hash dHash) detection across all connected volumes
-- **Multi-Volume Mirroring** — mirror albums to multiple external drives with security-scoped bookmarks for persistent access
+- **Multi-Volume Mirroring** �� mirror albums to multiple external drives with security-scoped bookmarks for persistent access; sync existing catalog to newly added volumes with dedup-by-hash
+- **Storage Reconciliation** — scan all volumes and B2 for discrepancies (dangling references, orphan files, missing entries) with per-item resolution actions via the Integrity settings tab
+- **Album & Image Deletion** — remove albums or individual photos from the catalog, all external volumes, and B2 in one operation with progress tracking
 - **Reed-Solomon Error Correction** — GF(2^8) Vandermonde-matrix redundancy with PAR2-compatible file format, including single-block repair with cross-verification
 - **Integrity Verification** — background checks surface corruption by re-hashing files against stored SHA-256 digests
 - **Drag & Drop Import** — native file import via `UniformTypeIdentifiers` with image-type filtering
-- **Settings** — configure external volumes, iCloud sync, and Backblaze B2 credentials
+- **Settings** — configure external volumes, iCloud sync, Backblaze B2 credentials, and storage integrity scanning
 
 ## Technology Stack
 
@@ -60,14 +62,16 @@ Photos are organized into date-based albums, deduplicated across multiple extern
           │     Domain Services     │
           │  (actors / @Observable) │
           ├─────────────────────────┤
-          │ CatalogService          │  read/write/merge catalog.json
+          │ CatalogService          │  read/write/merge/remove catalog.json
           │ PhotosImportService     │  PhotoKit album export
           │ ThumbnailService        │  generate + NSCache (128 MB)
           │ DeduplicationService    │  SHA-256 + perceptual hash index
           │ RedundancyService       │  Reed-Solomon ECC encode/verify/repair
-          │ B2Service               │  Backblaze B2 cloud upload
+          │ B2Service               │  B2 upload/download/list/delete
           │ SyncService             │  iCloud push/pull via NSFileCoordinator
-          │ VolumeService           │  external disk discovery/bookmarks
+          │ VolumeService           │  disk discovery/bookmarks/sync
+          │ ReconciliationService   │  scan volumes + B2 for discrepancies
+          │ DeletionService         │  remove files from volumes + B2
           │ IntegrityService        │  verification sweeps
           │ ExportCoordinator       │  orchestrates full export pipeline
           └────────────┬────────────┘
@@ -86,16 +90,16 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 ```text
 LumiVault/
 ├── App/                  App entry point, ContentView, menu commands
-├── Models/               Codable catalog structs, SwiftData models, B2 credentials
-├── Services/             Actor-based domain services + export coordinator
+├── Models/               Codable catalog structs, SwiftData models, B2/reconciliation types
+├── Services/             Actor-based domain services + coordinators
 │   └── Persistence/      SwiftData container factory
 ├── Views/
-│   ├── Sidebar/          Year-grouped album list + volume status popover
-│   ├── Grid/             LazyVGrid thumbnail browser
+│   ├── Sidebar/          Year-grouped album list, volume status, album deletion
+│   ├── Grid/             LazyVGrid thumbnail browser with image deletion
 │   ├── Detail/           Full-resolution preview + metadata inspector
 │   ├── Import/           Drag-and-drop file import with progress
 │   ├── PhotosImport/     Photos library album picker + export wizard
-│   ├── Settings/         General, Volumes, iCloud, B2 configuration
+│   ├── Settings/         General, Volumes, iCloud, B2, Integrity (reconciliation)
 │   └── Shared/           Reusable components (EmptyStateView)
 ├── Utilities/            Perceptual hashing, file coordination, bookmarks
 └── Resources/            Asset catalog
@@ -107,22 +111,27 @@ LumiVault reads and writes the same `catalog.json` format as the PhotoVault CLI.
 
 ## Testing
 
-38 tests across 7 suites covering core logic:
+59 tests across 12 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes:
 
 ```bash
 swift test                                    # Run all tests
 swift test --filter CatalogTests              # Run specific suite
 ```
 
-| Suite                      | Tests | Coverage                                                          |
-| -------------------------- | ----- | ----------------------------------------------------------------- |
-| CatalogTests               | 5     | Codable round-trip, optional fields, file I/O, snake_case keys    |
-| CatalogServiceMergeTests   | 5     | Disjoint merge, SHA union, new albums, timestamps, deduplication  |
-| HasherServiceTests         | 4     | Known hashes, empty file, size tracking, method consistency       |
-| RedundancyServiceTests     | 8     | PAR2 generate/verify, corrupt-and-repair round-trip, edge cases   |
-| PerceptualHashTests        | 7     | Hamming distance, symmetry, thresholds, invalid input             |
-| IntegrityServiceTests      | 4     | Hash match/mismatch, missing files, batch size                    |
-| SwiftDataModelTests        | 5     | Relationships, defaults, Codable support types                    |
+| Suite | Tests | Coverage |
+| --- | --- | --- |
+| CatalogTests | 5 | Codable round-trip, optional fields, file I/O, snake_case keys |
+| CatalogServiceMergeTests | 5 | Disjoint merge, SHA union, new albums, timestamps, deduplication |
+| CatalogRemovalTests | 3 | Album removal, empty container pruning, single image removal |
+| HasherServiceTests | 4 | Fixture hash verification, empty file, size tracking, consistency |
+| RedundancyServiceTests | 8 | PAR2 generate/verify, corrupt-and-repair round-trip, edge cases |
+| PerceptualHashTests | 7 | Hamming distance, symmetry, thresholds, invalid input |
+| IntegrityServiceTests | 4 | Hash match/mismatch, missing files, batch size |
+| SwiftDataModelTests | 5 | Relationships, defaults, Codable support types |
+| ReconciliationDiffTests | 5 | B2 diff: matched, dangling, orphan, PAR2 skip, mixed scenario |
+| VolumeScanTests | 4 | Dangling location, orphan detection, file exists, unmounted skip |
+| VolumeSyncToNewVolumeTests | 5 | Full A-to-B sync, dedup by hash, mismatch, skip, PAR2 companion |
+| DeletionServiceTests | 4 | Volume file removal, PAR2 companion, unmounted skip, bulk delete |
 
 ## Requirements
 

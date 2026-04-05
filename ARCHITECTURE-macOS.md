@@ -24,14 +24,12 @@
 |-------|-----------|---------|
 | UI | SwiftUI 7 | Declarative interface, NavigationSplitView, @Observable |
 | Data | SwiftData | Persistent local index, Spotlight integration |
-| Networking / Cloud | CloudKit + NSUbiquitousKeyValueStore | iCloud catalog sync |
-| Image Pipeline | Core Image, ImageIO, vImage | Thumbnail generation, HEIC/RAW decode, perceptual hashing |
+| Networking / Cloud | NSFileCoordinator + iCloud Drive | iCloud catalog sync |
+| Image Pipeline | Core Image, ImageIO | Thumbnail generation, HEIC/RAW decode, perceptual hashing |
 | File Access | FileManager, NSURL bookmarks, Security-Scoped Resources | External volume management |
 | Hashing | CryptoKit (SHA256) | File integrity, deduplication fingerprints |
 | Concurrency | Swift Concurrency (async/await, TaskGroup, actors) | Parallel import, background hashing |
-| Redundancy | Accelerate (Reed-Solomon via vDSP) | PAR2-equivalent error correction |
-| Spotlight | Core Spotlight | System-wide photo search by album/date/hash |
-| Background Work | BackgroundTasks framework | Scheduled verification & thumbnail warm-up |
+| Redundancy | Custom GF(2^8) Reed-Solomon (Vandermonde matrix) | PAR2-compatible error correction with repair |
 | Photos Import | PhotoKit (Photos framework) | Apple Photos album enumeration & asset export |
 | Cloud Storage | URLSession | Backblaze B2 REST API uploads |
 | Drag & Drop | UniformTypeIdentifiers, Transferable | Native drag-in import, drag-out export |
@@ -54,14 +52,16 @@
           │     Domain Services     │
           │  (actors / @Observable) │
           ├─────────────────────────┤
-          │ CatalogService          │  ← catalog.json read/write/merge
+          │ CatalogService          │  ← catalog.json read/write/merge/remove
           │ PhotosImportService     │  ← PhotoKit album export
           │ ThumbnailService        │  ← generate, cache, LRU eviction
           │ DeduplicationService    │  ← SHA-256 + perceptual hash index
           │ RedundancyService       │  ← Reed-Solomon ECC encode/verify/repair
-          │ B2Service               │  ← Backblaze B2 cloud upload
+          │ B2Service               │  ← B2 upload/download/list/delete
           │ SyncService             │  ← iCloud push/pull, conflict resolution
-          │ VolumeService           │  ← discover, bookmark, mirror external disks
+          │ VolumeService           │  ← discover, bookmark, mirror, sync
+          │ ReconciliationService   │  ← scan volumes + B2 for discrepancies
+          │ DeletionService         │  ← remove files from volumes + B2
           │ IntegrityService        │  ← scheduled verification sweeps
           │ ExportCoordinator       │  ← orchestrates full export pipeline
           └────────────┬────────────┘
@@ -239,23 +239,35 @@ Each `PHAsset` is exported via `PHAssetResourceManager.writeData(for:toFile:)` w
 
 **Mechanism**: `URLSession` + B2 REST API v2. Zero third-party dependencies.
 
-| Endpoint               | Purpose                                                        |
-| ---------------------- | -------------------------------------------------------------- |
-| `b2_authorize_account` | Authenticate with application key, obtain API URL + auth token |
-| `b2_get_upload_url`    | Get single-use upload URL for a bucket                         |
-| `b2_upload_file`       | Upload file data with SHA-1 verification header                |
+| Endpoint                  | Purpose                                                        |
+| ------------------------- | -------------------------------------------------------------- |
+| `b2_authorize_account`    | Authenticate with application key, obtain API URL + auth token |
+| `b2_get_upload_url`       | Get single-use upload URL for a bucket                         |
+| `b2_upload_file`          | Upload file data with SHA-1 verification header                |
+| `b2_list_file_names`      | List files in bucket (paginated), check file existence         |
+| `b2_download_file_by_id`  | Download file by B2 file ID                                    |
+| `b2_delete_file_version`  | Delete a specific file version by ID                           |
 
 **Upload flow** (per file):
 
 ```text
 1. Authorize (cached across uploads in a session)
-2. Get upload URL (refreshed after each upload — single-use)
-3. Upload file with headers:
+2. Check if file already exists via b2_list_file_names (skip if present)
+3. Get upload URL (refreshed after each upload — single-use)
+4. Upload file with headers:
      X-Bz-File-Name: year/month/day/album/filename
      X-Bz-Content-Sha1: SHA-1 of file data
      Content-Type: b2/x-auto
-4. Store returned fileId in ImageRecord.b2FileId
-5. Upload corresponding .par2 file
+5. Store returned fileId in ImageRecord.b2FileId
+6. Upload corresponding .par2 file (with same existence check)
+```
+
+**Deletion flow** (per file):
+
+```text
+1. Call b2_delete_file_version with stored fileId + fileName
+2. Look up PAR2 companion via b2_list_file_names prefix search
+3. Delete PAR2 file version if found (best-effort)
 ```
 
 **Remote path convention**: `{year}/{month}/{day}/{albumName}/{filename}` — mirrors
@@ -304,44 +316,116 @@ For each target volume:
 Each `VolumeRecord` stores a security-scoped bookmark (`NSURL.bookmarkData`) so the app
 can re-access external drives across launches without repeated permission prompts.
 
+**Sync existing catalog to new volume**:
+
+When a new volume is added via Settings > Volumes, the app offers to sync all existing
+catalog images to the new drive. `VolumeService.syncToVolume()` handles the sync with
+dedup-by-hash: if a file already exists at the destination with the correct SHA-256, it
+adds a `StorageLocation` without copying. PAR2 companions are copied alongside images.
+
+### 5.6 Storage Reconciliation
+
+**Mechanism**: `ReconciliationService` (actor) scans all mounted volumes and B2 to detect
+discrepancies between the database and actual file state.
+
+**Discrepancy types**:
+
+| Kind | Meaning |
+| --- | --- |
+| `danglingLocation` | DB says file is on volume, but file is missing |
+| `orphanOnVolume` | File exists on volume but not tracked in DB |
+| `danglingB2FileId` | DB says file is in B2, but B2 listing disagrees |
+| `orphanInB2` | File in B2 not referenced by any DB record |
+| `missingFromVolume` | File on other volumes but absent from this one |
+
+**Volume scan**: For each image's `storageLocations`, checks `FileManager.fileExists`.
+Then enumerates the volume's `year/month/day/album` directory structure to find orphans
+not tracked in the database. PAR2 files are excluded from orphan detection.
+
+**B2 scan**: Calls `b2_list_file_names` (paginated) and cross-references against the
+database's `b2FileId` values. Pure function `diffB2` is extracted for testability.
+
+**Resolution**: Each discrepancy can be resolved individually (copy from another volume,
+download from B2, remove dangling reference, upload to B2, or ignore).
+
+**UI**: Settings > Integrity tab with scan button, progress indicator, and grouped
+discrepancy list with per-item resolve actions.
+
+### 5.7 Album & Image Deletion
+
+**Mechanism**: `DeletionService` (actor) orchestrates file removal across all storage
+backends in a single operation with progress tracking.
+
+**Deletion flow**:
+
+```text
+1. Snapshot image metadata (sha256, storageLocations, b2FileId, par2Filename)
+2. Phase 1 — Remove from volumes:
+     For each storageLocation on each mounted volume:
+       Remove image file + PAR2 companion
+       Clean up empty album directory
+3. Phase 2 — Remove from B2:
+     Delete image file version via b2_delete_file_version
+     Look up PAR2 file via b2_list_file_names, delete if found
+4. Phase 3 — Update catalog:
+     CatalogService.removeAlbum() or .removeImage()
+     Prune empty year/month/day containers
+     Save catalog.json to disk
+5. Phase 4 — Remove from SwiftData:
+     modelContext.delete(album) — cascade deletes all images
+     Or modelContext.delete(image) for single image
+```
+
+**UI**: Context menus on sidebar albums ("Delete Album") and grid photos ("Delete Photo")
+with confirmation alerts showing affected item counts. Progress sheet displays phase,
+item count, and any errors encountered.
+
+Unmounted volumes are silently skipped — the files remain on disk but the `StorageLocation`
+references are removed from the database. A subsequent reconciliation scan will surface
+these as orphans if the volume is later mounted.
+
 ---
 
 ## 6. Module Breakdown
 
 ```
-PhotoVault/
+LumiVault/
 ├── App/
-│   ├── PhotoVaultApp.swift              // @main, WindowGroup, scene config
-│   └── AppState.swift                   // @Observable root state
+│   ├── LumiVaultApp.swift               // @main, WindowGroup, scene config
+│   └── ContentView.swift                // NavigationSplitView root
 │
 ├── Models/
 │   ├── Catalog.swift                    // Codable structs mirroring catalog.json
-│   ├── ImageRecord.swift                // SwiftData @Model
-│   ├── AlbumRecord.swift                // SwiftData @Model
+│   ├── ImageRecord.swift                // SwiftData @Model + StorageLocation
+│   ├── AlbumRecord.swift                // SwiftData @Model (cascade delete → images)
 │   ├── VolumeRecord.swift               // SwiftData @Model
-│   └── B2Credentials.swift              // B2 auth + API response types
+│   ├── B2Credentials.swift              // B2 auth, API response, listing types
+│   └── ReconciliationTypes.swift        // Sendable snapshots, discrepancies, progress
 │
 ├── Services/
 │   ├── Persistence/
 │   │   └── SwiftDataContainer.swift     // ModelContainer factory
-│   ├── CatalogService.swift             // Load/save/merge catalog.json
+│   ├── CatalogService.swift             // Load/save/merge/remove catalog.json
 │   ├── PhotosImportService.swift        // PhotoKit album enumeration + export
-│   ├── B2Service.swift                  // Backblaze B2 REST API uploads
+│   ├── B2Service.swift                  // B2 REST API (upload/download/list/delete)
 │   ├── ExportCoordinator.swift          // Orchestrates full export pipeline
+│   ├── DeletionService.swift            // Remove files from volumes + B2
+│   ├── ReconciliationService.swift      // Scan volumes + B2 for discrepancies
 │   ├── SyncService.swift                // iCloud coordination
 │   ├── ThumbnailService.swift           // Generate + cache thumbnails
 │   ├── DeduplicationService.swift       // SHA-256 + perceptual hash index
-│   ├── RedundancyService.swift          // Reed-Solomon ECC (via Accelerate)
-│   ├── VolumeService.swift              // External disk discovery + bookmarks
+│   ├── RedundancyService.swift          // Reed-Solomon ECC (GF(2^8) Vandermonde)
+│   ├── VolumeService.swift              // Disk discovery, bookmarks, sync to volume
 │   ├── IntegrityService.swift           // Scheduled verification
 │   └── HasherService.swift              // CryptoKit SHA-256 streaming
 │
 ├── Views/
 │   ├── Sidebar/
-│   │   ├── SidebarView.swift            // Year → Month → Day → Album tree
+│   │   ├── SidebarView.swift            // Year-grouped album list + album deletion
+│   │   ├── AlbumDeletionSheet.swift     // Deletion progress sheet
 │   │   └── VolumeListView.swift         // Connected volumes status
 │   ├── Grid/
-│   │   ├── PhotoGridView.swift          // LazyVGrid with async thumbnails
+│   │   ├── PhotoGridView.swift          // LazyVGrid with image deletion
 │   │   └── PhotoGridItem.swift          // Single thumbnail cell
 │   ├── Detail/
 │   │   ├── PhotoDetailView.swift        // Full-resolution preview
@@ -355,12 +439,15 @@ PhotoVault/
 │   │   └── PhotosExportSheet.swift      // Multi-step export wizard
 │   └── Settings/
 │       ├── GeneralSettingsView.swift     // Catalog path, redundancy %
-│       ├── VolumesSettingsView.swift     // Manage external disks
+│       ├── VolumesSettingsView.swift     // Manage disks + post-add sync
+│       ├── VolumeSyncSheet.swift         // Sync existing catalog to new volume
+│       ├── ReconciliationView.swift      // Integrity scan + discrepancy resolution
 │       ├── CloudSettingsView.swift       // iCloud sync toggle + status
 │       └── B2SettingsView.swift          // Backblaze B2 credentials + test
 │
 └── Utilities/
     ├── PerceptualHash.swift             // dHash via Core Image
+    ├── Constants.swift                  // Design tokens, paths
     ├── FileCoordination.swift           // NSFileCoordinator helpers
     └── BookmarkResolver.swift           // Security-scoped bookmark utilities
 ```
@@ -428,29 +515,22 @@ func importImages(_ urls: [URL], to album: AlbumRecord) async throws {
 
 ## 9. Storage & Integrity Verification
 
-### PAR2-Equivalent with Accelerate
+### PAR2-Compatible Reed-Solomon
 
-Since `par2cmdline` is a system dependency in the CLI version, the macOS app
-implements Reed-Solomon encoding natively using the Accelerate framework's
-`vDSP` routines for GF(2^8) arithmetic, matching the existing `.par2` file format
-produced by the CLI tool for full interoperability.
+The macOS app implements Reed-Solomon encoding natively using custom GF(2^8)
+arithmetic with Vandermonde matrix coefficients (`(r+1)^b` in GF(2^8)), replacing
+`par2cmdline` from the CLI version. The implementation uses a custom `.par2` file
+format with header: magic (`PV2R`), fileSize (8B), blockSize (4B), blockCount (4B),
+recoveryCount (4B), followed by recovery blocks.
 
-### Scheduled Verification
+Minimum 2 recovery blocks enables cross-verification to disambiguate which block is
+corrupted during repair.
 
-```swift
-// BackgroundTasks registration
-BGTaskScheduler.shared.register(
-    forTaskWithIdentifier: "com.photovault.integrity-check",
-    using: nil
-) { task in
-    // Verify N oldest-unchecked images per run
-    // Update lastVerifiedAt on each ImageRecord
-    // Surface failures as UserNotification alerts
-}
-```
+### Integrity Verification
 
-- Runs daily when on power, verifying images in LRU order.
-- Surfaces corruption via `UserNotification` with one-tap repair action.
+`IntegrityService` re-hashes files against stored SHA-256 digests in configurable
+batch sizes. Files are resolved via a caller-provided `sourceResolver` closure,
+allowing flexible source selection (volumes, staging directories).
 
 ---
 
@@ -481,9 +561,9 @@ remains fully functional alongside the macOS app.
 
 ## 12. Open Questions
 
-| #   | Question                                              | Status                                                   |
-| --- | ----------------------------------------------------- | -------------------------------------------------------- |
-| 1   | ~~Should the app also manage B2 uploads natively?~~   | Resolved: Yes, via URLSession + B2 REST API              |
-| 2   | Perceptual hash threshold for "near duplicate"        | Hamming distance 5 is conservative; may need tuning      |
-| 3   | iCloud container type                                 | Documents (user-visible) vs. app container (hidden)      |
-| 4   | Redundancy format                                     | Strict PAR2 interop vs. simplified RS with custom header |
+| # | Question | Status |
+| --- | --- | --- |
+| 1 | ~~Should the app also manage B2 uploads natively?~~ | Resolved: Yes, via URLSession + B2 REST API (upload, download, list, delete) |
+| 2 | Perceptual hash threshold for "near duplicate" | Hamming distance 5 is conservative; may need tuning |
+| 3 | iCloud container type | Documents (user-visible) vs. app container (hidden) |
+| 4 | ~~Redundancy format~~ | Resolved: Custom PAR2-compatible format with GF(2^8) Vandermonde matrix |
