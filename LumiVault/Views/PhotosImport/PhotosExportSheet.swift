@@ -15,6 +15,7 @@ struct PhotosExportSheet: View {
     )
     @State private var progress = ExportProgress()
     @State private var isExporting = false
+    @Environment(SyncCoordinator.self) private var syncCoordinator
 
     private let catalogService = CatalogService()
 
@@ -197,6 +198,7 @@ struct PhotosExportSheet: View {
         let prog = progress
         let sett = settings
         let catSvc = catalogService
+        let sync = syncCoordinator
 
         Task { @MainActor in
             let coordinator = ExportCoordinator(catalogService: catSvc)
@@ -207,6 +209,7 @@ struct PhotosExportSheet: View {
                     modelContext: ctx,
                     progress: prog
                 )
+                await sync.pushAfterLocalChange()
             } catch {
                 prog.errors.append("Export failed: \(error.localizedDescription)")
                 prog.phase = .failed

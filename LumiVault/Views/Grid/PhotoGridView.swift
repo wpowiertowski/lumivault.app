@@ -10,6 +10,7 @@ struct PhotoGridView: View {
     @State private var showingDeleteConfirmation = false
     @State private var showingDeletionProgress = false
     @State private var deletionProgress = DeletionProgress()
+    @Environment(SyncCoordinator.self) private var syncCoordinator
 
     private let columns = [
         GridItem(.adaptive(minimum: 140, maximum: 200), spacing: 4)
@@ -109,6 +110,7 @@ struct PhotoGridView: View {
             try? await catalogService.load(from: URL(fileURLWithPath: catalogPath))
             await catalogService.removeImage(sha256: sha256, fromAlbum: albumName, year: year, month: month, day: day)
             try? await catalogService.save(to: URL(fileURLWithPath: catalogPath))
+            await syncCoordinator.pushAfterLocalChange()
 
             // Remove from SwiftData
             if selectedImage?.sha256 == sha256 {

@@ -71,9 +71,9 @@ actor ThumbnailService {
 
     // MARK: - Warm Up
 
-    func warmUp(hashes: [(sha256: String, url: URL)]) async {
+    func warmUp(hashes: [(sha256: String, url: URL)]) {
         for item in hashes {
-            try? await self.generateThumbnail(for: item.url, sha256: item.sha256)
+            try? self.generateThumbnail(for: item.url, sha256: item.sha256)
         }
     }
 

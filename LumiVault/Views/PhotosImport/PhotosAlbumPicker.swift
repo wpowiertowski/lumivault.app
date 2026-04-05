@@ -28,7 +28,7 @@ struct PhotosAlbumPicker: View {
         }
         .task {
             let service = PhotosImportService()
-            authStatus = await service.authorizationStatus()
+            authStatus = service.authorizationStatus()
             if authStatus == .authorized || authStatus == .limited {
                 await loadAlbums()
             }

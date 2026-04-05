@@ -11,6 +11,7 @@ struct SidebarView: View {
     @State private var showingDeleteConfirmation = false
     @State private var showingDeletionProgress = false
     @State private var deletionProgress = DeletionProgress()
+    @Environment(SyncCoordinator.self) private var syncCoordinator
 
     private var albumsByYear: [String: [AlbumRecord]] {
         Dictionary(grouping: filteredAlbums, by: \.year)
@@ -144,6 +145,7 @@ struct SidebarView: View {
             try? await catalogService.load(from: URL(fileURLWithPath: catalogPath))
             await catalogService.removeAlbum(name: albumName, year: year, month: month, day: day)
             try? await catalogService.save(to: URL(fileURLWithPath: catalogPath))
+            await syncCoordinator.pushAfterLocalChange()
 
             // Remove from SwiftData (cascade deletes images)
             if selectedAlbum?.persistentModelID == album.persistentModelID {

@@ -13,11 +13,14 @@ final class AppActivationDelegate: NSObject, NSApplicationDelegate {
 struct LumiVaultApp: App {
     let container = SwiftDataContainer.create()
     @NSApplicationDelegateAdaptor(AppActivationDelegate.self) private var appDelegate
+    @State private var syncCoordinator = SyncCoordinator()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .tint(Constants.Design.accentColor)
+                .environment(syncCoordinator)
+                .task { await syncCoordinator.setup() }
         }
         .modelContainer(container)
         .commands {
@@ -26,6 +29,7 @@ struct LumiVaultApp: App {
 
         Settings {
             SettingsView()
+                .environment(syncCoordinator)
         }
         .modelContainer(container)
     }
