@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var selectedImage: ImageRecord?
     @State private var columnVisibility: NavigationSplitViewVisibility = .detailOnly
     @State private var showingPhotosImport = false
+    @State private var showingNearDuplicates = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -36,9 +37,20 @@ struct ContentView: View {
                     Label("Import from Photos", systemImage: "photo.badge.arrow.down")
                 }
             }
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    showingNearDuplicates = true
+                } label: {
+                    Label("Near-Duplicates", systemImage: "square.on.square.badge.person.crop")
+                }
+            }
         }
         .sheet(isPresented: $showingPhotosImport) {
             PhotosExportSheet()
+        }
+        .sheet(isPresented: $showingNearDuplicates) {
+            NearDuplicatesView()
+                .frame(width: 700, height: 500)
         }
         .onReceive(NotificationCenter.default.publisher(for: .showPhotosImport)) { _ in
             showingPhotosImport = true

@@ -7,6 +7,7 @@ struct ExportSettings: Sendable {
     var month: String
     var day: String
     var generatePAR2: Bool = true
+    var detectNearDuplicates: Bool = true
     var uploadToB2: Bool = false
     var targetVolumeIDs: [String] = []
     var b2Credentials: B2Credentials?
@@ -20,14 +21,25 @@ final class ExportProgress: @unchecked Sendable {
     var currentFilename: String = ""
     var filesHashed: Int = 0
     var filesDeduplicated: Int = 0
+    var nearDuplicatesFound: Int = 0
     var filesUploaded: Int = 0
     var filesCopied: Int = 0
     var errors: [String] = []
+    var nearDuplicates: [NearDuplicateMatch] = []
 
     var fraction: Double {
         guard totalFiles > 0 else { return 0 }
         return Double(currentFile) / Double(totalFiles)
     }
+}
+
+struct NearDuplicateMatch: Identifiable, Sendable {
+    let id = UUID()
+    let newFilename: String
+    let newSha256: String
+    let existingFilename: String
+    let existingSha256: String
+    let hammingDistance: Int
 }
 
 enum ExportPhase: String, Sendable {
@@ -109,6 +121,31 @@ class ExportCoordinator {
                 // Compute perceptual hash
                 if let pHash = try? PerceptualHash.compute(for: asset.fileURL) {
                     record.perceptualHash = pHash
+
+                    // Check for near-duplicates against existing library
+                    if settings.detectNearDuplicates {
+                        let allDescriptor = FetchDescriptor<ImageRecord>(
+                            predicate: #Predicate { $0.perceptualHash != nil }
+                        )
+                        if let candidates = try? modelContext.fetch(allDescriptor) {
+                            for candidate in candidates {
+                                guard let candidateHash = candidate.perceptualHash else { continue }
+                                let distance = PerceptualHash.hammingDistance(pHash, candidateHash)
+                                if distance < 5 {
+                                    let match = NearDuplicateMatch(
+                                        newFilename: asset.originalFilename,
+                                        newSha256: hash,
+                                        existingFilename: candidate.filename,
+                                        existingSha256: candidate.sha256,
+                                        hammingDistance: distance
+                                    )
+                                    progress.nearDuplicates.append(match)
+                                    progress.nearDuplicatesFound += 1
+                                    break
+                                }
+                            }
+                        }
+                    }
                 }
 
                 modelContext.insert(record)

@@ -118,6 +118,9 @@ struct PhotosExportSheet: View {
             HStack(spacing: 24) {
                 ExportStat(label: "Hashed", value: progress.filesHashed)
                 ExportStat(label: "Deduped", value: progress.filesDeduplicated)
+                if progress.nearDuplicatesFound > 0 {
+                    ExportStat(label: "Near-dupes", value: progress.nearDuplicatesFound)
+                }
                 ExportStat(label: "Copied", value: progress.filesCopied)
                 ExportStat(label: "Uploaded", value: progress.filesUploaded)
             }
@@ -163,6 +166,45 @@ struct PhotosExportSheet: View {
             }
             .font(Constants.Design.monoBody)
             .foregroundStyle(.secondary)
+
+            if !progress.nearDuplicates.isEmpty {
+                Divider()
+                    .padding(.vertical, 4)
+
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("\(progress.nearDuplicates.count) near-duplicate\(progress.nearDuplicates.count == 1 ? "" : "s") detected")
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(.orange)
+                }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(progress.nearDuplicates) { match in
+                            HStack(spacing: 8) {
+                                NearDupeThumbnail(sha256: match.newSha256)
+                                Image(systemName: "arrow.left.arrow.right")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                NearDupeThumbnail(sha256: match.existingSha256)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(match.newFilename)
+                                        .font(Constants.Design.monoCaption)
+                                        .lineLimit(1)
+                                    Text("≈ \(match.existingFilename) (distance: \(match.hammingDistance))")
+                                        .font(Constants.Design.monoCaption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                }
+                .frame(maxHeight: 120)
+            }
 
             if !progress.errors.isEmpty {
                 Divider()
@@ -293,6 +335,35 @@ private struct ExportStat: View {
                 .fontWeight(.medium)
             Text(label)
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct NearDupeThumbnail: View {
+    let sha256: String
+    @State private var thumbnail: NSImage?
+
+    var body: some View {
+        Group {
+            if let thumbnail {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Rectangle()
+                    .fill(.quaternary)
+                    .overlay {
+                        Image(systemName: "photo")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+            }
+        }
+        .frame(width: 32, height: 32)
+        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .task {
+            let service = ThumbnailService()
+            thumbnail = await service.thumbnail(for: sha256, size: .list)
         }
     }
 }

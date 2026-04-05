@@ -27,6 +27,13 @@ struct ExportSettingsView: View {
                 Toggle("Generate PAR2 error correction", isOn: $settings.generatePAR2)
             }
 
+            Section("Deduplication") {
+                Toggle("Detect near-duplicate images", isOn: $settings.detectNearDuplicates)
+                Text("Uses perceptual hashing to flag visually similar images during import.")
+                    .font(Constants.Design.monoCaption)
+                    .foregroundStyle(.tertiary)
+            }
+
             Section("External Volumes") {
                 if volumes.isEmpty {
                     Text("No volumes configured. Add volumes in Settings.")
