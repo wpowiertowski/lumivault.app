@@ -20,7 +20,10 @@ struct LumiVaultApp: App {
             ContentView()
                 .tint(Constants.Design.accentColor)
                 .environment(syncCoordinator)
-                .task { await syncCoordinator.setup() }
+                .task {
+                    syncCoordinator.modelContainer = container
+                    await syncCoordinator.setup()
+                }
         }
         .modelContainer(container)
         .commands {

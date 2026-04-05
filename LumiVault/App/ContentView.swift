@@ -57,6 +57,12 @@ struct ContentView: View {
 // MARK: - Welcome View
 
 private struct WelcomeView: View {
+    @Environment(SyncCoordinator.self) private var syncCoordinator
+    @AppStorage("b2Enabled") private var b2Enabled = false
+    @State private var isRestoring = false
+    @State private var restoreError: String?
+    @State private var restoreSuccess = false
+
     var body: some View {
         VStack(spacing: 0) {
             // Arrow pointing up-left toward the import button
@@ -96,12 +102,91 @@ private struct WelcomeView: View {
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
                     .lineSpacing(4)
+
+                Divider()
+                    .padding(.vertical, 8)
+                    .frame(width: 200)
+
+                Text("Or restore from a backup")
+                    .font(Constants.Design.monoCaption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 12) {
+                    Button("From File...") { restoreFromFile() }
+                    Button("From Volume...") { restoreFromVolume() }
+                    if b2Enabled {
+                        Button("From B2") { restoreFromB2() }
+                    }
+                }
+                .disabled(isRestoring)
+
+                if isRestoring {
+                    ProgressView("Restoring...")
+                        .font(Constants.Design.monoCaption)
+                }
+
+                if let error = restoreError {
+                    Text(error)
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(.red)
+                }
+
+                if restoreSuccess {
+                    Label("Catalog restored successfully", systemImage: "checkmark.circle.fill")
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(.green)
+                }
             }
 
             Spacer()
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func restoreFromFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.json]
+        panel.message = "Select a catalog.json backup"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        performRestore(.file(url))
+    }
+
+    private func restoreFromVolume() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.message = "Select a volume containing catalog.json"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        performRestore(.volume(url))
+    }
+
+    private func restoreFromB2() {
+        guard let data = UserDefaults.standard.data(forKey: B2Credentials.keychainKey),
+              let credentials = try? JSONDecoder().decode(B2Credentials.self, from: data) else {
+            restoreError = "B2 credentials not configured. Set them up in Settings > B2."
+            return
+        }
+        performRestore(.b2(credentials))
+    }
+
+    private func performRestore(_ source: SyncCoordinator.RestoreSource) {
+        isRestoring = true
+        restoreError = nil
+        restoreSuccess = false
+
+        Task {
+            do {
+                _ = try await syncCoordinator.restoreCatalog(from: source)
+                restoreSuccess = true
+            } catch {
+                restoreError = error.localizedDescription
+            }
+            isRestoring = false
+        }
     }
 }
 

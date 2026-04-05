@@ -185,6 +185,27 @@ actor B2Service {
         return data
     }
 
+    func downloadFile(
+        fileName: String,
+        bucketId: String,
+        credentials: B2Credentials
+    ) async throws -> Data {
+        if authorization == nil {
+            try await authorize(credentials: credentials)
+        }
+
+        guard let auth = authorization else { throw B2Error.notAuthorized }
+
+        let encodedName = fileName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? fileName
+        let url = URL(string: "\(auth.downloadURL)/file/\(credentials.bucketName)/\(encodedName)")!
+        var request = URLRequest(url: url)
+        request.setValue(auth.authorizationToken, forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await session.data(for: request)
+        try Self.checkResponse(response, data: data)
+        return data
+    }
+
     // MARK: - Delete File
 
     func deleteFile(

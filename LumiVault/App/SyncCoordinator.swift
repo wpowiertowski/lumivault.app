@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import SwiftData
 
 /// App-level coordinator that owns the shared CatalogService and SyncService,
 /// wires iCloud monitoring, and exposes sync state to SwiftUI views.
@@ -11,8 +12,10 @@ final class SyncCoordinator: @unchecked Sendable {
     private(set) var isICloudAvailable: Bool = false
 
     private let catalogService = CatalogService()
+    private let backupService = CatalogBackupService()
     private var syncService: SyncService?
     private var isSyncing = false
+    var modelContainer: ModelContainer?
 
     enum SyncStatus: Sendable {
         case idle, syncing, synced, error, disabled
@@ -72,20 +75,75 @@ final class SyncCoordinator: @unchecked Sendable {
         isSyncing = false
     }
 
-    /// Push local catalog to iCloud after a local mutation (export, delete, etc.).
+    /// Push local catalog to iCloud after a local mutation (export, delete, etc.),
+    /// and distribute catalog.json to all external volumes and B2.
     func pushAfterLocalChange() async {
-        let enabled = await MainActor.run {
-            UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
-        }
-        guard enabled, let service = syncService else { return }
-
         // Reload local catalog to pick up the latest changes
         let catalogPath = await MainActor.run {
             NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
         }
         try? await catalogService.load(from: URL(fileURLWithPath: catalogPath))
 
-        try? await service.pushToICloud()
+        let catalog = await catalogService.currentCatalog()
+
+        // Push to iCloud if enabled
+        let iCloudEnabled = await MainActor.run {
+            UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
+        }
+        if iCloudEnabled, let service = syncService {
+            try? await service.pushToICloud()
+        }
+
+        // Backup to all external volumes
+        let volumeSnapshots = await MainActor.run {
+            resolveVolumeSnapshots()
+        }
+        let volumeErrors = await backupService.backupToVolumes(catalog: catalog, volumes: volumeSnapshots)
+        for error in volumeErrors {
+            print("[CatalogBackup] Volume: \(error)")
+        }
+
+        // Backup to B2 if enabled
+        let b2Enabled = await MainActor.run {
+            UserDefaults.standard.bool(forKey: "b2Enabled")
+        }
+        if b2Enabled, let credentials = loadB2Credentials() {
+            if let error = await backupService.backupToB2(catalog: catalog, credentials: credentials) {
+                print("[CatalogBackup] B2: \(error)")
+            }
+        }
+    }
+
+    /// Restore a catalog from a given source, save it locally, and reload.
+    func restoreCatalog(from source: RestoreSource) async throws -> Catalog {
+        let catalog: Catalog
+        switch source {
+        case .volume(let url):
+            catalog = try await backupService.restoreFromVolume(volumeURL: url)
+        case .b2(let credentials):
+            catalog = try await backupService.restoreFromB2(credentials: credentials)
+        case .file(let url):
+            catalog = try await backupService.restoreFromFile(url: url)
+        }
+
+        // Save restored catalog locally
+        let catalogPath = await MainActor.run {
+            NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
+        }
+        let catalogURL = URL(fileURLWithPath: catalogPath)
+        try await MainActor.run {
+            try catalog.save(to: catalogURL)
+        }
+
+        // Reload into catalog service
+        try await catalogService.load(from: catalogURL)
+        return catalog
+    }
+
+    enum RestoreSource {
+        case volume(URL)
+        case b2(B2Credentials)
+        case file(URL)
     }
 
     func startMonitoring() async {
@@ -114,5 +172,30 @@ final class SyncCoordinator: @unchecked Sendable {
             await stopMonitoring()
             await MainActor.run { syncStatus = .disabled }
         }
+    }
+
+    // MARK: - Helpers
+
+    /// Resolve all VolumeRecord bookmarks into CatalogBackupService.VolumeSnapshot values.
+    /// Must be called on MainActor (accesses SwiftData).
+    private func resolveVolumeSnapshots() -> [CatalogBackupService.VolumeSnapshot] {
+        guard let container = modelContainer else { return [] }
+        let context = ModelContext(container)
+        guard let volumes = try? context.fetch(FetchDescriptor<VolumeRecord>()) else { return [] }
+
+        return volumes.compactMap { volume in
+            guard let url = try? BookmarkResolver.resolveAndAccess(volume.bookmarkData) else { return nil }
+            return CatalogBackupService.VolumeSnapshot(
+                volumeID: volume.volumeID,
+                label: volume.label,
+                mountURL: url
+            )
+        }
+    }
+
+    private func loadB2Credentials() -> B2Credentials? {
+        guard let data = UserDefaults.standard.data(forKey: B2Credentials.keychainKey),
+              let credentials = try? JSONDecoder().decode(B2Credentials.self, from: data) else { return nil }
+        return credentials
     }
 }
