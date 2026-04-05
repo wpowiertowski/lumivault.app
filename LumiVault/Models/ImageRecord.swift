@@ -25,6 +25,9 @@ final class ImageRecord {
     var thumbnailState: ThumbnailState
     var perceptualHash: Data?
     var lastVerifiedAt: Date?
+    var isEncrypted: Bool = false
+    var encryptionKeyId: String?
+    var encryptionNonce: Data?
 
     init(
         sha256: String,
@@ -37,7 +40,10 @@ final class ImageRecord {
         storageLocations: [StorageLocation] = [],
         thumbnailState: ThumbnailState = .pending,
         perceptualHash: Data? = nil,
-        lastVerifiedAt: Date? = nil
+        lastVerifiedAt: Date? = nil,
+        isEncrypted: Bool = false,
+        encryptionKeyId: String? = nil,
+        encryptionNonce: Data? = nil
     ) {
         self.sha256 = sha256
         self.filename = filename
@@ -50,5 +56,8 @@ final class ImageRecord {
         self.thumbnailState = thumbnailState
         self.perceptualHash = perceptualHash
         self.lastVerifiedAt = lastVerifiedAt
+        self.isEncrypted = isEncrypted
+        self.encryptionKeyId = encryptionKeyId
+        self.encryptionNonce = encryptionNonce
     }
 }

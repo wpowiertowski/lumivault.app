@@ -8,6 +8,7 @@ struct ExportSettings: Sendable {
     var day: String
     var generatePAR2: Bool = true
     var detectNearDuplicates: Bool = true
+    var encryptFiles: Bool = false
     var uploadToB2: Bool = false
     var targetVolumeIDs: [String] = []
     var b2Credentials: B2Credentials?
@@ -45,6 +46,7 @@ struct NearDuplicateMatch: Identifiable, Sendable {
 enum ExportPhase: String, Sendable {
     case exporting = "Exporting from Photos"
     case hashing = "Hashing & deduplicating"
+    case encrypting = "Encrypting files"
     case par2 = "Generating PAR2 recovery data"
     case copying = "Copying to external volumes"
     case uploading = "Uploading to B2"
@@ -60,9 +62,11 @@ class ExportCoordinator {
     private let redundancyService = RedundancyService()
     private let b2Service = B2Service()
     private let catalogService: CatalogService
+    private let encryptionService: EncryptionService
 
-    init(catalogService: CatalogService) {
+    init(catalogService: CatalogService, encryptionService: EncryptionService) {
         self.catalogService = catalogService
+        self.encryptionService = encryptionService
     }
 
     func export(
@@ -157,7 +161,41 @@ class ExportCoordinator {
             progress.filesHashed += 1
         }
 
-        // 4. Generate PAR2 recovery data
+        // 4. Encrypt files (if enabled) — before PAR2 so recovery data protects ciphertext
+        var fileURLsForStorage: [String: URL] = [:] // sha256 -> file URL to use for PAR2/copy/upload
+        var encryptedSizes: [String: Int64] = [:]  // sha256 -> encrypted file size
+        for item in imageRecords {
+            fileURLsForStorage[item.record.sha256] = item.fileURL
+        }
+
+        let encryptionKeyAvailable = await encryptionService.isKeyAvailable
+        if settings.encryptFiles && encryptionKeyAvailable {
+            progress.phase = .encrypting
+            progress.currentFile = 0
+
+            let keyId = await encryptionService.cachedKeyId
+
+            for (index, item) in imageRecords.enumerated() {
+                progress.currentFile = index + 1
+                progress.currentFilename = item.record.filename
+
+                let encryptedURL = staging.appendingPathComponent(item.record.filename + ".enc")
+                let (nonce, encSize) = try await encryptionService.encryptFile(
+                    at: item.fileURL,
+                    to: encryptedURL,
+                    sha256: item.record.sha256
+                )
+
+                item.record.isEncrypted = true
+                item.record.encryptionNonce = nonce
+                item.record.encryptionKeyId = keyId
+
+                fileURLsForStorage[item.record.sha256] = encryptedURL
+                encryptedSizes[item.record.sha256] = encSize
+            }
+        }
+
+        // 5. Generate PAR2 recovery data (on ciphertext if encrypted)
         if settings.generatePAR2 {
             progress.phase = .par2
             progress.currentFile = 0
@@ -165,8 +203,9 @@ class ExportCoordinator {
             for (index, item) in imageRecords.enumerated() {
                 progress.currentFile = index + 1
 
+                let fileForPAR2 = fileURLsForStorage[item.record.sha256] ?? item.fileURL
                 if let par2URL = try? await redundancyService.generatePAR2(
-                    for: item.fileURL,
+                    for: fileForPAR2,
                     outputDirectory: staging
                 ) {
                     item.record.par2Filename = par2URL.lastPathComponent
@@ -198,9 +237,10 @@ class ExportCoordinator {
                 try FileManager.default.createDirectory(at: destBase, withIntermediateDirectories: true)
 
                 for item in imageRecords {
+                    let sourceFile = fileURLsForStorage[item.record.sha256] ?? item.fileURL
                     let dest = destBase.appendingPathComponent(item.record.filename)
                     if !FileManager.default.fileExists(atPath: dest.path) {
-                        try FileManager.default.copyItem(at: item.fileURL, to: dest)
+                        try FileManager.default.copyItem(at: sourceFile, to: dest)
                     }
 
                     let relativePath = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)/\(item.record.filename)"
@@ -246,8 +286,9 @@ class ExportCoordinator {
                     )
 
                     if !alreadyExists {
+                        let uploadFile = fileURLsForStorage[item.record.sha256] ?? item.fileURL
                         let fileId = try await b2Service.uploadImage(
-                            fileURL: item.fileURL,
+                            fileURL: uploadFile,
                             remotePath: remotePath,
                             sha256: item.record.sha256,
                             credentials: credentials
@@ -305,7 +346,11 @@ class ExportCoordinator {
                 sha256: item.record.sha256,
                 sizeBytes: item.record.sizeBytes,
                 par2Filename: item.record.par2Filename,
-                b2FileId: item.record.b2FileId
+                b2FileId: item.record.b2FileId,
+                encryptionAlgorithm: item.record.isEncrypted ? "AES-256-GCM" : nil,
+                encryptionKeyId: item.record.encryptionKeyId,
+                encryptionNonce: item.record.encryptionNonce?.base64EncodedString(),
+                encryptedSizeBytes: encryptedSizes[item.record.sha256]
             )
             await catalogService.addImage(
                 catalogImage,

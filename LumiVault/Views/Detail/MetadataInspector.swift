@@ -51,6 +51,28 @@ struct MetadataInspector: View {
                     }
                 }
 
+                // Encryption
+                InspectorSection(title: "Encryption") {
+                    if image.isEncrypted {
+                        HStack(spacing: 6) {
+                            Image(systemName: "lock.fill")
+                                .foregroundStyle(.green)
+                            Text("Encrypted (AES-256-GCM)")
+                                .font(Constants.Design.monoCaption)
+                        }
+                        if let keyId = image.encryptionKeyId {
+                            InspectorRow(label: "Key ID", value: keyId)
+                        }
+                    } else {
+                        HStack(spacing: 6) {
+                            Image(systemName: "lock.open")
+                                .foregroundStyle(.secondary)
+                            Text("Not encrypted")
+                                .font(Constants.Design.monoCaption)
+                        }
+                    }
+                }
+
                 // Thumbnail
                 InspectorSection(title: "Thumbnail") {
                     HStack {

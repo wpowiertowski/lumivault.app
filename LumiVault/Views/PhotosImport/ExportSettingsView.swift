@@ -5,6 +5,11 @@ struct ExportSettingsView: View {
     @Binding var settings: ExportSettings
     @Query private var volumes: [VolumeRecord]
     @AppStorage("b2Enabled") private var b2Enabled = false
+    @AppStorage("encryptionEnabled") private var encryptionEnabled = false
+
+    private var encryptionKeyAvailable: Bool {
+        encryptionEnabled && EncryptionService.storedKeyId() != nil
+    }
 
     var body: some View {
         Form {
@@ -32,6 +37,21 @@ struct ExportSettingsView: View {
                 Text("Uses perceptual hashing to flag visually similar images during import.")
                     .font(Constants.Design.monoCaption)
                     .foregroundStyle(.tertiary)
+            }
+
+            Section("Encryption") {
+                Toggle("Encrypt files at rest", isOn: $settings.encryptFiles)
+                    .disabled(!encryptionKeyAvailable)
+                if settings.encryptFiles {
+                    Text("Files will be encrypted with AES-256-GCM before storage. PAR2 recovery data protects the encrypted payload.")
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(.tertiary)
+                }
+                if !encryptionKeyAvailable {
+                    Text("Set up encryption passphrase in Settings > Encryption first.")
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("External Volumes") {
@@ -81,6 +101,11 @@ struct ExportSettingsView: View {
         // Pre-select all configured volumes
         if settings.targetVolumeIDs.isEmpty && !volumes.isEmpty {
             settings.targetVolumeIDs = volumes.map(\.volumeID)
+        }
+
+        // Enable encryption if key is configured
+        if !settings.encryptFiles && encryptionKeyAvailable {
+            settings.encryptFiles = true
         }
 
         // Enable B2 upload if credentials are configured

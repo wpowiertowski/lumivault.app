@@ -4,6 +4,7 @@ import SwiftData
 struct PhotoDetailView: View {
     let image: ImageRecord
     @Query private var volumes: [VolumeRecord]
+    @Environment(\.encryptionService) private var encryptionService
     @State private var fullImage: NSImage?
     @State private var showingInspector = true
 
@@ -49,14 +50,28 @@ struct PhotoDetailView: View {
                   let mountURL = try? BookmarkResolver.resolveAndAccess(volume.bookmarkData) else {
                 continue
             }
+            defer { mountURL.stopAccessingSecurityScopedResource() }
 
             let fileURL = mountURL.appendingPathComponent(location.relativePath)
-            if let loaded = NSImage(contentsOf: fileURL) {
-                fullImage = loaded
-                mountURL.stopAccessingSecurityScopedResource()
-                return
+
+            // Decrypt if encrypted
+            if image.isEncrypted, let nonce = image.encryptionNonce {
+                guard let ciphertext = try? Data(contentsOf: fileURL),
+                      let plaintext = try? await encryptionService.decryptData(
+                          ciphertext, nonce: nonce, sha256: image.sha256
+                      ) else {
+                    continue
+                }
+                if let loaded = NSImage(data: plaintext) {
+                    fullImage = loaded
+                    return
+                }
+            } else {
+                if let loaded = NSImage(contentsOf: fileURL) {
+                    fullImage = loaded
+                    return
+                }
             }
-            mountURL.stopAccessingSecurityScopedResource()
         }
     }
 }

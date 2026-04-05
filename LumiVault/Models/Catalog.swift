@@ -42,6 +42,11 @@ struct CatalogImage: Codable, Sendable {
     var sizeBytes: Int64
     var par2Filename: String
     var b2FileId: String?
+    // Encryption — optional, nil for unencrypted (backwards-compatible)
+    var encryptionAlgorithm: String?
+    var encryptionKeyId: String?
+    var encryptionNonce: String?       // base64-encoded 12-byte nonce
+    var encryptedSizeBytes: Int64?
 
     enum CodingKeys: String, CodingKey {
         case filename
@@ -49,6 +54,10 @@ struct CatalogImage: Codable, Sendable {
         case sizeBytes = "size_bytes"
         case par2Filename = "par2_filename"
         case b2FileId = "b2_file_id"
+        case encryptionAlgorithm = "encryption_algorithm"
+        case encryptionKeyId = "encryption_key_id"
+        case encryptionNonce = "encryption_nonce"
+        case encryptedSizeBytes = "encrypted_size_bytes"
     }
 }
 

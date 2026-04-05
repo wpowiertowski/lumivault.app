@@ -16,6 +16,7 @@ struct PhotosExportSheet: View {
     @State private var progress = ExportProgress()
     @State private var isExporting = false
     @Environment(SyncCoordinator.self) private var syncCoordinator
+    @Environment(\.encryptionService) private var encryptionService
 
     private let catalogService = CatalogService()
 
@@ -263,10 +264,11 @@ struct PhotosExportSheet: View {
         let prog = progress
         let sett = settings
         let catSvc = catalogService
+        let encSvc = encryptionService
         let sync = syncCoordinator
 
         Task { @MainActor in
-            let coordinator = ExportCoordinator(catalogService: catSvc)
+            let coordinator = ExportCoordinator(catalogService: catSvc, encryptionService: encSvc)
             do {
                 try await coordinator.export(
                     photosAlbumId: albumId,

@@ -19,11 +19,15 @@ struct SettingsView: View {
                 .tabItem {
                     Label("B2", systemImage: "cloud")
                 }
+            EncryptionSettingsView()
+                .tabItem {
+                    Label("Encryption", systemImage: "lock.shield")
+                }
             ReconciliationView()
                 .tabItem {
                     Label("Integrity", systemImage: "checkmark.shield")
                 }
         }
-        .frame(width: 480, height: 420)
+        .frame(width: 480, height: 450)
     }
 }
