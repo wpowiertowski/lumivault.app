@@ -22,6 +22,7 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 - **Apple Photos Import** — browse and select albums from your Photos library, export originals via PhotoKit, and archive them in one step
 - **Backblaze B2 Cloud Upload** — upload photos and PAR2 recovery data to B2 cloud storage via the REST API with SHA-1 verification; existence checks prevent duplicate uploads
 - **iCloud Catalog Sync** — catalog.json syncs across devices via iCloud Drive with conflict-free merge (union by SHA-256, newest timestamp wins)
+- **Catalog Backup & Restore** — catalog.json is automatically distributed to all external volumes and B2 after every mutation; restore from any backup source (volume, B2, or local file) on fresh run or via Settings
 - **Thumbnail Generation** — HEIC/RAW/CR2/CR3/NEF/ARW/DNG support with a multi-resolution cache (256px grid, 64px list) keyed by content hash
 - **Deduplication** — exact (SHA-256) and near-duplicate (perceptual hash dHash) detection across all connected volumes
 - **Multi-Volume Mirroring** �� mirror albums to multiple external drives with security-scoped bookmarks for persistent access; sync existing catalog to newly added volumes with dedup-by-hash
@@ -30,7 +31,7 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 - **Reed-Solomon Error Correction** — GF(2^8) Vandermonde-matrix redundancy with PAR2-compatible file format, including single-block repair with cross-verification
 - **Integrity Verification** — background checks surface corruption by re-hashing files against stored SHA-256 digests
 - **Drag & Drop Import** — native file import via `UniformTypeIdentifiers` with image-type filtering
-- **Settings** — configure external volumes, iCloud sync, Backblaze B2 credentials, and storage integrity scanning
+- **Settings** — configure external volumes, iCloud sync, Backblaze B2 credentials, storage integrity scanning, and catalog restore
 
 ## Technology Stack
 
@@ -63,6 +64,7 @@ Photos are organized into date-based albums, deduplicated across multiple extern
           │  (actors / @Observable) │
           ├─────────────────────────┤
           │ CatalogService          │  read/write/merge/remove catalog.json
+          │ CatalogBackupService    │  distribute catalog to volumes + B2, restore
           │ PhotosImportService     │  PhotoKit album export
           │ ThumbnailService        │  generate + NSCache (128 MB)
           │ DeduplicationService    │  SHA-256 + perceptual hash index
@@ -89,7 +91,7 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 
 ```text
 LumiVault/
-├── App/                  App entry point, ContentView, menu commands
+├── App/                  App entry point, ContentView, SyncCoordinator, menu commands
 ├── Models/               Codable catalog structs, SwiftData models, B2/reconciliation types
 ├── Services/             Actor-based domain services + coordinators
 │   └── Persistence/      SwiftData container factory

@@ -53,6 +53,7 @@
           │  (actors / @Observable) │
           ├─────────────────────────┤
           │ CatalogService          │  ← catalog.json read/write/merge/remove
+          │ CatalogBackupService    │  ← distribute catalog to volumes + B2, restore
           │ PhotosImportService     │  ← PhotoKit album export
           │ ThumbnailService        │  ← generate, cache, LRU eviction
           │ DeduplicationService    │  ← SHA-256 + perceptual hash index
@@ -167,6 +168,43 @@ for each year/month/day/album in remote:
     if album missing locally  → adopt remote version
     if album exists locally   → union images by sha256, keep newest added_at
 update last_updated = max(local, remote)
+```
+
+### 5.1.1 Catalog Backup & Restore
+
+**Mechanism**: `CatalogBackupService` (actor) distributes `catalog.json` to external
+volumes and B2, and restores from any backup source. `SyncCoordinator` orchestrates
+this automatically after every catalog mutation.
+
+**Backup (automatic)**:
+
+After every local change (export, delete, etc.), `SyncCoordinator.pushAfterLocalChange()`
+triggers:
+
+```text
+1. Reload catalog from disk
+2. Push to iCloud (if enabled)
+3. Write catalog.json to root of each mounted external volume
+4. Upload catalog.json to B2 (if enabled)
+```
+
+Volume bookmarks are resolved from SwiftData via the shared `ModelContainer`.
+Errors are logged but do not block the primary operation.
+
+**Restore (user-initiated)**:
+
+Available in two places:
+
+- **WelcomeView** (shown on fresh run with no albums) — "From File...", "From Volume...", "From B2"
+- **Settings > General > Restore Catalog** — same options, for existing installations
+
+Restore flow:
+
+```text
+1. Load catalog.json from selected source
+2. Decode and validate
+3. Save to local catalog path
+4. Reload into CatalogService
 ```
 
 ### 5.2 Thumbnail Generation & Storage
@@ -394,7 +432,8 @@ these as orphans if the volume is later mounted.
 LumiVault/
 ├── App/
 │   ├── LumiVaultApp.swift               // @main, WindowGroup, scene config
-│   └── ContentView.swift                // NavigationSplitView root
+│   ├── ContentView.swift                // NavigationSplitView root + WelcomeView (restore)
+│   └── SyncCoordinator.swift            // App-level sync + catalog backup orchestration
 │
 ├── Models/
 │   ├── Catalog.swift                    // Codable structs mirroring catalog.json
@@ -408,6 +447,7 @@ LumiVault/
 │   ├── Persistence/
 │   │   └── SwiftDataContainer.swift     // ModelContainer factory
 │   ├── CatalogService.swift             // Load/save/merge/remove catalog.json
+│   ├── CatalogBackupService.swift       // Distribute catalog to volumes + B2, restore
 │   ├── PhotosImportService.swift        // PhotoKit album enumeration + export
 │   ├── B2Service.swift                  // B2 REST API (upload/download/list/delete)
 │   ├── ExportCoordinator.swift          // Orchestrates full export pipeline
@@ -440,7 +480,7 @@ LumiVault/
 │   │   ├── ExportSettingsView.swift     // Export configuration form
 │   │   └── PhotosExportSheet.swift      // Multi-step export wizard
 │   └── Settings/
-│       ├── GeneralSettingsView.swift     // Catalog path, redundancy %
+│       ├── GeneralSettingsView.swift     // Catalog path, redundancy %, restore
 │       ├── VolumesSettingsView.swift     // Manage disks + post-add sync
 │       ├── VolumeSyncSheet.swift         // Sync existing catalog to new volume
 │       ├── ReconciliationView.swift      // Integrity scan + discrepancy resolution
@@ -493,24 +533,26 @@ func importImages(_ urls: [URL], to album: AlbumRecord) async throws {
 ## 8. iCloud Sync — Sequence Diagram
 
 ```
- ┌──────┐          ┌─────────────┐       ┌───────────┐       ┌───────┐
- │ User │          │ CatalogSvc  │       │  SyncSvc  │       │ iCloud│
- └──┬───┘          └──────┬──────┘       └─────┬─────┘       └───┬───┘
-    │  add album          │                    │                  │
-    │─────────────────────>                    │                  │
-    │                     │ save catalog.json  │                  │
-    │                     │───────────────────>│                  │
-    │                     │                    │ NSFileCoordinator│
-    │                     │                    │  write to iCloud │
-    │                     │                    │─────────────────>│
-    │                     │                    │                  │
-    │                     │                    │  remote change   │
-    │                     │                    │<─────────────────│
-    │                     │                    │ NSMetadataQuery  │
-    │                     │  merge(remote)     │                  │
-    │                     │<───────────────────│                  │
-    │  UI refresh         │                    │                  │
-    │<─────────────────────                    │                  │
+ ┌──────┐      ┌─────────────┐   ┌───────────┐   ┌───────┐  ┌────────┐  ┌────┐
+ │ User │      │ CatalogSvc  │   │  SyncCoord│   │ iCloud│  │Volumes │  │ B2 │
+ └──┬───┘      └──────┬──────┘   └─────┬─────┘   └───┬───┘  └───┬────┘  └─┬──┘
+    │  add album      │               │              │          │         │
+    │─────────────────>               │              │          │         │
+    │                 │ save to disk  │              │          │         │
+    │                 │──────────────>│              │          │         │
+    │                 │               │ push iCloud  │          │         │
+    │                 │               │─────────────>│          │         │
+    │                 │               │ backup vols  │          │         │
+    │                 │               │──────────────────────── >│         │
+    │                 │               │ backup B2    │          │         │
+    │                 │               │───────────────────────────────── >│
+    │                 │               │              │          │         │
+    │                 │               │ remote change│          │         │
+    │                 │               │<─────────────│          │         │
+    │                 │ merge(remote) │              │          │         │
+    │                 │<──────────────│              │          │         │
+    │  UI refresh     │              │              │          │         │
+    │<─────────────────              │              │          │         │
 ```
 
 ---
