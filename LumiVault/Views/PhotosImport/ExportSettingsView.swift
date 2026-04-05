@@ -74,6 +74,23 @@ struct ExportSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { applyDefaults() }
+    }
+
+    private func applyDefaults() {
+        // Pre-select all configured volumes
+        if settings.targetVolumeIDs.isEmpty && !volumes.isEmpty {
+            settings.targetVolumeIDs = volumes.map(\.volumeID)
+        }
+
+        // Enable B2 upload if credentials are configured
+        if !settings.uploadToB2 && b2Enabled {
+            if let data = UserDefaults.standard.data(forKey: B2Credentials.keychainKey),
+               let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) {
+                settings.uploadToB2 = true
+                settings.b2Credentials = creds
+            }
+        }
     }
 
     private func volumeBinding(for volumeID: String) -> Binding<Bool> {
