@@ -79,7 +79,7 @@ Photos are organized into date-based albums, deduplicated across multiple extern
           ┌────────────┴────────────┐
           │     Persistence Layer   │
           ├─────────────────────────┤
-          │ SwiftData ModelContext   │  local index
+          │ SwiftData ModelContext  │  local index
           │ catalog.json (Codable)  │  portable JSON catalog
           │ NSFileCoordinator       │  safe concurrent file access
           └─────────────────────────┘

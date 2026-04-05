@@ -69,7 +69,7 @@
           ┌────────────┴────────────┐
           │     Persistence Layer   │
           ├─────────────────────────┤
-          │ SwiftData ModelContext   │  ← local index (ImageRecord, Album, Volume)
+          │ SwiftData ModelContext  │  ← local index (ImageRecord, Album, Volume)
           │ catalog.json (Codable)  │  ← portable JSON catalog (existing format)
           │ NSFileCoordinator       │  ← safe concurrent file access
           └─────────────────────────┘
@@ -146,8 +146,10 @@ per volume — the core structure enabling multi-volume deduplication.
 
 **Mechanism**: `NSFileCoordinator` + iCloud Drive (Documents container).
 
+Uses the app's iCloud container (hidden from the user in Finder):
+
 ```
-~/Library/Mobile Documents/iCloud~com~photovault/Documents/catalog.json
+~/Library/Mobile Documents/iCloud~app~lumivault/catalog.json
 ```
 
 | Aspect | Design |
@@ -556,6 +558,7 @@ remains fully functional alongside the macOS app.
 - AI-based tagging or face detection
 - Photo editing or RAW development
 - Video file support
+- Perceptual hash near-duplicate threshold tuning (infrastructure exists via dHash, but surfacing near-duplicate prompts to the user is deferred to a future version)
 
 ---
 
@@ -564,6 +567,6 @@ remains fully functional alongside the macOS app.
 | # | Question | Status |
 | --- | --- | --- |
 | 1 | ~~Should the app also manage B2 uploads natively?~~ | Resolved: Yes, via URLSession + B2 REST API (upload, download, list, delete) |
-| 2 | Perceptual hash threshold for "near duplicate" | Hamming distance 5 is conservative; may need tuning |
-| 3 | iCloud container type | Documents (user-visible) vs. app container (hidden) |
+| 2 | ~~Perceptual hash threshold for "near duplicate"~~ | Deferred: moved to future development; dHash infrastructure remains but threshold tuning is not a v1 priority |
+| 3 | ~~iCloud container type~~ | Resolved: App container (hidden) — catalog syncs via the app's iCloud container, not user-visible Documents |
 | 4 | ~~Redundancy format~~ | Resolved: Custom PAR2-compatible format with GF(2^8) Vandermonde matrix |
