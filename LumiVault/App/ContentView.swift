@@ -78,19 +78,23 @@ private struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Arrow pointing up-left toward the import button
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Image(systemName: "arrow.up.left")
-                        .font(.system(size: 28, weight: .medium))
-                        .foregroundStyle(Constants.Design.accentColor)
+            HStack(alignment: .bottom, spacing: 6) {
+                Image(systemName: "arrow.turn.left.up")
+                    .font(.system(size: 48, weight: .ultraLight))
+                    .foregroundStyle(Constants.Design.accentColor.opacity(0.6))
+                    .padding(.leading, 20)
+
+                VStack(alignment: .leading, spacing: 2) {
                     Text("Click to import")
-                        .font(Constants.Design.monoCaption)
-                        .foregroundStyle(Constants.Design.accentColor)
+                    Text("from Photos")
                 }
-                .padding(.leading, 32)
-                .padding(.top, 16)
+                .font(Constants.Design.monoCaption)
+                .foregroundStyle(Constants.Design.accentColor)
+                .padding(.bottom, 2)
+
                 Spacer()
             }
+            .padding(.top, 8)
 
             Spacer()
 

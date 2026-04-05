@@ -32,6 +32,8 @@
 | Redundancy | Custom GF(2^8) Reed-Solomon (Vandermonde matrix) | PAR2-compatible error correction with repair |
 | Photos Import | PhotoKit (Photos framework) | Apple Photos album enumeration & asset export |
 | Cloud Storage | URLSession | Backblaze B2 REST API uploads |
+| Encryption | CryptoKit (AES-256-GCM), CommonCrypto (PBKDF2) | Per-file encryption at rest |
+| In-App Purchase | StoreKit 2 | Tip jar consumable products |
 | Drag & Drop | UniformTypeIdentifiers, Transferable | Native drag-in import, drag-out export |
 
 ---
@@ -64,6 +66,7 @@
           │ ReconciliationService   │  ← scan volumes + B2 for discrepancies
           │ DeletionService         │  ← remove files from volumes + B2
           │ IntegrityService        │  ← scheduled verification sweeps
+          │ EncryptionService       │  ← AES-256-GCM encrypt/decrypt, key derivation
           │ ExportCoordinator       │  ← orchestrates full export pipeline
           └────────────┬────────────┘
                        │
@@ -117,6 +120,9 @@ Codable structs mirror this hierarchy exactly. Serialization uses `JSONEncoder` 
     var storageLocations: [StorageLocation]   // volumes where this hash exists
     var thumbnailState: ThumbnailState        // .pending | .generated | .failed
     var perceptualHash: Data?                 // for near-duplicate detection
+    var isEncrypted: Bool                     // true if stored as ciphertext
+    var encryptionKeyId: String?              // identifies which key encrypted
+    var encryptionNonce: Data?                // 12-byte AES-GCM nonce
 }
 
 @Model class AlbumRecord {
@@ -265,7 +271,8 @@ PHAssetCollection.fetchAssetCollections(with: .smartAlbum) → Favorites, Recent
      → SHA-256 hash + dedup check
      → Thumbnail generation
      → Perceptual hash
-     → PAR2 generation (optional)
+     → AES-256-GCM encryption (optional)
+     → PAR2 generation on ciphertext (optional)
      → Copy to external volumes
      → Upload to B2 (optional)
      → Update SwiftData index + catalog.json
@@ -424,6 +431,59 @@ Unmounted volumes are silently skipped — the files remain on disk but the `Sto
 references are removed from the database. A subsequent reconciliation scan will surface
 these as orphans if the volume is later mounted.
 
+### 5.8 Per-File Encryption
+
+**Mechanism**: `EncryptionService` (actor) provides AES-256-GCM authenticated encryption
+via CryptoKit, with key derivation from a user passphrase via PBKDF2 (CommonCrypto,
+600,000 iterations).
+
+**Operation order** (critical for resilience):
+
+```text
+Raw file
+  → SHA-256(raw)           # identity & dedup on original content
+  → Perceptual hash(raw)   # near-duplicate detection on original
+  → Thumbnail(raw)         # generate before encryption
+  → AES-256-GCM encrypt    # encrypt with unique 12-byte nonce
+  → PAR2(ciphertext)       # Reed-Solomon protects encrypted payload
+  → Copy/Upload ciphertext # store on volumes and B2
+```
+
+**Why this order**:
+
+- PAR2 operates on ciphertext — can repair bit-rot without the encryption key
+- SHA-256 is computed on raw data — exact dedup works unchanged
+- Thumbnails are generated from raw data — browsable without the key
+- Associated data (raw SHA-256) binds ciphertext to file identity via GCM
+
+**Key management**:
+
+- PBKDF2 with SHA-256, 600K iterations, 32-byte random salt (stored in UserDefaults)
+- Key ID = first 16 hex chars of SHA-256(derived key) — stored per-file in catalog
+- Key cached in memory during session; passphrase never stored
+- Settings > Encryption: create/unlock/lock key, change passphrase
+
+**What gets encrypted**:
+
+| Data | Encrypted | Reason |
+| ---- | --------- | ------ |
+| Image files on volumes/B2 | Yes | Primary protection target |
+| PAR2 files | No | Protects ciphertext, reveals no image content |
+| Thumbnails (local cache) | No | Low-res, local only, needed for browsing |
+| catalog.json | No | Metadata only, keeps CLI compatibility |
+
+**Catalog fields** (backwards-compatible, all optional):
+
+`encryption_algorithm`, `encryption_key_id`, `encryption_nonce` (base64),
+`encrypted_size_bytes`. Unencrypted files have `nil` for all fields.
+
+### 5.9 Tip Jar (In-App Purchase)
+
+**Mechanism**: StoreKit 2 with four consumable tip products. The `SupportSettingsView`
+loads products via `Product.products(for:)`, handles purchase verification, and displays
+a thank-you confirmation. A `TipJar.storekit` configuration file enables local testing
+in Xcode without App Store Connect setup.
+
 ---
 
 ## 6. Module Breakdown
@@ -459,6 +519,7 @@ LumiVault/
 │   ├── RedundancyService.swift          // Reed-Solomon ECC (GF(2^8) Vandermonde)
 │   ├── VolumeService.swift              // Disk discovery, bookmarks, sync to volume
 │   ├── IntegrityService.swift           // Scheduled verification
+│   ├── EncryptionService.swift         // AES-256-GCM encrypt/decrypt, PBKDF2 key derivation
 │   └── HasherService.swift              // CryptoKit SHA-256 streaming
 │
 ├── Views/
@@ -485,7 +546,9 @@ LumiVault/
 │       ├── VolumeSyncSheet.swift         // Sync existing catalog to new volume
 │       ├── ReconciliationView.swift      // Integrity scan + discrepancy resolution
 │       ├── CloudSettingsView.swift       // iCloud sync toggle + status
-│       └── B2SettingsView.swift          // Backblaze B2 credentials + test
+│       ├── B2SettingsView.swift          // Backblaze B2 credentials + test
+│       ├── EncryptionSettingsView.swift  // Passphrase management, key status
+│       └── SupportSettingsView.swift     // Tip jar via StoreKit 2
 │
 └── Utilities/
     ├── PerceptualHash.swift             // dHash via Core Image
@@ -600,7 +663,7 @@ remains fully functional alongside the macOS app.
 - AI-based tagging or face detection
 - Photo editing or RAW development
 - Video file support
-- Perceptual hash near-duplicate threshold tuning (infrastructure exists via dHash, but surfacing near-duplicate prompts to the user is deferred to a future version)
+- Perceptual hash near-duplicate threshold tuning (fixed at Hamming distance < 5; adjustable threshold deferred)
 
 ---
 

@@ -102,19 +102,35 @@ struct PhotosExportSheet: View {
     }
 
     private var exportingStep: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             Text(progress.phase.rawValue)
                 .font(Constants.Design.monoHeadline)
 
-            ProgressView(value: progress.fraction) {
-                if !progress.currentFilename.isEmpty {
-                    Text(progress.currentFilename)
-                        .font(Constants.Design.monoCaption)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+            VStack(spacing: 6) {
+                ProgressView(value: progress.fraction)
+                    .padding(.horizontal, 40)
+
+                // Live status line: stage + filename + counter
+                HStack(spacing: 0) {
+                    if !progress.currentFilename.isEmpty {
+                        Text(progress.phase.verb)
+                            .foregroundStyle(.quaternary)
+                        Text(" ")
+                        Text(progress.currentFilename)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Spacer(minLength: 4)
+                    if progress.totalFiles > 0 {
+                        Text("\(progress.currentFile)/\(progress.totalFiles)")
+                            .foregroundStyle(.quaternary)
+                    }
                 }
+                .font(Constants.Design.monoCaption2)
+                .padding(.horizontal, 40)
+                .frame(height: 16)
             }
-            .padding(.horizontal, 40)
 
             HStack(spacing: 24) {
                 ExportStat(label: "Hashed", value: progress.filesHashed)

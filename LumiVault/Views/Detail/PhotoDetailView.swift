@@ -39,7 +39,8 @@ struct PhotoDetailView: View {
                 }
             }
         }
-        .task {
+        .task(id: image.sha256) {
+            fullImage = nil
             await loadFullImage()
         }
     }

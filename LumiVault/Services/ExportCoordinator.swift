@@ -53,6 +53,20 @@ enum ExportPhase: String, Sendable {
     case cataloging = "Updating catalog"
     case complete = "Complete"
     case failed = "Failed"
+
+    var verb: String {
+        switch self {
+        case .exporting: "Exporting"
+        case .hashing: "Hashing"
+        case .encrypting: "Encrypting"
+        case .par2: "PAR2"
+        case .copying: "Copying"
+        case .uploading: "Uploading"
+        case .cataloging: "Cataloging"
+        case .complete: "Done"
+        case .failed: "Failed"
+        }
+    }
 }
 
 class ExportCoordinator {

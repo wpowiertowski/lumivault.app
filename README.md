@@ -31,21 +31,25 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 - **Reed-Solomon Error Correction** — GF(2^8) Vandermonde-matrix redundancy with PAR2-compatible file format, including single-block repair with cross-verification
 - **Integrity Verification** — background checks surface corruption by re-hashing files against stored SHA-256 digests
 - **Drag & Drop Import** — native file import via `UniformTypeIdentifiers` with image-type filtering
-- **Settings** — configure external volumes, iCloud sync, Backblaze B2 credentials, storage integrity scanning, and catalog restore
+- **Per-File Encryption** — optional AES-256-GCM encryption with PBKDF2 key derivation (600K iterations); pipeline order Hash(raw) → Encrypt → PAR2(ciphertext) → Store enables key-free PAR2 repair and raw-data dedup
+- **Tip Jar** — StoreKit 2 in-app purchases to support development (4 consumable tip tiers)
+- **Settings** — configure external volumes, iCloud sync, Backblaze B2 credentials, encryption passphrase, storage integrity scanning, and catalog restore
 
 ## Technology Stack
 
-| Layer           | Framework                                          |
-| --------------- | -------------------------------------------------- |
-| UI              | SwiftUI (NavigationSplitView, @Observable)         |
-| Data            | SwiftData                                          |
-| Photos Import   | PhotoKit (Photos, PhotosUI)                        |
-| Cloud Sync      | iCloud Drive via NSFileCoordinator                 |
-| Cloud Storage   | URLSession + Backblaze B2 REST API                 |
-| Image Pipeline  | Core Image, ImageIO                                |
-| Hashing         | CryptoKit (SHA-256, SHA-1)                         |
-| Redundancy      | Custom GF(2^8) Reed-Solomon (Vandermonde matrix)   |
-| Concurrency     | Swift Concurrency (async/await, TaskGroup, actors) |
+| Layer           | Framework                                              |
+| --------------- | ------------------------------------------------------ |
+| UI              | SwiftUI (NavigationSplitView, @Observable)             |
+| Data            | SwiftData                                              |
+| Photos Import   | PhotoKit (Photos, PhotosUI)                            |
+| Cloud Sync      | iCloud Drive via NSFileCoordinator                     |
+| Cloud Storage   | URLSession + Backblaze B2 REST API                     |
+| Image Pipeline  | Core Image, ImageIO                                    |
+| Hashing         | CryptoKit (SHA-256, SHA-1)                             |
+| Encryption      | CryptoKit (AES-256-GCM), CommonCrypto (PBKDF2)         |
+| In-App Purchase | StoreKit 2                                             |
+| Redundancy      | Custom GF(2^8) Reed-Solomon (Vandermonde matrix)       |
+| Concurrency     | Swift Concurrency (async/await, TaskGroup, actors)     |
 
 ## Architecture
 
@@ -75,6 +79,7 @@ Photos are organized into date-based albums, deduplicated across multiple extern
           │ ReconciliationService   │  scan volumes + B2 for discrepancies
           │ DeletionService         │  remove files from volumes + B2
           │ IntegrityService        │  verification sweeps
+          │ EncryptionService       │  AES-256-GCM encrypt/decrypt, key derivation
           │ ExportCoordinator       │  orchestrates full export pipeline
           └────────────┬────────────┘
                        │
@@ -101,10 +106,10 @@ LumiVault/
 │   ├── Detail/           Full-resolution preview + metadata inspector
 │   ├── Import/           Drag-and-drop file import with progress
 │   ├── PhotosImport/     Photos library album picker + export wizard
-│   ├── Settings/         General, Volumes, iCloud, B2, Integrity (reconciliation)
+│   ├── Settings/         General, Volumes, iCloud, B2, Encryption, Integrity, Support
 │   └── Shared/           Reusable components (EmptyStateView)
 ├── Utilities/            Perceptual hashing, file coordination, bookmarks
-└── Resources/            Asset catalog
+└── Resources/            Asset catalog, StoreKit configuration
 ```
 
 ## Migration from CLI

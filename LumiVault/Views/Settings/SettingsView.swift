@@ -27,6 +27,10 @@ struct SettingsView: View {
                 .tabItem {
                     Label("Integrity", systemImage: "checkmark.shield")
                 }
+            SupportSettingsView()
+                .tabItem {
+                    Label("Support", systemImage: "heart")
+                }
         }
         .frame(width: 480, height: 450)
     }
