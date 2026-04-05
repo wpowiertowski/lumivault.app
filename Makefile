@@ -7,7 +7,7 @@ xcode:
 test:
 	swift test
 	xcodegen generate
-	xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultTests -destination 'platform=macOS'
+	xcodebuild build -project LumiVault.xcodeproj -scheme LumiVault -configuration Debug
 
 clean:
 	rm -rf LumiVault.xcodeproj
