@@ -23,27 +23,26 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 - **Backblaze B2 Cloud Upload** — upload photos and PAR2 recovery data to B2 cloud storage via the REST API with SHA-1 verification
 - **iCloud Catalog Sync** — catalog.json syncs across devices via iCloud Drive with conflict-free merge (union by SHA-256, newest timestamp wins)
 - **Thumbnail Generation** — HEIC/RAW/CR2/CR3/NEF/ARW/DNG support with a multi-resolution cache (256px grid, 64px list) keyed by content hash
-- **Deduplication** — exact (SHA-256) and near-duplicate (perceptual hash) detection across all connected volumes
+- **Deduplication** — exact (SHA-256) and near-duplicate (perceptual hash dHash) detection across all connected volumes
 - **Multi-Volume Mirroring** — mirror albums to multiple external drives with security-scoped bookmarks for persistent access
-- **Reed-Solomon Error Correction** — PAR2-compatible redundancy implemented natively via Accelerate, interoperable with the CLI tool
-- **Scheduled Integrity Verification** — background checks surface corruption via system notifications with one-tap repair
-- **Spotlight Integration** — search photos system-wide by album, date, or hash
-- **Drag & Drop** — native import/export via `Transferable` and `UniformTypeIdentifiers`
+- **Reed-Solomon Error Correction** — GF(2^8) Vandermonde-matrix redundancy with PAR2-compatible file format, including single-block repair with cross-verification
+- **Integrity Verification** — background checks surface corruption by re-hashing files against stored SHA-256 digests
+- **Drag & Drop Import** — native file import via `UniformTypeIdentifiers` with image-type filtering
+- **Settings** — configure external volumes, iCloud sync, and Backblaze B2 credentials
 
 ## Technology Stack
 
 | Layer           | Framework                                          |
 | --------------- | -------------------------------------------------- |
-| UI              | SwiftUI 7 (NavigationSplitView, @Observable)       |
+| UI              | SwiftUI (NavigationSplitView, @Observable)         |
 | Data            | SwiftData                                          |
 | Photos Import   | PhotoKit (Photos, PhotosUI)                        |
-| Cloud Sync      | CloudKit + NSUbiquitousKeyValueStore               |
+| Cloud Sync      | iCloud Drive via NSFileCoordinator                 |
 | Cloud Storage   | URLSession + Backblaze B2 REST API                 |
-| Image Pipeline  | Core Image, ImageIO, vImage                        |
+| Image Pipeline  | Core Image, ImageIO                                |
 | Hashing         | CryptoKit (SHA-256, SHA-1)                         |
-| Redundancy      | Accelerate (Reed-Solomon via vDSP)                 |
+| Redundancy      | Custom GF(2^8) Reed-Solomon (Vandermonde matrix)   |
 | Concurrency     | Swift Concurrency (async/await, TaskGroup, actors) |
-| Search          | Core Spotlight                                     |
 
 ## Architecture
 
@@ -63,13 +62,13 @@ Photos are organized into date-based albums, deduplicated across multiple extern
           ├─────────────────────────┤
           │ CatalogService          │  read/write/merge catalog.json
           │ PhotosImportService     │  PhotoKit album export
-          │ ThumbnailService        │  generate, cache, LRU eviction
+          │ ThumbnailService        │  generate + NSCache (128 MB)
           │ DeduplicationService    │  SHA-256 + perceptual hash index
-          │ RedundancyService       │  Reed-Solomon ECC encode/verify
+          │ RedundancyService       │  Reed-Solomon ECC encode/verify/repair
           │ B2Service               │  Backblaze B2 cloud upload
-          │ SyncService             │  iCloud push/pull, conflicts
+          │ SyncService             │  iCloud push/pull via NSFileCoordinator
           │ VolumeService           │  external disk discovery/bookmarks
-          │ IntegrityService        │  scheduled verification sweeps
+          │ IntegrityService        │  verification sweeps
           │ ExportCoordinator       │  orchestrates full export pipeline
           └────────────┬────────────┘
                        │
@@ -86,23 +85,44 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 
 ```text
 LumiVault/
-├── App/                  App entry point, root state, menu commands
+├── App/                  App entry point, ContentView, menu commands
 ├── Models/               Codable catalog structs, SwiftData models, B2 credentials
 ├── Services/             Actor-based domain services + export coordinator
 │   └── Persistence/      SwiftData container factory
 ├── Views/
-│   ├── Sidebar/          Year/month/day/album tree + volume status
+│   ├── Sidebar/          Year-grouped album list + volume status popover
 │   ├── Grid/             LazyVGrid thumbnail browser
 │   ├── Detail/           Full-resolution preview + metadata inspector
-│   ├── Import/           Drag-and-drop import with progress/dedup stats
+│   ├── Import/           Drag-and-drop file import with progress
 │   ├── PhotosImport/     Photos library album picker + export wizard
-│   └── Settings/         General, Volumes, iCloud, B2 config
-└── Utilities/            Perceptual hashing, file coordination, bookmarks
+│   ├── Settings/         General, Volumes, iCloud, B2 configuration
+│   └── Shared/           Reusable components (EmptyStateView)
+├── Utilities/            Perceptual hashing, file coordination, bookmarks
+└── Resources/            Asset catalog
 ```
 
 ## Migration from CLI
 
-LumiVault automatically detects an existing `~/.photovault/catalog.json` on first launch, populates its local index, creates volume bookmarks, and queues thumbnail generation. The app writes catalog.json in the same format, so the CLI tool remains fully functional alongside it.
+LumiVault reads and writes the same `catalog.json` format as the PhotoVault CLI. In Settings, use the "Detect Existing" button to locate `~/.photovault/catalog.json` and import it into the app's local index. Both tools can coexist — changes made in either are merged on sync.
+
+## Testing
+
+38 tests across 7 suites covering core logic:
+
+```bash
+swift test                                    # Run all tests
+swift test --filter CatalogTests              # Run specific suite
+```
+
+| Suite                      | Tests | Coverage                                                          |
+| -------------------------- | ----- | ----------------------------------------------------------------- |
+| CatalogTests               | 5     | Codable round-trip, optional fields, file I/O, snake_case keys    |
+| CatalogServiceMergeTests   | 5     | Disjoint merge, SHA union, new albums, timestamps, deduplication  |
+| HasherServiceTests         | 4     | Known hashes, empty file, size tracking, method consistency       |
+| RedundancyServiceTests     | 8     | PAR2 generate/verify, corrupt-and-repair round-trip, edge cases   |
+| PerceptualHashTests        | 7     | Hamming distance, symmetry, thresholds, invalid input             |
+| IntegrityServiceTests      | 4     | Hash match/mismatch, missing files, batch size                    |
+| SwiftDataModelTests        | 5     | Relationships, defaults, Codable support types                    |
 
 ## Requirements
 
