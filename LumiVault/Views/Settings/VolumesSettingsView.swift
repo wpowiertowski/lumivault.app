@@ -4,6 +4,9 @@ import SwiftData
 struct VolumesSettingsView: View {
     @Query private var volumes: [VolumeRecord]
     @Environment(\.modelContext) private var modelContext
+    @State private var showingSyncAlert = false
+    @State private var showingSyncSheet = false
+    @State private var newlyAddedVolume: VolumeRecord?
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -47,6 +50,17 @@ struct VolumesSettingsView: View {
             .padding(.bottom, 8)
         }
         .padding(.top)
+        .alert("Sync Catalog", isPresented: $showingSyncAlert) {
+            Button("Sync Now") { showingSyncSheet = true }
+            Button("Later", role: .cancel) { newlyAddedVolume = nil }
+        } message: {
+            Text("Sync existing catalog images to \(newlyAddedVolume?.label ?? "this volume")?")
+        }
+        .sheet(isPresented: $showingSyncSheet) {
+            if let volume = newlyAddedVolume {
+                VolumeSyncSheet(volume: volume)
+            }
+        }
     }
 
     private func addVolume() {
@@ -69,6 +83,9 @@ struct VolumesSettingsView: View {
             )
             modelContext.insert(volume)
             try? modelContext.save()
+
+            newlyAddedVolume = volume
+            showingSyncAlert = true
         }
     }
 

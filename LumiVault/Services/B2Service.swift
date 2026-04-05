@@ -80,6 +80,137 @@ actor B2Service {
         }
     }
 
+    // MARK: - Check File Exists
+
+    func fileExists(
+        fileName: String,
+        bucketId: String,
+        credentials: B2Credentials
+    ) async throws -> Bool {
+        if authorization == nil {
+            try await authorize(credentials: credentials)
+        }
+
+        guard let auth = authorization else { throw B2Error.notAuthorized }
+
+        let url = URL(string: "\(auth.apiURL)/b2api/v2/b2_list_file_names")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(auth.authorizationToken, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = [
+            "bucketId": bucketId,
+            "prefix": fileName,
+            "maxFileCount": 1
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+        try Self.checkResponse(response)
+
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let files = json?["files"] as? [[String: Any]] ?? []
+        return files.contains { ($0["fileName"] as? String) == fileName }
+    }
+
+    // MARK: - List All Files
+
+    func listAllFiles(
+        bucketId: String,
+        credentials: B2Credentials,
+        prefix: String? = nil
+    ) async throws -> [B2FileListing] {
+        if authorization == nil {
+            try await authorize(credentials: credentials)
+        }
+
+        guard let auth = authorization else { throw B2Error.notAuthorized }
+
+        var allFiles: [B2FileListing] = []
+        var nextFileName: String? = nil
+
+        repeat {
+            let url = URL(string: "\(auth.apiURL)/b2api/v2/b2_list_file_names")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue(auth.authorizationToken, forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            var body: [String: Any] = [
+                "bucketId": bucketId,
+                "maxFileCount": 10000
+            ]
+            if let prefix { body["prefix"] = prefix }
+            if let next = nextFileName { body["startFileName"] = next }
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+            let (data, response) = try await session.data(for: request)
+            try Self.checkResponse(response)
+
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let files = json?["files"] as? [[String: Any]] ?? []
+
+            for file in files {
+                guard let fileId = file["fileId"] as? String,
+                      let fileName = file["fileName"] as? String,
+                      let contentLength = file["contentLength"] as? Int64 else { continue }
+                allFiles.append(B2FileListing(fileId: fileId, fileName: fileName, contentLength: contentLength))
+            }
+
+            nextFileName = json?["nextFileName"] as? String
+        } while nextFileName != nil
+
+        return allFiles
+    }
+
+    // MARK: - Download File
+
+    func downloadFile(
+        fileId: String,
+        credentials: B2Credentials
+    ) async throws -> Data {
+        if authorization == nil {
+            try await authorize(credentials: credentials)
+        }
+
+        guard let auth = authorization else { throw B2Error.notAuthorized }
+
+        let url = URL(string: "\(auth.downloadURL)/b2api/v2/b2_download_file_by_id?fileId=\(fileId)")!
+        var request = URLRequest(url: url)
+        request.setValue(auth.authorizationToken, forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await session.data(for: request)
+        try Self.checkResponse(response)
+        return data
+    }
+
+    // MARK: - Delete File
+
+    func deleteFile(
+        fileId: String,
+        fileName: String,
+        credentials: B2Credentials
+    ) async throws {
+        if authorization == nil {
+            try await authorize(credentials: credentials)
+        }
+
+        guard let auth = authorization else { throw B2Error.notAuthorized }
+
+        let url = URL(string: "\(auth.apiURL)/b2api/v2/b2_delete_file_version")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(auth.authorizationToken, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: String] = ["fileId": fileId, "fileName": fileName]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (_, response) = try await session.data(for: request)
+        try Self.checkResponse(response)
+    }
+
     // MARK: - High-Level Upload
 
     func uploadImage(

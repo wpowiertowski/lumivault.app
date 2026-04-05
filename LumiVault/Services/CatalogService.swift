@@ -46,6 +46,51 @@ actor CatalogService {
         catalog.lastUpdated = .now
     }
 
+    // MARK: - Remove Operations
+
+    func removeAlbum(name: String, year: String, month: String, day: String) {
+        guard var yearEntry = catalog.years[year],
+              var monthEntry = yearEntry.months[month],
+              var dayEntry = monthEntry.days[day] else { return }
+
+        dayEntry.albums.removeValue(forKey: name)
+
+        // Prune empty containers
+        if dayEntry.albums.isEmpty {
+            monthEntry.days.removeValue(forKey: day)
+        } else {
+            monthEntry.days[day] = dayEntry
+        }
+
+        if monthEntry.days.isEmpty {
+            yearEntry.months.removeValue(forKey: month)
+        } else {
+            yearEntry.months[month] = monthEntry
+        }
+
+        if yearEntry.months.isEmpty {
+            catalog.years.removeValue(forKey: year)
+        } else {
+            catalog.years[year] = yearEntry
+        }
+
+        catalog.lastUpdated = .now
+    }
+
+    func removeImage(sha256: String, fromAlbum name: String, year: String, month: String, day: String) {
+        guard var yearEntry = catalog.years[year],
+              var monthEntry = yearEntry.months[month],
+              var dayEntry = monthEntry.days[day],
+              var album = dayEntry.albums[name] else { return }
+
+        album.images.removeAll { $0.sha256 == sha256 }
+        dayEntry.albums[name] = album
+        monthEntry.days[day] = dayEntry
+        yearEntry.months[month] = monthEntry
+        catalog.years[year] = yearEntry
+        catalog.lastUpdated = .now
+    }
+
     // MARK: - Merge (iCloud Sync)
 
     func merge(remote: Catalog) -> Catalog {

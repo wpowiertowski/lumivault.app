@@ -167,9 +167,10 @@ class ExportCoordinator {
                     }
 
                     let relativePath = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)/\(item.record.filename)"
-                    item.record.storageLocations.append(
-                        StorageLocation(volumeID: volumeRecord.volumeID, relativePath: relativePath)
-                    )
+                    let location = StorageLocation(volumeID: volumeRecord.volumeID, relativePath: relativePath)
+                    if !item.record.storageLocations.contains(location) {
+                        item.record.storageLocations.append(location)
+                    }
 
                     // Copy PAR2 if exists
                     if !item.record.par2Filename.isEmpty {
@@ -198,28 +199,47 @@ class ExportCoordinator {
                 progress.currentFilename = item.record.filename
 
                 let remotePath = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)/\(item.record.filename)"
+                let encodedPath = remotePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? remotePath
 
                 do {
-                    let fileId = try await b2Service.uploadImage(
-                        fileURL: item.fileURL,
-                        remotePath: remotePath,
-                        sha256: item.record.sha256,
+                    let alreadyExists = try await b2Service.fileExists(
+                        fileName: encodedPath,
+                        bucketId: credentials.bucketId,
                         credentials: credentials
                     )
-                    item.record.b2FileId = fileId
-                    progress.filesUploaded += 1
 
-                    // Also upload PAR2
+                    if !alreadyExists {
+                        let fileId = try await b2Service.uploadImage(
+                            fileURL: item.fileURL,
+                            remotePath: remotePath,
+                            sha256: item.record.sha256,
+                            credentials: credentials
+                        )
+                        item.record.b2FileId = fileId
+                        progress.filesUploaded += 1
+                    } else {
+                        progress.filesDeduplicated += 1
+                    }
+
+                    // Also upload PAR2 if not already in B2
                     if !item.record.par2Filename.isEmpty {
                         let par2URL = staging.appendingPathComponent(item.record.par2Filename)
                         if FileManager.default.fileExists(atPath: par2URL.path) {
                             let par2Remote = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)/\(item.record.par2Filename)"
-                            _ = try await b2Service.uploadImage(
-                                fileURL: par2URL,
-                                remotePath: par2Remote,
-                                sha256: "",
+                            let par2Encoded = par2Remote.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? par2Remote
+                            let par2Exists = try await b2Service.fileExists(
+                                fileName: par2Encoded,
+                                bucketId: credentials.bucketId,
                                 credentials: credentials
                             )
+                            if !par2Exists {
+                                _ = try await b2Service.uploadImage(
+                                    fileURL: par2URL,
+                                    remotePath: par2Remote,
+                                    sha256: "",
+                                    credentials: credentials
+                                )
+                            }
                         }
                     }
                 } catch {

@@ -33,3 +33,9 @@ struct B2FileResponse: Codable, Sendable {
     var fileName: String
     var contentSha1: String
 }
+
+struct B2FileListing: Sendable {
+    nonisolated let fileId: String
+    nonisolated let fileName: String
+    nonisolated let contentLength: Int64
+}
