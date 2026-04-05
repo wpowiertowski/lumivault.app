@@ -43,6 +43,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .showPhotosImport)) { _ in
             showingPhotosImport = true
         }
+        .onChange(of: selectedAlbum) {
+            selectedImage = nil
+        }
         .onChange(of: albums.isEmpty) {
             if !albums.isEmpty {
                 columnVisibility = .all

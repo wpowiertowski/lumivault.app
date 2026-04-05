@@ -18,7 +18,7 @@ actor B2Service {
         request.setValue("Basic \(base64)", forHTTPHeaderField: "Authorization")
 
         let (data, response) = try await session.data(for: request)
-        try Self.checkResponse(response)
+        try Self.checkResponse(response, data: data)
 
         authorization = try await MainActor.run {
             try JSONDecoder().decode(B2Authorization.self, from: data)
@@ -42,7 +42,7 @@ actor B2Service {
         }
 
         let (data, response) = try await session.data(for: request)
-        try Self.checkResponse(response)
+        try Self.checkResponse(response, data: data)
 
         uploadURL = try await MainActor.run {
             try JSONDecoder().decode(B2UploadURL.self, from: data)
@@ -70,7 +70,7 @@ actor B2Service {
         request.httpBody = fileData
 
         let (data, response) = try await session.data(for: request)
-        try Self.checkResponse(response)
+        try Self.checkResponse(response, data: data)
 
         // Upload URL is single-use per upload, refresh for next file
         uploadURL = nil
@@ -107,7 +107,7 @@ actor B2Service {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await session.data(for: request)
-        try Self.checkResponse(response)
+        try Self.checkResponse(response, data: data)
 
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let files = json?["files"] as? [[String: Any]] ?? []
@@ -146,7 +146,7 @@ actor B2Service {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
             let (data, response) = try await session.data(for: request)
-            try Self.checkResponse(response)
+            try Self.checkResponse(response, data: data)
 
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
             let files = json?["files"] as? [[String: Any]] ?? []
@@ -181,7 +181,7 @@ actor B2Service {
         request.setValue(auth.authorizationToken, forHTTPHeaderField: "Authorization")
 
         let (data, response) = try await session.data(for: request)
-        try Self.checkResponse(response)
+        try Self.checkResponse(response, data: data)
         return data
     }
 
@@ -207,8 +207,8 @@ actor B2Service {
         let body: [String: String] = ["fileId": fileId, "fileName": fileName]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (_, response) = try await session.data(for: request)
-        try Self.checkResponse(response)
+        let (deleteData, response) = try await session.data(for: request)
+        try Self.checkResponse(response, data: deleteData)
     }
 
     // MARK: - High-Level Upload
@@ -247,21 +247,52 @@ actor B2Service {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    nonisolated private static func checkResponse(_ response: URLResponse) throws {
+    nonisolated private static func checkResponse(_ response: URLResponse, data: Data? = nil) throws {
         guard let http = response as? HTTPURLResponse else {
             throw B2Error.invalidResponse
         }
         guard (200...299).contains(http.statusCode) else {
-            throw B2Error.httpError(statusCode: http.statusCode)
+            var message: String?
+            if let data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                message = json["message"] as? String ?? json["code"] as? String
+            }
+            throw B2Error.httpError(statusCode: http.statusCode, message: message)
         }
     }
 
     // MARK: - Errors
 
-    enum B2Error: Error {
+    enum B2Error: Error, LocalizedError {
         case notAuthorized
         case noUploadURL
         case invalidResponse
-        case httpError(statusCode: Int)
+        case httpError(statusCode: Int, message: String?)
+
+        var errorDescription: String? {
+            switch self {
+            case .notAuthorized:
+                "B2 authorization failed. Check your Application Key ID and Application Key in Settings."
+            case .noUploadURL:
+                "Failed to obtain B2 upload URL. Try again or check your bucket configuration."
+            case .invalidResponse:
+                "Received an invalid response from B2. Check your network connection."
+            case .httpError(let statusCode, let message):
+                switch statusCode {
+                case 401:
+                    "B2 authentication failed (401). Verify your Application Key ID and Application Key are correct."
+                case 403:
+                    "B2 access denied (403). Your application key may not have permission for this bucket."
+                case 404:
+                    "B2 bucket not found (404). Verify the Bucket ID in Settings."
+                case 408, 429:
+                    "B2 request timed out or rate limited (\(statusCode)). Try again in a moment."
+                case 500...599:
+                    "B2 server error (\(statusCode)). Backblaze may be experiencing issues. Try again later."
+                default:
+                    "B2 error \(statusCode)\(message.map { ": \($0)" } ?? ""). Check your B2 settings and try again."
+                }
+            }
+        }
     }
 }

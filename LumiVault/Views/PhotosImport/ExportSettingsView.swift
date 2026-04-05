@@ -48,6 +48,16 @@ struct ExportSettingsView: View {
             Section("Cloud Storage") {
                 Toggle("Upload to Backblaze B2", isOn: $settings.uploadToB2)
                     .disabled(!b2Enabled)
+                    .onChange(of: settings.uploadToB2) { _, enabled in
+                        if enabled {
+                            if let data = UserDefaults.standard.data(forKey: B2Credentials.keychainKey),
+                               let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) {
+                                settings.b2Credentials = creds
+                            }
+                        } else {
+                            settings.b2Credentials = nil
+                        }
+                    }
 
                 if !b2Enabled {
                     Text("Configure B2 credentials in Settings first.")

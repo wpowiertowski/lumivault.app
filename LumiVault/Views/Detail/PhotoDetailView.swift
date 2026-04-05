@@ -1,7 +1,9 @@
 import SwiftUI
+import SwiftData
 
 struct PhotoDetailView: View {
     let image: ImageRecord
+    @Query private var volumes: [VolumeRecord]
     @State private var fullImage: NSImage?
     @State private var showingInspector = true
 
@@ -42,9 +44,19 @@ struct PhotoDetailView: View {
     }
 
     private func loadFullImage() async {
-        // Resolve from first available storage location
-        guard let location = image.storageLocations.first else { return }
-        let url = URL(fileURLWithPath: location.relativePath)
-        fullImage = NSImage(contentsOf: url)
+        for location in image.storageLocations {
+            guard let volume = volumes.first(where: { $0.volumeID == location.volumeID }),
+                  let mountURL = try? BookmarkResolver.resolveAndAccess(volume.bookmarkData) else {
+                continue
+            }
+
+            let fileURL = mountURL.appendingPathComponent(location.relativePath)
+            if let loaded = NSImage(contentsOf: fileURL) {
+                fullImage = loaded
+                mountURL.stopAccessingSecurityScopedResource()
+                return
+            }
+            mountURL.stopAccessingSecurityScopedResource()
+        }
     }
 }

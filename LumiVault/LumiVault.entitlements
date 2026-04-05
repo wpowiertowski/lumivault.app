@@ -12,9 +12,6 @@
     <true/>
     <key>com.apple.security.network.client</key>
     <true/>
-    <key>com.apple.security.application-groups</key>
-    <array>
-        <string>iCloud.app.lumivault</string>
-    </array>
+    <!-- TODO: Add com.apple.developer.ubiquity-container-identifiers once provisioning profile is available -->
 </dict>
 </plist>

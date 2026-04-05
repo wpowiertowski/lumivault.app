@@ -163,6 +163,29 @@ struct PhotosExportSheet: View {
             }
             .font(Constants.Design.monoBody)
             .foregroundStyle(.secondary)
+
+            if !progress.errors.isEmpty {
+                Divider()
+                    .padding(.vertical, 4)
+
+                Text("\(progress.errors.count) error\(progress.errors.count == 1 ? "" : "s")")
+                    .font(Constants.Design.monoCaption)
+                    .foregroundStyle(.red)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(progress.errors, id: \.self) { error in
+                            Text(error)
+                                .font(Constants.Design.monoCaption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                }
+                .frame(maxHeight: 120)
+            }
         }
     }
 

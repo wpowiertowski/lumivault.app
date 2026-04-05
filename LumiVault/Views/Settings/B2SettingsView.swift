@@ -68,10 +68,10 @@ struct B2SettingsView: View {
         Task {
             let service = B2Service()
             let credentials = B2Credentials(
-                applicationKeyId: keyId,
-                applicationKey: applicationKey,
-                bucketId: bucketId,
-                bucketName: bucketName
+                applicationKeyId: keyId.trimmingCharacters(in: .whitespacesAndNewlines),
+                applicationKey: applicationKey.trimmingCharacters(in: .whitespacesAndNewlines),
+                bucketId: bucketId.trimmingCharacters(in: .whitespacesAndNewlines),
+                bucketName: bucketName.trimmingCharacters(in: .whitespacesAndNewlines)
             )
 
             do {
@@ -87,10 +87,10 @@ struct B2SettingsView: View {
 
     private func saveCredentials() {
         let credentials = B2Credentials(
-            applicationKeyId: keyId,
-            applicationKey: applicationKey,
-            bucketId: bucketId,
-            bucketName: bucketName
+            applicationKeyId: keyId.trimmingCharacters(in: .whitespacesAndNewlines),
+            applicationKey: applicationKey.trimmingCharacters(in: .whitespacesAndNewlines),
+            bucketId: bucketId.trimmingCharacters(in: .whitespacesAndNewlines),
+            bucketName: bucketName.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         if let data = try? JSONEncoder().encode(credentials) {
             UserDefaults.standard.set(data, forKey: B2Credentials.keychainKey)

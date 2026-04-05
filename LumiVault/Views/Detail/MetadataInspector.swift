@@ -29,6 +29,28 @@ struct MetadataInspector: View {
                     }
                 }
 
+                // Cloud (B2)
+                InspectorSection(title: "Cloud") {
+                    if let fileId = image.b2FileId, !fileId.isEmpty {
+                        HStack {
+                            Circle()
+                                .fill(.green)
+                                .frame(width: 8, height: 8)
+                            Text("Uploaded to B2")
+                                .font(Constants.Design.monoCaption)
+                        }
+                        InspectorRow(label: "File ID", value: fileId)
+                    } else {
+                        HStack {
+                            Circle()
+                                .fill(.secondary)
+                                .frame(width: 8, height: 8)
+                            Text("Not uploaded")
+                                .font(Constants.Design.monoCaption)
+                        }
+                    }
+                }
+
                 // Thumbnail
                 InspectorSection(title: "Thumbnail") {
                     HStack {

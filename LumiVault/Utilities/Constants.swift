@@ -21,6 +21,7 @@ enum Constants {
     enum Paths {
         static let defaultCatalog = "~/.photovault/catalog.json"
         nonisolated static let iCloudContainer = "iCloud~app~lumivault"
+        nonisolated static let debugSyncFallback = "~/.lumivault/catalog.json"
     }
 
     // MARK: - Thumbnails
