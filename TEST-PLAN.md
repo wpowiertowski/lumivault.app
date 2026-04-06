@@ -6,18 +6,29 @@
 
 | Rating | Suite | Tests | Assessment |
 |--------|-------|-------|------------|
+| High Value | EncryptionServiceTests | 14 | Key derivation determinism, encrypt/decrypt round-trip (data + file), wrong key/AD rejection, nonce uniqueness, static method interop |
+| High Value | EncryptPAR2IntegrationTests | 2 | Full encrypt-PAR2-corrupt-repair-decrypt pipeline, uncorrupted encrypted file passes PAR2 verification |
+| High Value | EncryptionEdgeCaseTests | 4 | Empty data, ciphertext size = plaintext+16, 1MB large data round-trip, file-level encrypted size check |
 | High Value | RedundancyServiceTests | 8 | Core data-integrity logic. Covers encode, verify, corrupt-and-repair round-trips, edge cases. Irreplaceable. |
 | High Value | VolumeSyncToNewVolumeTests | 5 | End-to-end copy + hash verification, dedup detection, hash mismatch, PAR2 companion handling. Tests real file I/O. |
+| High Value | VolumeSyncAdditionalTests | 3 | Single-album sync, partial dedup with pre-placed files, already-tracked dedup skip |
 | High Value | CatalogServiceMergeTests | 5 | Union-by-SHA merge, timestamp precedence, dedup — exactly the logic that protects multi-device iCloud sync. |
 | High Value | CatalogRemovalTests | 3 | Album removal, empty container pruning, single-image removal — validates catalog mutation correctness. |
 | High Value | VolumeScanTests | 4 | Reconciliation scan: dangling locations, orphan detection, healthy pass, unmounted skip. Core integrity flow. |
 | High Value | DeletionServiceTests | 4 | File removal from volumes, PAR2 companion cleanup, unmounted volume skip, bulk delete. Real FS operations. |
 | High Value | ReconciliationDiffTests | 5 | B2 diff logic: matched, dangling B2 IDs, orphans, PAR2 skip, mixed scenarios. Pure logic, well-structured. |
+| Medium Value | B2ServiceHelperTests | 7 | SHA-1 known test vectors, HTTP response validation for success (200, 299) and error (401, 500) status codes |
+| Medium Value | ExportProgressTests | 5 | Fraction calculation: empty state, mid-phase progress, complete, PAR2 sub-progress, single active phase |
+| Medium Value | CatalogBackupServiceTests | 5 | Volume backup write + decode, error on bad path, nil mount skip, file restore round-trip, missing catalog error |
+| Medium Value | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture hash verification |
+| Medium Value | DeduplicationServiceTests | 3 | Unique file detection, exact SHA-256 match, returned hash + size verification (using real JPEG fixtures) |
+| Medium Value | ImageConversionTests | 5 | JPEG conversion with extension change, valid output, dimension scaling, original format pass-through, below-max preservation |
 | Medium Value | HasherServiceTests | 4 | Fixture hash verification is the trust anchor for the entire test suite. Empty file + consistency checks are useful but simple. |
 | Medium Value | IntegrityServiceTests | 4 | Verify pass/fail/missing and batch-size limit. Solid, but `batchSize` test just checks truncation. |
 | Medium Value | CatalogTests | 5 | Codable round-trip, optional fields, snake_case keys, file I/O. Necessary for CLI compatibility guarantee, but scenarios are basic. |
-| Low Value | PerceptualHashTests | 7 | All 7 tests exercise a single pure function (`hammingDistance`) with synthetic byte arrays. Zero coverage of actual image hashing (`dHash`). |
-| Low Value | SwiftDataModelTests | 5 | Checks defaults and Codable on trivial types. `albumRecordDateLabel` tests string interpolation. These tests will almost never catch a real bug. |
+| Medium Value | PerceptualHashComputeTests | 3 | dHash `compute()` returns 8 bytes, deterministic output for same image, rejects non-image files |
+| Low Value | PerceptualHashTests | 7 | All 7 tests exercise `hammingDistance` with synthetic byte arrays. Useful but does not test image hashing. |
+| Low Value | SwiftDataModelTests | 5 | Checks defaults and Codable on trivial types. `albumRecordDateLabel` tests string interpolation. Rarely catches real bugs. |
 
 ### Redundancy & Overlap
 
@@ -25,19 +36,34 @@ No truly redundant tests. Each test has a distinct scenario. Some suites have te
 
 IntegrityServiceTests duplicates fixture materialization inline instead of using `TestFixtures.materializeVolume()` — a maintenance concern, not a test-value issue.
 
-### Critical Gaps in Automated Coverage
+### Coverage Status
 
-| Gap | Risk | Status |
-|-----|------|--------|
-| EncryptionService | High | **Covered** — 14 tests: key derivation, encrypt/decrypt round-trip, wrong key/AD rejection, nonce uniqueness, file-level operations |
+| Area | Risk | Status |
+|------|------|--------|
+| EncryptionService | High | **Covered** — 20 tests across 3 suites: key derivation, round-trips, wrong key/AD, nonce uniqueness, file ops, edge cases, encrypt-PAR2-decrypt integration |
 | B2Service (network layer) | High | **Partially covered** — 7 tests on pure helpers (SHA-1, HTTP response validation). Network methods require URLSession abstraction; covered by manual QA. |
-| ExportCoordinator (pipeline) | High | **Partially covered** — 5 tests on image conversion (JPEG, scaling, pass-through). Full pipeline orchestration requires service mocking; covered by manual QA. |
-| CatalogBackupService | Medium | **Covered** — 5 tests: volume backup/restore round-trip, error reporting, missing catalog handling |
-| DeduplicationService | Medium | **Covered** — 3 tests: unique detection, exact match, SHA-256 + size verification |
-| ExportProgress | Medium | **Covered** — 5 tests: fraction calculation across phases, PAR2 sub-progress, edge cases |
-| SyncService / SyncCoordinator | Medium | Not testable without iCloud provisioning. Catalog merge logic covered by CatalogServiceMergeTests. |
-| ThumbnailService | Low | Not tested — visual correctness validated by manual QA. |
-| PhotosImportService | Low | Not testable — requires Photos.app sandbox entitlement. Covered by manual QA. |
+| ExportCoordinator (pipeline) | High | **Partially covered** — 5 tests on image conversion + 5 on ExportProgress. Full pipeline orchestration requires service mocking; covered by manual QA. |
+| CatalogBackupService | Medium | **Covered** — 6 tests: volume backup/restore round-trip, error reporting, missing catalog, happy path restore |
+| DeduplicationService | Medium | **Covered** — 3 tests: unique detection, exact match, SHA-256 + size verification with real JPEG fixtures |
+| Volume sync | Medium | **Covered** — 8 tests across 2 suites: full A-to-B sync, dedup, mismatch, PAR2 companion, single-album, partial dedup, already-tracked |
+| PerceptualHash | Medium | **Covered** — 10 tests across 2 suites: hammingDistance (7 pure math) + compute (3 with real images) |
+| SyncService / SyncCoordinator | Medium | **Not testable** — requires iCloud provisioning. Catalog merge logic covered by CatalogServiceMergeTests. |
+| ThumbnailService | Low | **Not tested** — ImageIO + NSCache. Visual correctness validated by manual QA. |
+| PhotosImportService | Low | **Not testable** — requires Photos.app sandbox entitlement. Covered by manual QA. |
+| VolumeService.mirrorAlbum | Low | **Not testable** — takes non-Sendable `AlbumRecord` + closure across actor boundary. Equivalent logic covered by syncToVolume tests. |
+
+### Remaining Automated Test TODOs
+
+These items would further improve coverage but require architectural changes:
+
+| Item | Blocker | Effort |
+|------|---------|--------|
+| B2Service network methods (upload, download, list, delete) | Needs URLSession protocol abstraction or URLProtocol subclass for HTTP mocking | Medium — touches B2Service constructor + all callers |
+| ExportCoordinator full pipeline | Single 300-line method orchestrating 8+ services; needs breakup into testable stages or protocol-based service injection | High — significant refactor |
+| SyncService push/pull/merge | Depends on FileManager ubiquity container + NSFileCoordinator; needs filesystem abstraction | Medium — iCloud APIs deeply coupled |
+| SyncCoordinator state machine | Orchestrates 3 services + UserDefaults + SwiftData; needs dependency injection | Medium — requires constructor refactor |
+| ThumbnailService cache logic | Two-level cache (NSCache + disk); needs real image rendering which is unreliable in headless CI (CIContext renders all-white at small sizes) | Low — limited value vs manual QA |
+| PerceptualHash visual distinctness | CIContext.render produces all-white pixels in headless test environments at 9x8 resolution; cannot reliably test that different images produce different hashes | Low — CI environment limitation |
 
 ---
 
