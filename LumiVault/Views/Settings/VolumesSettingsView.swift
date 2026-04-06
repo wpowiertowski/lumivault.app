@@ -56,6 +56,7 @@ struct VolumesSettingsView: View {
                             }
                             .buttonStyle(.plain)
                             .help("Remove volume")
+                            .accessibilityIdentifier("volumes.remove.\(volume.volumeID)")
                         }
                     }
                     .onDelete(perform: deleteVolumes)
@@ -72,6 +73,7 @@ struct VolumesSettingsView: View {
                 }
                 Spacer()
                 Button("Add Volume...") { addVolume() }
+                    .accessibilityIdentifier("volumes.add")
             }
             .padding(.horizontal)
             .padding(.vertical, 8)

@@ -60,6 +60,7 @@ struct SidebarView: View {
                                 NavigationLink(value: album) {
                                     AlbumRow(album: album)
                                 }
+                                .accessibilityIdentifier("sidebar.album.\(album.name)")
                                 .contextMenu {
                                     Button(role: .destructive) {
                                         albumToDelete = album
@@ -73,6 +74,7 @@ struct SidebarView: View {
                     }
                 }
                 .searchable(text: $searchText, prompt: "Search albums")
+                .accessibilityIdentifier("sidebar.albumList")
             }
         }
         .navigationTitle("Library")
@@ -193,6 +195,7 @@ private struct VolumeStatusButton: View {
         } label: {
             Label("Volumes", systemImage: "externaldrive")
         }
+        .accessibilityIdentifier("sidebar.volumeStatus")
         .popover(isPresented: $showingVolumes) {
             VolumeListView()
                 .frame(width: 280, height: 300)

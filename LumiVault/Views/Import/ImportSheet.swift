@@ -25,14 +25,17 @@ struct ImportSheet: View {
             HStack {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("import.cancel")
 
                 Spacer()
 
                 Button("Choose Files...") { chooseFiles() }
+                    .accessibilityIdentifier("import.chooseFiles")
 
                 Button("Import \(selectedURLs.count) Photos") { startImport() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(selectedURLs.isEmpty || isProcessing)
+                    .accessibilityIdentifier("import.importButton")
             }
         }
         .padding(24)
@@ -59,6 +62,7 @@ struct ImportSheet: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .accessibilityIdentifier("import.dropZone")
             .dropDestination(for: URL.self) { urls, _ in
                 let imageTypes: Set<String> = ["jpg", "jpeg", "heic", "png", "tiff", "raw", "cr2", "cr3", "nef", "arw", "dng"]
                 selectedURLs = urls.filter { imageTypes.contains($0.pathExtension.lowercased()) }

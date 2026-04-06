@@ -67,6 +67,92 @@ These items would further improve coverage but require architectural changes:
 
 ---
 
+## UI Test Automation (XCUIAutomation)
+
+### Summary: 12 UI tests in 1 suite (local environment only)
+
+The `LumiVaultUITests` target uses XCUIAutomation (Xcode 26) to automate a subset of the manual test cases below. These tests are designed for **local development only** — they require a real app launch and are not suitable for headless CI.
+
+| Test | Covers | What it validates |
+|------|--------|-------------------|
+| `testWelcomeScreenRestoreButtons` | TC-1 | Welcome view shows From File / From Volume restore buttons (skips if albums exist) |
+| `testSidebarExists` | TC-21 | NavigationSplitView sidebar is present |
+| `testToolbarImportButton` | TC-21 | Import from Photos toolbar button is accessible |
+| `testToolbarNearDuplicatesButton` | TC-21 | Near-Duplicates toolbar button is accessible |
+| `testWindowExists` | TC-21 | App window renders successfully |
+| `testSettingsTabsExist` | TC-22 | All 8 settings tabs (General through Support) are accessible |
+| `testB2CredentialFields` | TC-22 | B2 tab shows enable toggle |
+| `testEncryptionTabFields` | TC-22 | Encryption tab shows passphrase field |
+| `testPhotosImportOpensSheet` | TC-2 | Import button opens export sheet with cancel button |
+| `testExportCancelButtonExists` | TC-4 | Cancel and Next buttons exist; Next is disabled without album selection |
+| `testAlbumContextMenuDeleteExists` | TC-16 | Right-click album shows Delete Album context menu (skips if no albums) |
+| `testExportDefaultsToggles` | TC-22 | Export Defaults tab shows PAR2 and near-duplicate toggles |
+
+### Accessibility Identifiers
+
+~65 `.accessibilityIdentifier()` modifiers have been added across 14 view files. Naming convention: `area.element` (e.g., `sidebar.albumList`, `export.cancel`, `b2.testConnection`).
+
+Key identifier groups:
+- **Navigation**: `nav.sidebar`, `toolbar.importPhotos`, `toolbar.nearDuplicates`
+- **Welcome**: `welcome.restoreFile`, `welcome.restoreVolume`, `welcome.restoreB2`
+- **Sidebar**: `sidebar.albumList`, `sidebar.album.<name>`, `sidebar.volumeStatus`
+- **Grid**: `grid.container`, `grid.import`, `grid.photo.<sha256prefix>`
+- **Settings tabs**: `settings.tab.general` through `settings.tab.support`
+- **B2**: `b2.enable`, `b2.keyId`, `b2.appKey`, `b2.bucketId`, `b2.bucketName`, `b2.testConnection`, `b2.save`
+- **Encryption**: `encryption.passphrase`, `encryption.confirmPassphrase`, `encryption.createKey`, `encryption.unlock`
+- **Export flow**: `export.cancel`, `export.next`, `export.back`, `export.start`, `export.done`, `export.phaseLabel`
+- **Export settings**: `exportSettings.albumName`, `exportSettings.year/month/day`, `exportSettings.par2`, `exportSettings.nearDupe`, `exportSettings.encrypt`, `exportSettings.b2Upload`
+- **Import**: `import.dropZone`, `import.chooseFiles`, `import.importButton`, `import.cancel`
+- **Other settings**: `general.*`, `volumes.*`, `exportDefaults.*`, `integrity.scan`, `albums.*`
+
+### Running UI Tests
+
+```bash
+# Build and run all UI tests
+xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultUITests -destination 'platform=macOS'
+
+# Run a specific UI test
+xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultUITests \
+  -destination 'platform=macOS' -only-testing:LumiVaultUITests/LumiVaultUITests/testSettingsTabsExist
+```
+
+### Recording UI Test Traces with Xcode 26
+
+Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto-generates test code from your interactions with the app. This is the fastest way to create new UI tests.
+
+**How to record a UI test:**
+
+1. Open the project in Xcode: `open LumiVault.xcodeproj`
+2. Open `UITests/LumiVaultUITests.swift`
+3. Place your cursor inside a test method body (or create a new empty `func testSomething()`)
+4. Click the **red record button** at the bottom of the editor (or **Product > Record UI Test**)
+5. Xcode launches the app and records every interaction — clicks, typing, menu selections — as XCUIElement API calls
+6. Perform the flow you want to test in the running app
+7. Click the record button again to stop — Xcode inserts the generated code at your cursor position
+8. Add `XCTAssert` / `XCTAssertTrue` / `XCTAssertEqual` assertions after the recorded actions to verify expected state
+9. Clean up the generated code: replace fragile element queries with accessibility identifiers (e.g., `app.buttons["export.cancel"]` instead of `app.buttons["Cancel"]`)
+
+**Tips for reliable recorded tests:**
+- Always use `.accessibilityIdentifier()` queries over text-based queries — text changes break tests, identifiers don't
+- Add `waitForExistence(timeout:)` before interacting with elements that appear asynchronously (sheets, popovers, alerts)
+- Use `XCTSkipUnless` for tests that depend on app state (e.g., albums existing in the sidebar)
+- Keep tests independent — each test launches a fresh app instance via `setUp`
+
+### Manual Test Cases NOT Automated
+
+| TC | Reason |
+|----|--------|
+| TC-5 (Drag & Drop) | XCUIAutomation cannot simulate inter-process drag from Finder |
+| TC-8, TC-9, TC-25 (Volumes) | Require physical external drive mount + NSOpenPanel interaction |
+| TC-10, TC-19 (PAR2/Integrity) | Require file corruption between UI steps |
+| TC-12, TC-13 (B2 Upload) | Upload verification requires external B2 API checks |
+| TC-14 (iCloud Sync) | Requires two physical devices with same iCloud account |
+| TC-18 (Reconciliation) | Requires pre-staged volume discrepancies |
+| TC-23 (Edge Cases) | Require external failure conditions (full disk, network drop) |
+| TC-24 (Tip Jar) | StoreKit sandbox interaction is unreliable in UI tests |
+
+---
+
 ## Manual Test Plan
 
 ### Prerequisites

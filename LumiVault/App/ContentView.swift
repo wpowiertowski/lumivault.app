@@ -13,6 +13,7 @@ struct ContentView: View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(selectedAlbum: $selectedAlbum)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
+                .accessibilityIdentifier("nav.sidebar")
         } content: {
             if let album = selectedAlbum {
                 PhotoGridView(album: album, selectedImage: $selectedImage)
@@ -36,6 +37,7 @@ struct ContentView: View {
                 } label: {
                     Label("Import from Photos", systemImage: "photo.badge.arrow.down")
                 }
+                .accessibilityIdentifier("toolbar.importPhotos")
             }
             ToolbarItem(placement: .navigation) {
                 Button {
@@ -43,6 +45,7 @@ struct ContentView: View {
                 } label: {
                     Label("Near-Duplicates", systemImage: "square.on.square.badge.person.crop")
                 }
+                .accessibilityIdentifier("toolbar.nearDuplicates")
             }
         }
         .sheet(isPresented: $showingPhotosImport) {
@@ -125,9 +128,12 @@ private struct WelcomeView: View {
 
                 HStack(spacing: 12) {
                     Button("From File...") { restoreFromFile() }
+                        .accessibilityIdentifier("welcome.restoreFile")
                     Button("From Volume...") { restoreFromVolume() }
+                        .accessibilityIdentifier("welcome.restoreVolume")
                     if b2Enabled {
                         Button("From B2") { restoreFromB2() }
+                            .accessibilityIdentifier("welcome.restoreB2")
                     }
                 }
                 .disabled(isRestoring)

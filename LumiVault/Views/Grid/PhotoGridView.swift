@@ -36,6 +36,7 @@ struct PhotoGridView: View {
             }
             .padding(8)
         }
+        .accessibilityIdentifier("grid.container")
         .navigationTitle(album.name)
         .navigationSubtitle("\(album.images.count) photos")
         .toolbar {
@@ -135,6 +136,7 @@ private struct ImportButton: View {
         } label: {
             Label("Import", systemImage: "plus")
         }
+        .accessibilityIdentifier("grid.import")
         .sheet(isPresented: $showingImport) {
             ImportSheet(album: album)
         }

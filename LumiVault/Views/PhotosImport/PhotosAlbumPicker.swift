@@ -77,6 +77,7 @@ struct PhotosAlbumPicker: View {
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 200)
+                    .accessibilityIdentifier("albums.sortPicker")
 
                     Button {
                         sortAscending.toggle()
@@ -86,6 +87,7 @@ struct PhotosAlbumPicker: View {
                     }
                     .buttonStyle(.borderless)
                     .help(sortAscending ? "Ascending" : "Descending")
+                    .accessibilityIdentifier("albums.sortDirection")
 
                     Spacer()
 
@@ -101,6 +103,7 @@ struct PhotosAlbumPicker: View {
                         .tag(album.id)
                 }
                 .searchable(text: $searchText, prompt: "Search albums")
+                .accessibilityIdentifier("albums.list")
             }
         }
     }
@@ -121,6 +124,7 @@ struct PhotosAlbumPicker: View {
                 }
             }
             .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("albums.grantAccess")
         }
     }
 

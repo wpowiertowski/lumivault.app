@@ -22,14 +22,18 @@ struct ExportSettingsView: View {
             Section("Album Details") {
                 TextField("Album Name", text: $settings.albumName)
                     .font(Constants.Design.monoBody)
+                    .accessibilityIdentifier("exportSettings.albumName")
 
                 HStack(spacing: 12) {
                     TextField("Year", text: $settings.year)
                         .frame(minWidth: 70)
+                        .accessibilityIdentifier("exportSettings.year")
                     TextField("Month", text: $settings.month)
                         .frame(minWidth: 55)
+                        .accessibilityIdentifier("exportSettings.month")
                     TextField("Day", text: $settings.day)
                         .frame(minWidth: 55)
+                        .accessibilityIdentifier("exportSettings.day")
                 }
                 .font(Constants.Design.monoBody)
             }
@@ -71,10 +75,12 @@ struct ExportSettingsView: View {
 
             Section("Recovery") {
                 Toggle("Generate PAR2 error correction", isOn: $settings.generatePAR2)
+                    .accessibilityIdentifier("exportSettings.par2")
             }
 
             Section("Deduplication") {
                 Toggle("Detect near-duplicate images", isOn: $settings.detectNearDuplicates)
+                    .accessibilityIdentifier("exportSettings.nearDupe")
                 Text("Uses perceptual hashing to flag visually similar images during import.")
                     .font(Constants.Design.monoCaption)
                     .foregroundStyle(.tertiary)
@@ -83,6 +89,7 @@ struct ExportSettingsView: View {
             Section("Encryption") {
                 Toggle("Encrypt files at rest", isOn: $settings.encryptFiles)
                     .disabled(!encryptionKeyAvailable)
+                    .accessibilityIdentifier("exportSettings.encrypt")
                 if settings.encryptFiles {
                     Text("Files will be encrypted with AES-256-GCM before storage. PAR2 recovery data protects the encrypted payload.")
                         .font(Constants.Design.monoCaption)
@@ -116,6 +123,7 @@ struct ExportSettingsView: View {
             Section("Cloud Storage") {
                 Toggle("Upload to Backblaze B2", isOn: $settings.uploadToB2)
                     .disabled(!b2Enabled)
+                    .accessibilityIdentifier("exportSettings.b2Upload")
                     .onChange(of: settings.uploadToB2) { _, enabled in
                         if enabled {
                             if let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),

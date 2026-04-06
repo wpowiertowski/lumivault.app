@@ -14,20 +14,26 @@ struct GeneralSettingsView: View {
             Section("Catalog") {
                 TextField("Catalog Path", text: $catalogPath)
                     .font(Constants.Design.monoBody)
+                    .accessibilityIdentifier("general.catalogPath")
 
                 HStack {
                     Button("Browse...") { chooseCatalogPath() }
+                        .accessibilityIdentifier("general.browse")
                     Spacer()
                     Button("Detect Existing") { detectExisting() }
+                        .accessibilityIdentifier("general.detectExisting")
                 }
             }
 
             Section("Restore Catalog") {
                 HStack(spacing: 12) {
                     Button("From File...") { restoreFromFile() }
+                        .accessibilityIdentifier("general.restoreFile")
                     Button("From Volume...") { restoreFromVolume() }
+                        .accessibilityIdentifier("general.restoreVolume")
                     if b2Enabled {
                         Button("From B2") { restoreFromB2() }
+                            .accessibilityIdentifier("general.restoreB2")
                     }
                 }
                 .disabled(isRestoring)

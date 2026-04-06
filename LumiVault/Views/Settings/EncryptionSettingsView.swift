@@ -38,23 +38,28 @@ struct EncryptionSettingsView: View {
                 Section("Set Up Encryption") {
                     SecureField("Passphrase", text: $passphrase)
                         .font(Constants.Design.monoBody)
+                        .accessibilityIdentifier("encryption.passphrase")
                     SecureField("Confirm Passphrase", text: $confirmPassphrase)
                         .font(Constants.Design.monoBody)
+                        .accessibilityIdentifier("encryption.confirmPassphrase")
 
                     Button("Create Encryption Key") {
                         createKey()
                     }
                     .disabled(passphrase.isEmpty || passphrase != confirmPassphrase)
+                    .accessibilityIdentifier("encryption.createKey")
                 }
             } else {
                 Section("Unlock") {
                     if !isKeyLoaded {
                         SecureField("Passphrase", text: $passphrase)
                             .font(Constants.Design.monoBody)
+                            .accessibilityIdentifier("encryption.unlockPassphrase")
 
                         HStack {
                             Button("Unlock") { unlockKey() }
                                 .disabled(passphrase.isEmpty)
+                                .accessibilityIdentifier("encryption.unlock")
                             Button("Lock") { lockKey() }
                                 .disabled(!isKeyLoaded)
                         }

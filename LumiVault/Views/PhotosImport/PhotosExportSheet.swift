@@ -53,6 +53,7 @@ struct PhotosExportSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
+                .accessibilityIdentifier("export.cancel")
 
                 Spacer()
 
@@ -61,12 +62,15 @@ struct PhotosExportSheet: View {
                     Button("Next") { goToSettings() }
                         .keyboardShortcut(.defaultAction)
                         .disabled(selectedAlbumId == nil)
+                        .accessibilityIdentifier("export.next")
 
                 case .configure:
                     Button("Back") { step = .pickAlbum }
+                        .accessibilityIdentifier("export.back")
                     Button("Start Export") { startExport() }
                         .keyboardShortcut(.defaultAction)
                         .disabled(settings.albumName.isEmpty)
+                        .accessibilityIdentifier("export.start")
 
                 case .exporting:
                     EmptyView()
@@ -74,6 +78,7 @@ struct PhotosExportSheet: View {
                 case .complete:
                     Button("Done") { dismiss() }
                         .keyboardShortcut(.defaultAction)
+                        .accessibilityIdentifier("export.done")
                 }
             }
             .padding()
@@ -112,6 +117,7 @@ struct PhotosExportSheet: View {
                     .controlSize(.small)
                 Text(progress.phase.rawValue)
                     .font(Constants.Design.monoHeadline)
+                    .accessibilityIdentifier("export.phaseLabel")
             }
 
             VStack(spacing: 6) {

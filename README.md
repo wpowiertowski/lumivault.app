@@ -114,6 +114,8 @@ LumiVault/
 │   └── Shared/           Reusable components (EmptyStateView)
 ├── Utilities/            Perceptual hashing, file coordination, bookmarks
 └── Resources/            Asset catalog, StoreKit configuration
+Tests/                    Unit tests (Swift Testing) + shared TestFixtures
+UITests/                  XCUIAutomation UI tests (local development only)
 ```
 
 ## Migration from CLI
@@ -122,11 +124,14 @@ LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool
 
 ## Testing
 
-111 tests across 23 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes:
+111 unit tests across 23 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
 
 ```bash
-swift test                                    # Run all tests
+swift test                                    # Run all unit tests
 swift test --filter CatalogTests              # Run specific suite
+
+# UI tests (local only — launches the app)
+xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultUITests -destination 'platform=macOS'
 ```
 
 | Suite | Tests | Coverage |
@@ -154,6 +159,7 @@ swift test --filter CatalogTests              # Run specific suite
 | EncryptPAR2IntegrationTests | 2 | Encrypt→PAR2→corrupt→repair→decrypt round-trip, uncorrupted verification |
 | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture verification |
 | EncryptionEdgeCaseTests | 4 | Empty data, size = plaintext+16, 1MB large data, file size check |
+| **LumiVaultUITests** | **12** | **XCUIAutomation (local only): welcome screen, navigation, settings tabs, import flow, deletion context menu** |
 
 ## Requirements
 

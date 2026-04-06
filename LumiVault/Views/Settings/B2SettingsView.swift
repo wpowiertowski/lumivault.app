@@ -13,6 +13,7 @@ struct B2SettingsView: View {
         Form {
             Section("Backblaze B2") {
                 Toggle("Enable B2 cloud uploads", isOn: $b2Enabled)
+                    .accessibilityIdentifier("b2.enable")
             }
 
             if b2Enabled {
@@ -37,21 +38,26 @@ struct B2SettingsView: View {
                 Section("Credentials") {
                     TextField("Application Key ID", text: $keyId)
                         .font(Constants.Design.monoBody)
+                        .accessibilityIdentifier("b2.keyId")
                     SecureField("Application Key", text: $applicationKey)
                         .font(Constants.Design.monoBody)
+                        .accessibilityIdentifier("b2.appKey")
                 }
 
                 Section("Bucket") {
                     TextField("Bucket ID", text: $bucketId)
                         .font(Constants.Design.monoBody)
+                        .accessibilityIdentifier("b2.bucketId")
                     TextField("Bucket Name", text: $bucketName)
                         .font(Constants.Design.monoBody)
+                        .accessibilityIdentifier("b2.bucketName")
                 }
 
                 Section {
                     HStack {
                         Button("Test Connection") { testConnection() }
                             .disabled(keyId.isEmpty || applicationKey.isEmpty || isTesting)
+                            .accessibilityIdentifier("b2.testConnection")
 
                         if isTesting {
                             ProgressView()
@@ -70,6 +76,7 @@ struct B2SettingsView: View {
 
                         Button("Save") { saveCredentials() }
                             .disabled(keyId.isEmpty || applicationKey.isEmpty || bucketId.isEmpty)
+                            .accessibilityIdentifier("b2.save")
                     }
                 }
             }

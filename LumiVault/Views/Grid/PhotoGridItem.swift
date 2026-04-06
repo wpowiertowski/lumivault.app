@@ -32,6 +32,7 @@ struct PhotoGridItem: View {
                     .stroke(Constants.Design.accentColor, lineWidth: 3)
             }
         }
+        .accessibilityIdentifier("grid.photo.\(String(image.sha256.prefix(8)))")
         .task {
             await loadThumbnail()
         }

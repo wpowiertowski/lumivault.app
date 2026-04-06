@@ -65,7 +65,9 @@ struct ExportDefaultsSettingsView: View {
 
             Section("Processing") {
                 Toggle("Generate PAR2 error correction", isOn: $generatePAR2)
+                    .accessibilityIdentifier("exportDefaults.par2")
                 Toggle("Detect near-duplicate images", isOn: $detectNearDuplicates)
+                    .accessibilityIdentifier("exportDefaults.nearDupe")
             }
         }
         .formStyle(.grouped)

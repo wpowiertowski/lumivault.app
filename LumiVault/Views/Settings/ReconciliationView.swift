@@ -34,6 +34,7 @@ struct ReconciliationView: View {
                 Spacer()
                 Button(isScanning ? "Scanning..." : "Scan") { startScan() }
                     .disabled(isScanning || images.isEmpty)
+                    .accessibilityIdentifier("integrity.scan")
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
