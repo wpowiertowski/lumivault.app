@@ -13,6 +13,11 @@ struct SidebarView: View {
     @State private var deletionProgress = DeletionProgress()
     @Environment(SyncCoordinator.self) private var syncCoordinator
 
+    private var filteredAlbums: [AlbumRecord] {
+        if searchText.isEmpty { return albums }
+        return albums.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
     private var albumsByYear: [String: [AlbumRecord]] {
         Dictionary(grouping: filteredAlbums, by: \.year)
     }
@@ -21,9 +26,12 @@ struct SidebarView: View {
         albumsByYear.keys.sorted(by: >)
     }
 
-    private var filteredAlbums: [AlbumRecord] {
-        if searchText.isEmpty { return albums }
-        return albums.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    private func sortedAlbums(for year: String) -> [AlbumRecord] {
+        (albumsByYear[year] ?? []).sorted {
+            if $0.month != $1.month { return $0.month < $1.month }
+            if $0.day != $1.day { return $0.day < $1.day }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
     }
 
     var body: some View {
@@ -48,7 +56,7 @@ struct SidebarView: View {
                 List(selection: $selectedAlbum) {
                     ForEach(sortedYears, id: \.self) { year in
                         Section(year) {
-                            ForEach(albumsByYear[year] ?? [], id: \.persistentModelID) { album in
+                            ForEach(sortedAlbums(for: year), id: \.persistentModelID) { album in
                                 NavigationLink(value: album) {
                                     AlbumRow(album: album)
                                 }

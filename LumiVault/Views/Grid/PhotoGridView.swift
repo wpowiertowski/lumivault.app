@@ -19,7 +19,7 @@ struct PhotoGridView: View {
     var body: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 4) {
-                ForEach(album.images, id: \.persistentModelID) { image in
+                ForEach(album.images.sorted(by: { $0.addedAt < $1.addedAt }), id: \.persistentModelID) { image in
                     PhotoGridItem(image: image, isSelected: selectedImage?.sha256 == image.sha256)
                         .onTapGesture {
                             selectedImage = image

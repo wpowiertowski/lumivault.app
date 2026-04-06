@@ -136,6 +136,22 @@ actor EncryptionService {
         return (Data(nonce), Int64(ciphertext.count))
     }
 
+    /// Encrypt without actor hop — caller must pass the key. Safe for concurrent use.
+    nonisolated static func encryptFileWithKey(
+        at source: URL, to destination: URL, sha256: String, key: SymmetricKey
+    ) throws -> (nonce: Data, encryptedSize: Int64) {
+        let rawData = try Data(contentsOf: source)
+        let associatedData = Data(sha256.utf8)
+        let nonce = AES.GCM.Nonce()
+        let sealedBox = try AES.GCM.seal(rawData, using: key, nonce: nonce, authenticating: associatedData)
+        guard let combined = sealedBox.combined else {
+            throw EncryptionError.sealFailed
+        }
+        let ciphertextAndTag = Data(combined.dropFirst(12))
+        try ciphertextAndTag.write(to: destination, options: .atomic)
+        return (Data(nonce), Int64(ciphertextAndTag.count))
+    }
+
     func decryptFile(at source: URL, to destination: URL, nonce: Data, sha256: String) throws {
         let ciphertext = try Data(contentsOf: source)
         let associatedData = Data(sha256.utf8)

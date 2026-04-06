@@ -16,6 +16,24 @@ struct B2SettingsView: View {
             }
 
             if b2Enabled {
+                Section {
+                    DisclosureGroup("How to set up Backblaze B2") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            SetupStep(number: 1, title: "Create a Backblaze account",
+                                      detail: "Sign up at backblaze.com. The first 10 GB of storage is free.")
+                            SetupStep(number: 2, title: "Create a B2 bucket",
+                                      detail: "Go to B2 Cloud Storage > Buckets > Create a Bucket. Choose \"Private\" for file visibility. Note the Bucket Name and Bucket ID shown after creation.")
+                            SetupStep(number: 3, title: "Create an Application Key",
+                                      detail: "Go to Account > Application Keys > Add a New Application Key. Restrict it to your bucket for security. Copy the Application Key ID and the Application Key (shown only once).")
+                            SetupStep(number: 4, title: "Enter credentials below",
+                                      detail: "Paste the Application Key ID, Application Key, Bucket ID, and Bucket Name into the fields below, then click Test Connection to verify.")
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .font(Constants.Design.monoCaption)
+                    .foregroundStyle(.secondary)
+                }
+
                 Section("Credentials") {
                     TextField("Application Key ID", text: $keyId)
                         .font(Constants.Design.monoBody)
@@ -109,5 +127,30 @@ struct B2SettingsView: View {
     private struct TestResult {
         let success: Bool
         let message: String
+    }
+}
+
+private struct SetupStep: View {
+    let number: Int
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("\(number).")
+                .font(Constants.Design.monoCaption)
+                .fontWeight(.semibold)
+                .foregroundStyle(Constants.Design.accentColor)
+                .frame(width: 16, alignment: .trailing)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(Constants.Design.monoCaption)
+                    .fontWeight(.medium)
+                Text(detail)
+                    .font(Constants.Design.monoCaption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
     }
 }
