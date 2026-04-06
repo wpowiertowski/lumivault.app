@@ -77,24 +77,20 @@ private struct WelcomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Arrow pointing up-left toward the import button
-            HStack(alignment: .bottom, spacing: 6) {
-                Image(systemName: "arrow.turn.left.up")
-                    .font(.system(size: 48, weight: .ultraLight))
-                    .foregroundStyle(Constants.Design.accentColor.opacity(0.6))
-                    .padding(.leading, 20)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Click to import")
-                    Text("from Photos")
+            // Line pointing up toward the import button
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 14, weight: .medium))
+                    Text("Click to import\nfrom Photos")
+                        .font(Constants.Design.monoCaption)
                 }
-                .font(Constants.Design.monoCaption)
-                .foregroundStyle(Constants.Design.accentColor)
-                .padding(.bottom, 2)
+                .foregroundStyle(Constants.Design.accentColor.opacity(0.6))
+                .padding(.leading, 20)
+                .padding(.top, 12)
 
                 Spacer()
             }
-            .padding(.top, 8)
 
             Spacer()
 
