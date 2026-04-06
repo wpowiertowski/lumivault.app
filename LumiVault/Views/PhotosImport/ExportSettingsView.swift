@@ -118,7 +118,7 @@ struct ExportSettingsView: View {
                     .disabled(!b2Enabled)
                     .onChange(of: settings.uploadToB2) { _, enabled in
                         if enabled {
-                            if let data = UserDefaults.standard.data(forKey: B2Credentials.keychainKey),
+                            if let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
                                let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) {
                                 settings.b2Credentials = creds
                             }
@@ -158,7 +158,7 @@ struct ExportSettingsView: View {
 
         // Enable B2 upload if credentials are configured
         if !settings.uploadToB2 && b2Enabled {
-            if let data = UserDefaults.standard.data(forKey: B2Credentials.keychainKey),
+            if let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
                let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) {
                 settings.uploadToB2 = true
                 settings.b2Credentials = creds

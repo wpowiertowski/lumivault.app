@@ -26,12 +26,12 @@ actor DeletionService {
     private let b2Service = B2Service()
 
     struct ImageDeletionInput: Sendable {
-        nonisolated let sha256: String
-        nonisolated let filename: String
-        nonisolated let par2Filename: String
-        nonisolated let b2FileId: String?
-        nonisolated let storageLocations: [StorageLocation]
-        nonisolated let albumPath: String
+        let sha256: String
+        let filename: String
+        let par2Filename: String
+        let b2FileId: String?
+        let storageLocations: [StorageLocation]
+        let albumPath: String
     }
 
     struct DeletionResult: Sendable {

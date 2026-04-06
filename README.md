@@ -99,7 +99,7 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 
 ```text
 LumiVault/
-├── App/                  App entry point, ContentView, SyncCoordinator, menu commands
+├── App/                  App entry point, ContentView, SyncCoordinator, menu commands, environment injection
 ├── Models/               Codable catalog structs, SwiftData models, B2/reconciliation types
 ├── Services/             Actor-based domain services + coordinators
 │   ├── MetalPAR2Service  GPU-accelerated PAR2 via Metal compute shaders

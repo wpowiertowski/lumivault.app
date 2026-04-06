@@ -383,6 +383,7 @@ private struct ExportStat: View {
 
 private struct NearDupeThumbnail: View {
     let sha256: String
+    @Environment(\.thumbnailService) private var thumbnailService
     @State private var thumbnail: NSImage?
 
     var body: some View {
@@ -404,8 +405,7 @@ private struct NearDupeThumbnail: View {
         .frame(width: 32, height: 32)
         .clipShape(RoundedRectangle(cornerRadius: 3))
         .task {
-            let service = ThumbnailService()
-            thumbnail = await service.thumbnail(for: sha256, size: .list)
+            thumbnail = await thumbnailService.thumbnail(for: sha256, size: .list)
         }
     }
 }

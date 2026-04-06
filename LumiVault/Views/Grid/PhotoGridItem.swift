@@ -3,6 +3,7 @@ import SwiftUI
 struct PhotoGridItem: View {
     let image: ImageRecord
     let isSelected: Bool
+    @Environment(\.thumbnailService) private var thumbnailService
     @State private var thumbnail: NSImage?
 
     var body: some View {
@@ -37,7 +38,6 @@ struct PhotoGridItem: View {
     }
 
     private func loadThumbnail() async {
-        let service = ThumbnailService()
-        thumbnail = await service.thumbnail(for: image.sha256, size: .grid)
+        thumbnail = await thumbnailService.thumbnail(for: image.sha256, size: .grid)
     }
 }

@@ -107,7 +107,7 @@ struct GeneralSettingsView: View {
     }
 
     private func restoreFromB2() {
-        guard let data = UserDefaults.standard.data(forKey: B2Credentials.keychainKey),
+        guard let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
               let credentials = try? JSONDecoder().decode(B2Credentials.self, from: data) else {
             restoreResult = RestoreResult(success: false, message: "B2 credentials not configured.")
             return

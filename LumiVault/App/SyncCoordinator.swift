@@ -51,8 +51,9 @@ final class SyncCoordinator: @unchecked Sendable {
     // MARK: - Public API
 
     func performSync() async {
-        guard let service = syncService, !isSyncing else { return }
-        isSyncing = true
+        let alreadySyncing = await MainActor.run { isSyncing }
+        guard let service = syncService, !alreadySyncing else { return }
+        await MainActor.run { isSyncing = true }
 
         await MainActor.run {
             syncStatus = .syncing
@@ -72,7 +73,7 @@ final class SyncCoordinator: @unchecked Sendable {
             }
         }
 
-        isSyncing = false
+        await MainActor.run { isSyncing = false }
     }
 
     /// Push local catalog to iCloud after a local mutation (export, delete, etc.),
@@ -146,6 +147,26 @@ final class SyncCoordinator: @unchecked Sendable {
         case file(URL)
     }
 
+    // MARK: - Catalog Mutation (for deletion flows)
+
+    /// Remove an album from the catalog and save.
+    func removeAlbumFromCatalog(name: String, year: String, month: String, day: String) async {
+        await catalogService.removeAlbum(name: name, year: year, month: month, day: day)
+        let catalogPath = await MainActor.run {
+            NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
+        }
+        try? await catalogService.save(to: URL(fileURLWithPath: catalogPath))
+    }
+
+    /// Remove a single image from a catalog album and save.
+    func removeImageFromCatalog(sha256: String, albumName: String, year: String, month: String, day: String) async {
+        await catalogService.removeImage(sha256: sha256, fromAlbum: albumName, year: year, month: month, day: day)
+        let catalogPath = await MainActor.run {
+            NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
+        }
+        try? await catalogService.save(to: URL(fileURLWithPath: catalogPath))
+    }
+
     func startMonitoring() async {
         guard let service = syncService else { return }
 
@@ -194,7 +215,7 @@ final class SyncCoordinator: @unchecked Sendable {
     }
 
     private func loadB2Credentials() -> B2Credentials? {
-        guard let data = UserDefaults.standard.data(forKey: B2Credentials.keychainKey),
+        guard let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
               let credentials = try? JSONDecoder().decode(B2Credentials.self, from: data) else { return nil }
         return credentials
     }

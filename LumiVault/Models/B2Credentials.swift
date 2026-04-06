@@ -6,7 +6,7 @@ struct B2Credentials: Codable, Sendable {
     var bucketId: String
     var bucketName: String
 
-    static let keychainKey = "b2.credentials"
+    static let defaultsKey = "b2.credentials"
 }
 
 struct B2Authorization: Codable, Sendable {
@@ -35,7 +35,7 @@ struct B2FileResponse: Codable, Sendable {
 }
 
 struct B2FileListing: Sendable {
-    nonisolated let fileId: String
-    nonisolated let fileName: String
-    nonisolated let contentLength: Int64
+    let fileId: String
+    let fileName: String
+    let contentLength: Int64
 }

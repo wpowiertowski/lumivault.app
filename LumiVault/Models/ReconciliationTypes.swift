@@ -3,17 +3,17 @@ import Foundation
 // MARK: - Sendable Snapshots (extracted from SwiftData models on MainActor)
 
 struct ImageSnapshot: Sendable {
-    nonisolated let sha256: String
-    nonisolated let filename: String
-    nonisolated let b2FileId: String?
-    nonisolated let storageLocations: [StorageLocation]
-    nonisolated let albumPath: String // "year/month/day/albumName"
+    let sha256: String
+    let filename: String
+    let b2FileId: String?
+    let storageLocations: [StorageLocation]
+    let albumPath: String // "year/month/day/albumName"
 }
 
 struct VolumeSnapshot: Sendable {
-    nonisolated let volumeID: String
-    nonisolated let label: String
-    nonisolated let mountURL: URL
+    let volumeID: String
+    let label: String
+    let mountURL: URL
 }
 
 // MARK: - Discrepancy Model
@@ -27,10 +27,10 @@ enum DiscrepancyKind: Sendable, Hashable {
 }
 
 struct Discrepancy: Sendable, Identifiable {
-    nonisolated let id: UUID
-    nonisolated let sha256: String
-    nonisolated let filename: String
-    nonisolated let kind: DiscrepancyKind
+    let id: UUID
+    let sha256: String
+    let filename: String
+    let kind: DiscrepancyKind
 
     nonisolated init(sha256: String, filename: String, kind: DiscrepancyKind) {
         self.id = UUID()
@@ -43,10 +43,10 @@ struct Discrepancy: Sendable, Identifiable {
 // MARK: - Report
 
 struct ReconciliationReport: Sendable {
-    nonisolated let discrepancies: [Discrepancy]
-    nonisolated let scannedImages: Int
-    nonisolated let scannedVolumes: Int
-    nonisolated let scannedB2Files: Int
+    let discrepancies: [Discrepancy]
+    let scannedImages: Int
+    let scannedVolumes: Int
+    let scannedB2Files: Int
 
     nonisolated init(discrepancies: [Discrepancy], scannedImages: Int, scannedVolumes: Int, scannedB2Files: Int) {
         self.discrepancies = discrepancies

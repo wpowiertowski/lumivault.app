@@ -2,10 +2,24 @@ import Foundation
 import AppKit
 import ImageIO
 import CoreImage
+import SwiftUI
 
 enum ThumbnailSize: Int, Sendable {
     case grid = 256
     case list = 64
+}
+
+// MARK: - Environment Key
+
+private struct ThumbnailServiceKey: EnvironmentKey {
+    static let defaultValue: ThumbnailService = ThumbnailService()
+}
+
+extension EnvironmentValues {
+    var thumbnailService: ThumbnailService {
+        get { self[ThumbnailServiceKey.self] }
+        set { self[ThumbnailServiceKey.self] = newValue }
+    }
 }
 
 actor ThumbnailService {

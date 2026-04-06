@@ -13,6 +13,7 @@ final class AppActivationDelegate: NSObject, NSApplicationDelegate {
 struct LumiVaultApp: App {
     let container = SwiftDataContainer.create()
     let encryptionService = EncryptionService()
+    let thumbnailService = ThumbnailService()
     @NSApplicationDelegateAdaptor(AppActivationDelegate.self) private var appDelegate
     @State private var syncCoordinator = SyncCoordinator()
 
@@ -22,6 +23,7 @@ struct LumiVaultApp: App {
                 .tint(Constants.Design.accentColor)
                 .environment(syncCoordinator)
                 .environment(\.encryptionService, encryptionService)
+                .environment(\.thumbnailService, thumbnailService)
                 .task {
                     syncCoordinator.modelContainer = container
                     await syncCoordinator.setup()
@@ -36,6 +38,7 @@ struct LumiVaultApp: App {
             SettingsView()
                 .environment(syncCoordinator)
                 .environment(\.encryptionService, encryptionService)
+                .environment(\.thumbnailService, thumbnailService)
         }
         .modelContainer(container)
     }

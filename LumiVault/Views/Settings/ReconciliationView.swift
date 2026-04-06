@@ -137,7 +137,7 @@ struct ReconciliationView: View {
 
         var b2Creds: B2Credentials?
         if b2Enabled,
-           let data = UserDefaults.standard.data(forKey: B2Credentials.keychainKey),
+           let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
            let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) {
             b2Creds = creds
         }

@@ -218,6 +218,20 @@ class ExportCoordinator {
         // 3. Hash, dedup, create records
         var imageRecords: [(record: ImageRecord, fileURL: URL, isNew: Bool)] = []
 
+        // Pre-fetch near-duplicate candidates once (instead of per-image)
+        var nearDuplicateCandidates: [(sha256: String, filename: String, hash: Data)] = []
+        if settings.detectNearDuplicates {
+            let allDescriptor = FetchDescriptor<ImageRecord>(
+                predicate: #Predicate { $0.perceptualHash != nil }
+            )
+            if let candidates = try? modelContext.fetch(allDescriptor) {
+                nearDuplicateCandidates = candidates.compactMap { candidate in
+                    guard let hash = candidate.perceptualHash else { return nil }
+                    return (candidate.sha256, candidate.filename, hash)
+                }
+            }
+        }
+
         for (index, asset) in processedAssets.enumerated() {
             try checkCancellation()
             progress.currentFile = index + 1
@@ -250,29 +264,26 @@ class ExportCoordinator {
                 if let pHash = try? PerceptualHash.compute(for: asset.fileURL) {
                     record.perceptualHash = pHash
 
-                    // Check for near-duplicates against existing library
+                    // Check for near-duplicates against pre-fetched candidates
                     if settings.detectNearDuplicates {
-                        let allDescriptor = FetchDescriptor<ImageRecord>(
-                            predicate: #Predicate { $0.perceptualHash != nil }
-                        )
-                        if let candidates = try? modelContext.fetch(allDescriptor) {
-                            for candidate in candidates {
-                                guard let candidateHash = candidate.perceptualHash else { continue }
-                                let distance = PerceptualHash.hammingDistance(pHash, candidateHash)
-                                if distance < 5 {
-                                    let match = NearDuplicateMatch(
-                                        newFilename: asset.originalFilename,
-                                        newSha256: hash,
-                                        existingFilename: candidate.filename,
-                                        existingSha256: candidate.sha256,
-                                        hammingDistance: distance
-                                    )
-                                    progress.nearDuplicates.append(match)
-                                    progress.nearDuplicatesFound += 1
-                                    break
-                                }
+                        for candidate in nearDuplicateCandidates {
+                            let distance = PerceptualHash.hammingDistance(pHash, candidate.hash)
+                            if distance < 5 {
+                                let match = NearDuplicateMatch(
+                                    newFilename: asset.originalFilename,
+                                    newSha256: hash,
+                                    existingFilename: candidate.filename,
+                                    existingSha256: candidate.sha256,
+                                    hammingDistance: distance
+                                )
+                                progress.nearDuplicates.append(match)
+                                progress.nearDuplicatesFound += 1
+                                break
                             }
                         }
+
+                        // Add this image to candidates so subsequent imports can detect intra-batch dupes
+                        nearDuplicateCandidates.append((hash, asset.originalFilename, pHash))
                     }
                 }
 

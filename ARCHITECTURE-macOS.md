@@ -58,7 +58,7 @@
           │ CatalogService          │  ← catalog.json read/write/merge/remove
           │ CatalogBackupService    │  ← distribute catalog to volumes + B2, restore
           │ PhotosImportService     │  ← PhotoKit album export
-          │ ThumbnailService        │  ← generate, cache, LRU eviction
+          │ ThumbnailService        │  ← generate, cache, LRU eviction (shared via Environment)
           │ DeduplicationService    │  ← SHA-256 + perceptual hash index
           │ RedundancyService       │  ← Reed-Solomon ECC encode/verify/repair
           │ B2Service               │  ← B2 upload/download/list/delete
@@ -500,9 +500,10 @@ in Xcode without App Store Connect setup.
 ```
 LumiVault/
 ├── App/
-│   ├── LumiVaultApp.swift               // @main, WindowGroup, scene config
+│   ├── LumiVaultApp.swift               // @main, WindowGroup, scene config, environment injection
 │   ├── ContentView.swift                // NavigationSplitView root + WelcomeView (restore)
-│   └── SyncCoordinator.swift            // App-level sync + catalog backup orchestration
+│   ├── ImportFromPhotosCommands.swift   // Menu bar command for Photos import
+│   └── SyncCoordinator.swift            // App-level sync, catalog backup, catalog mutation
 │
 ├── Models/
 │   ├── Catalog.swift                    // Codable structs mirroring catalog.json

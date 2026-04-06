@@ -98,11 +98,11 @@ actor VolumeService {
     }
 
     struct SyncImageInput: Sendable {
-        nonisolated let sha256: String
-        nonisolated let filename: String
-        nonisolated let par2Filename: String
-        nonisolated let albumPath: String // "year/month/day/albumName"
-        nonisolated let existingLocations: [StorageLocation]
+        let sha256: String
+        let filename: String
+        let par2Filename: String
+        let albumPath: String // "year/month/day/albumName"
+        let existingLocations: [StorageLocation]
     }
 
     /// Sync images to a target volume. Returns result with counts and list of

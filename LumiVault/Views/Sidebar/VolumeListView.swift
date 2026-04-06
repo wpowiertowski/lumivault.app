@@ -25,6 +25,10 @@ struct VolumeListView: View {
                 }
             }
         }
+        .task {
+            let service = VolumeService()
+            mountedVolumes = await service.discoverMountedVolumes()
+        }
     }
 
     private func isMounted(_ volume: VolumeRecord) -> Bool {

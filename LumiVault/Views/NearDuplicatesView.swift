@@ -184,6 +184,7 @@ private struct NearDuplicateGroupRow: View {
 
 private struct NearDuplicateMemberCard: View {
     let member: NearDuplicateGroup.Member
+    @Environment(\.thumbnailService) private var thumbnailService
     @State private var thumbnail: NSImage?
 
     var body: some View {
@@ -227,8 +228,7 @@ private struct NearDuplicateMemberCard: View {
         }
         .frame(width: 120)
         .task {
-            let service = ThumbnailService()
-            thumbnail = await service.thumbnail(for: member.sha256, size: .grid)
+            thumbnail = await thumbnailService.thumbnail(for: member.sha256, size: .grid)
         }
     }
 }

@@ -119,7 +119,7 @@ struct SidebarView: View {
 
         // Load B2 credentials
         var b2Credentials: B2Credentials?
-        if let data = UserDefaults.standard.data(forKey: B2Credentials.keychainKey),
+        if let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
            let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) {
             b2Credentials = creds
         }
@@ -146,13 +146,9 @@ struct SidebarView: View {
                 url.stopAccessingSecurityScopedResource()
             }
 
-            // Update catalog
+            // Update catalog via shared coordinator (avoids race with separate CatalogService)
             await MainActor.run { progress.phase = .updatingCatalog }
-            let catalogService = CatalogService()
-            let catalogPath = NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
-            try? await catalogService.load(from: URL(fileURLWithPath: catalogPath))
-            await catalogService.removeAlbum(name: albumName, year: year, month: month, day: day)
-            try? await catalogService.save(to: URL(fileURLWithPath: catalogPath))
+            await syncCoordinator.removeAlbumFromCatalog(name: albumName, year: year, month: month, day: day)
             await syncCoordinator.pushAfterLocalChange()
 
             // Remove from SwiftData (cascade deletes images)
