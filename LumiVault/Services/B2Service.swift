@@ -263,12 +263,12 @@ actor B2Service {
 
     // MARK: - Helpers
 
-    nonisolated private func sha1Hash(of data: Data) -> String {
+    nonisolated func sha1Hash(of data: Data) -> String {
         let digest = Insecure.SHA1.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    nonisolated private static func checkResponse(_ response: URLResponse, data: Data? = nil) throws {
+    nonisolated static func checkResponse(_ response: URLResponse, data: Data? = nil) throws {
         guard let http = response as? HTTPURLResponse else {
             throw B2Error.invalidResponse
         }

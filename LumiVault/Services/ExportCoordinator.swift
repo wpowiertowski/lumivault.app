@@ -554,7 +554,7 @@ class ExportCoordinator {
 
     // MARK: - Image Conversion
 
-    private func convertImage(
+    func convertImage(
         asset: ExportedAsset,
         format: ImageFormat,
         quality: Double,

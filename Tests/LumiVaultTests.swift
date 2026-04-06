@@ -1,6 +1,8 @@
 import Testing
 import Foundation
 import SwiftData
+import CryptoKit
+import AppKit
 @testable import LumiVault
 
 // MARK: - Catalog Tests
@@ -1230,5 +1232,640 @@ struct DeletionServiceTests {
             let path = root.appendingPathComponent(spec.albumPath).appendingPathComponent(spec.name)
             #expect(!fm.fileExists(atPath: path.path), "\(spec.name) should be deleted")
         }
+    }
+}
+
+// MARK: - Encryption Service Tests
+
+@Suite
+struct EncryptionServiceTests {
+    private static let testPassphrase = "lumivault-test-passphrase"
+    private static let testSalt = Data(repeating: 0x42, count: 32)
+    private static let altPassphrase = "different-passphrase"
+    private static let altSalt = Data(repeating: 0xAB, count: 32)
+
+    private func serviceWithKey() async -> EncryptionService {
+        let service = EncryptionService()
+        let (key, keyId) = service.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+        await service.setKey(key, keyId: keyId)
+        return service
+    }
+
+    @Test func deriveKeyDeterministic() {
+        let service = EncryptionService()
+        let (key1, keyId1) = service.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+        let (key2, keyId2) = service.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+
+        #expect(key1 == key2)
+        #expect(keyId1 == keyId2)
+    }
+
+    @Test func deriveKeyDifferentPassphrases() {
+        let service = EncryptionService()
+        let (key1, keyId1) = service.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+        let (key2, keyId2) = service.deriveKey(passphrase: Self.altPassphrase, salt: Self.testSalt)
+
+        #expect(key1 != key2)
+        #expect(keyId1 != keyId2)
+    }
+
+    @Test func deriveKeyDifferentSalts() {
+        let service = EncryptionService()
+        let (key1, keyId1) = service.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+        let (key2, keyId2) = service.deriveKey(passphrase: Self.testPassphrase, salt: Self.altSalt)
+
+        #expect(key1 != key2)
+        #expect(keyId1 != keyId2)
+    }
+
+    @Test func deriveKeyIdFormat() {
+        let service = EncryptionService()
+        let (_, keyId) = service.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+
+        #expect(keyId.count == 16)
+        #expect(keyId.allSatisfy { $0.isHexDigit })
+    }
+
+    @Test func setKeyAndClearKey() async {
+        let service = EncryptionService()
+        let (key, keyId) = service.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+
+        await service.setKey(key, keyId: keyId)
+        #expect(await service.isKeyAvailable == true)
+        #expect(await service.cachedKeyId == keyId)
+
+        await service.clearKey()
+        #expect(await service.isKeyAvailable == false)
+        #expect(await service.cachedKeyId == nil)
+    }
+
+    @Test func encryptDecryptRoundTripData() async throws {
+        let service = await serviceWithKey()
+        let plaintext = Data("LumiVault encryption test payload".utf8)
+
+        let (ciphertext, nonce) = try await service.encrypt(data: plaintext)
+        #expect(ciphertext != plaintext)
+
+        let decrypted = try await service.decrypt(ciphertext: ciphertext, nonce: Data(nonce))
+        #expect(decrypted == plaintext)
+    }
+
+    @Test func encryptDecryptWithAssociatedData() async throws {
+        let service = await serviceWithKey()
+        let plaintext = Data("payload with AD".utf8)
+        let ad = Data("associated-context".utf8)
+
+        let (ciphertext, nonce) = try await service.encrypt(data: plaintext, associatedData: ad)
+        let decrypted = try await service.decrypt(ciphertext: ciphertext, nonce: Data(nonce), associatedData: ad)
+        #expect(decrypted == plaintext)
+    }
+
+    @Test func decryptWithWrongKeyFails() async throws {
+        let service = await serviceWithKey()
+        let plaintext = Data("secret data".utf8)
+
+        let (ciphertext, nonce) = try await service.encrypt(data: plaintext)
+
+        // Switch to a different key
+        let (altKey, altKeyId) = service.deriveKey(passphrase: Self.altPassphrase, salt: Self.altSalt)
+        await service.setKey(altKey, keyId: altKeyId)
+
+        do {
+            _ = try await service.decrypt(ciphertext: ciphertext, nonce: Data(nonce))
+            Issue.record("Expected decryption to throw with wrong key")
+        } catch {
+            // Expected — CryptoKit throws on authentication failure
+        }
+    }
+
+    @Test func decryptWithWrongAssociatedDataFails() async throws {
+        let service = await serviceWithKey()
+        let plaintext = Data("payload".utf8)
+        let correctAD = Data("correct".utf8)
+        let wrongAD = Data("wrong".utf8)
+
+        let (ciphertext, nonce) = try await service.encrypt(data: plaintext, associatedData: correctAD)
+
+        do {
+            _ = try await service.decrypt(ciphertext: ciphertext, nonce: Data(nonce), associatedData: wrongAD)
+            Issue.record("Expected decryption to throw with wrong associated data")
+        } catch {
+            // Expected — GCM authentication fails
+        }
+    }
+
+    @Test func encryptProducesUniqueNonces() async throws {
+        let service = await serviceWithKey()
+        let plaintext = Data("same content".utf8)
+
+        var nonces = Set<Data>()
+        for _ in 0..<50 {
+            let (_, nonce) = try await service.encrypt(data: plaintext)
+            nonces.insert(Data(nonce))
+        }
+        #expect(nonces.count == 50)
+    }
+
+    @Test func encryptWithNoKeyThrows() async {
+        let service = EncryptionService()
+        do {
+            _ = try await service.encrypt(data: Data("test".utf8))
+            Issue.record("Expected EncryptionError.noKey")
+        } catch {
+            #expect(error is EncryptionService.EncryptionError)
+        }
+    }
+
+    @Test func encryptFileDecryptFileRoundTrip() async throws {
+        let service = await serviceWithKey()
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-enc-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let plaintext = Data("File-level encryption test content for LumiVault".utf8)
+        let sha256 = SHA256.hash(data: plaintext).map { String(format: "%02x", $0) }.joined()
+
+        let sourceURL = tmpDir.appendingPathComponent("source.bin")
+        let encryptedURL = tmpDir.appendingPathComponent("encrypted.bin")
+        let decryptedURL = tmpDir.appendingPathComponent("decrypted.bin")
+
+        try plaintext.write(to: sourceURL)
+
+        let (nonce, encryptedSize) = try await service.encryptFile(at: sourceURL, to: encryptedURL, sha256: sha256)
+        #expect(encryptedSize > 0)
+        #expect(fm.fileExists(atPath: encryptedURL.path))
+
+        try await service.decryptFile(at: encryptedURL, to: decryptedURL, nonce: nonce, sha256: sha256)
+        let recovered = try Data(contentsOf: decryptedURL)
+        #expect(recovered == plaintext)
+    }
+
+    @Test func encryptFileWithKeyStaticRoundTrip() async throws {
+        let service = EncryptionService()
+        let (key, keyId) = service.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+        await service.setKey(key, keyId: keyId)
+
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-encstatic-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let plaintext = Data("Static encryption method test".utf8)
+        let sha256 = SHA256.hash(data: plaintext).map { String(format: "%02x", $0) }.joined()
+
+        let sourceURL = tmpDir.appendingPathComponent("source.bin")
+        let encryptedURL = tmpDir.appendingPathComponent("encrypted.bin")
+        let decryptedURL = tmpDir.appendingPathComponent("decrypted.bin")
+
+        try plaintext.write(to: sourceURL)
+
+        let (nonce, _) = try EncryptionService.encryptFileWithKey(at: sourceURL, to: encryptedURL, sha256: sha256, key: key)
+
+        // Decrypt with the instance method (proves interoperability)
+        try await service.decryptFile(at: encryptedURL, to: decryptedURL, nonce: nonce, sha256: sha256)
+        let recovered = try Data(contentsOf: decryptedURL)
+        #expect(recovered == plaintext)
+    }
+
+    @Test func decryptDataInMemory() async throws {
+        let service = await serviceWithKey()
+        let plaintext = Data("In-memory decryption test".utf8)
+        let sha256 = SHA256.hash(data: plaintext).map { String(format: "%02x", $0) }.joined()
+
+        let (ciphertext, nonce) = try await service.encrypt(data: plaintext, associatedData: Data(sha256.utf8))
+        let recovered = try await service.decryptData(ciphertext, nonce: Data(nonce), sha256: sha256)
+        #expect(recovered == plaintext)
+    }
+}
+
+// MARK: - B2 Service Helper Tests
+
+@Suite
+struct B2ServiceHelperTests {
+    @Test func sha1HashKnownValue() async {
+        let service = B2Service()
+        let hash = await service.sha1Hash(of: Data("hello".utf8))
+        #expect(hash == "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d")
+    }
+
+    @Test func sha1HashEmptyData() async {
+        let service = B2Service()
+        let hash = await service.sha1Hash(of: Data())
+        #expect(hash == "da39a3ee5e6b4b0d3255bfef95601890afd80709")
+    }
+
+    @Test func sha1HashFixtureContent() async {
+        let service = B2Service()
+        let content = Data("LumiVault B2 test fixture".utf8)
+        let hash = await service.sha1Hash(of: content)
+        #expect(hash.count == 40)
+        #expect(hash.allSatisfy { $0.isHexDigit })
+    }
+
+    @Test func checkResponseSuccess200() throws {
+        let url = URL(string: "https://api.example.com")!
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        try B2Service.checkResponse(response, data: nil)
+    }
+
+    @Test func checkResponseSuccess299() throws {
+        let url = URL(string: "https://api.example.com")!
+        let response = HTTPURLResponse(url: url, statusCode: 299, httpVersion: nil, headerFields: nil)!
+        try B2Service.checkResponse(response, data: nil)
+    }
+
+    @Test func checkResponseError401() {
+        let url = URL(string: "https://api.example.com")!
+        let response = HTTPURLResponse(url: url, statusCode: 401, httpVersion: nil, headerFields: nil)!
+        let body = try? JSONSerialization.data(withJSONObject: ["message": "Unauthorized"])
+
+        do {
+            try B2Service.checkResponse(response, data: body)
+            Issue.record("Expected B2Error.httpError")
+        } catch let error as B2Service.B2Error {
+            if case .httpError(let code, let message) = error {
+                #expect(code == 401)
+                #expect(message == "Unauthorized")
+            } else {
+                Issue.record("Expected httpError, got \(error)")
+            }
+        } catch {
+            Issue.record("Unexpected error type: \(error)")
+        }
+    }
+
+    @Test func checkResponseError500NoBody() {
+        let url = URL(string: "https://api.example.com")!
+        let response = HTTPURLResponse(url: url, statusCode: 500, httpVersion: nil, headerFields: nil)!
+
+        do {
+            try B2Service.checkResponse(response, data: nil)
+            Issue.record("Expected B2Error.httpError")
+        } catch let error as B2Service.B2Error {
+            if case .httpError(let code, let message) = error {
+                #expect(code == 500)
+                #expect(message == nil)
+            } else {
+                Issue.record("Expected httpError, got \(error)")
+            }
+        } catch {
+            Issue.record("Unexpected error type: \(error)")
+        }
+    }
+}
+
+// MARK: - Export Progress Tests
+
+@Suite @MainActor
+struct ExportProgressTests {
+    @Test func fractionZeroWhenEmpty() {
+        let progress = ExportProgress()
+        progress.totalFiles = 0
+        #expect(progress.fraction == 0)
+    }
+
+    @Test func fractionReflectsProgress() {
+        let progress = ExportProgress()
+        progress.activePhases = [.hashing, .par2, .cataloging]
+        progress.totalFiles = 10
+        progress.phase = .hashing
+        progress.currentFile = 5
+
+        // Phase 0 of 3 → base = 0, phaseFraction = 5/10 = 0.5, weight = 1/3
+        let expected = 0.0 + 0.5 * (1.0 / 3.0)
+        #expect(abs(progress.fraction - expected) < 0.001)
+    }
+
+    @Test func fractionOneWhenComplete() {
+        let progress = ExportProgress()
+        progress.activePhases = [.hashing, .cataloging]
+        progress.totalFiles = 5
+        progress.phase = .complete
+
+        #expect(progress.fraction == 1.0)
+    }
+
+    @Test func fractionWithPAR2SubProgress() {
+        let progress = ExportProgress()
+        progress.activePhases = [.par2, .cataloging]
+        progress.totalFiles = 4
+        progress.phase = .par2
+        progress.currentFile = 2 // Processing file 2 (1 complete, 1 in progress)
+        progress.par2FileFraction = 0.5
+
+        // Phase 0 of 2 → base = 0, weight = 0.5
+        // PAR2 formula: fileFraction = max(2-1,0)/4 = 0.25, subFraction = 0.5/4 = 0.125
+        // phaseFraction = 0.25 + 0.125 = 0.375
+        let expected = 0.0 + 0.375 * 0.5
+        #expect(abs(progress.fraction - expected) < 0.001)
+    }
+
+    @Test func fractionWithSinglePhase() {
+        let progress = ExportProgress()
+        progress.activePhases = [.hashing]
+        progress.totalFiles = 4
+        progress.phase = .hashing
+        progress.currentFile = 2
+
+        // Phase 0 of 1 → base = 0, weight = 1.0, phaseFraction = 2/4 = 0.5
+        #expect(abs(progress.fraction - 0.5) < 0.001)
+    }
+}
+
+// MARK: - Catalog Backup Service Tests
+
+@Suite @MainActor
+struct CatalogBackupServiceTests {
+    @Test func backupToVolumeWritesCatalogJSON() async throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-backup-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let catalog = TestFixtures.catalog()
+        let service = CatalogBackupService()
+        let volume = CatalogBackupService.VolumeSnapshot(volumeID: "vol-test", label: "TestVol", mountURL: tmpDir)
+
+        let errors = await service.backupToVolumes(catalog: catalog, volumes: [volume])
+        #expect(errors.isEmpty)
+
+        let catalogURL = tmpDir.appendingPathComponent("catalog.json")
+        #expect(fm.fileExists(atPath: catalogURL.path))
+
+        // Decode and verify
+        let data = try Data(contentsOf: catalogURL)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let restored = try decoder.decode(Catalog.self, from: data)
+        #expect(restored.version == catalog.version)
+
+        // Count total images
+        let originalCount = catalog.years.values.flatMap { $0.months.values }.flatMap { $0.days.values }.flatMap { $0.albums.values }.flatMap { $0.images }.count
+        let restoredCount = restored.years.values.flatMap { $0.months.values }.flatMap { $0.days.values }.flatMap { $0.albums.values }.flatMap { $0.images }.count
+        #expect(restoredCount == originalCount)
+    }
+
+    @Test func backupToVolumeReportsErrorForBadPath() async {
+        let service = CatalogBackupService()
+        let catalog = TestFixtures.catalog()
+        let badURL = URL(fileURLWithPath: "/nonexistent/path/\(UUID().uuidString)")
+        let volume = CatalogBackupService.VolumeSnapshot(volumeID: "vol-bad", label: "BadVol", mountURL: badURL)
+
+        let errors = await service.backupToVolumes(catalog: catalog, volumes: [volume])
+        #expect(!errors.isEmpty)
+    }
+
+    @Test func backupSkipsVolumeWithNilMountURL() async {
+        let service = CatalogBackupService()
+        let catalog = TestFixtures.catalog()
+        let volume = CatalogBackupService.VolumeSnapshot(volumeID: "vol-nil", label: "NilVol", mountURL: nil)
+
+        let errors = await service.backupToVolumes(catalog: catalog, volumes: [volume])
+        #expect(errors.isEmpty) // Should skip gracefully, not error
+    }
+
+    @Test func restoreFromFileRoundTrip() async throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-restore-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let catalog = TestFixtures.catalog()
+
+        // Write catalog to file
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(catalog)
+        let fileURL = tmpDir.appendingPathComponent("catalog.json")
+        try data.write(to: fileURL)
+
+        let service = CatalogBackupService()
+        let restored = try await service.restoreFromFile(url: fileURL)
+
+        #expect(restored.version == catalog.version)
+        let originalHashes = Set(catalog.years.values.flatMap { $0.months.values }.flatMap { $0.days.values }.flatMap { $0.albums.values }.flatMap { $0.images }.map(\.sha256))
+        let restoredHashes = Set(restored.years.values.flatMap { $0.months.values }.flatMap { $0.days.values }.flatMap { $0.albums.values }.flatMap { $0.images }.map(\.sha256))
+        #expect(originalHashes == restoredHashes)
+    }
+
+    @Test func restoreFromVolumeThrowsWhenMissing() async {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-norestore-\(UUID().uuidString)")
+        try? fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let service = CatalogBackupService()
+        do {
+            _ = try await service.restoreFromVolume(volumeURL: tmpDir)
+            Issue.record("Expected RestoreError.catalogNotFound")
+        } catch {
+            #expect(error is CatalogBackupService.RestoreError)
+        }
+    }
+}
+
+// MARK: - Deduplication Service Tests
+
+@Suite @MainActor
+struct DeduplicationServiceTests {
+    private func makeContainer() throws -> ModelContainer {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        return try ModelContainer(
+            for: ImageRecord.self, AlbumRecord.self, VolumeRecord.self,
+            configurations: config
+        )
+    }
+
+    @Test func checkExactMatchReturnsExactMatch() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let fm = FileManager.default
+
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-dedup-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        // Create a tiny valid JPEG
+        let jpegURL = tmpDir.appendingPathComponent("test.jpg")
+        try TestFixtures.createTinyJPEG(at: jpegURL, width: 8, height: 8)
+
+        // Hash it to get the real SHA-256
+        let hasher = HasherService()
+        let (hash, size) = try await hasher.sha256AndSize(of: jpegURL)
+
+        // Insert matching record
+        let record = ImageRecord(sha256: hash, filename: "test.jpg", sizeBytes: size)
+        context.insert(record)
+        try context.save()
+
+        let service = DeduplicationService()
+        let (result, returnedHash, returnedSize) = try await service.check(fileURL: jpegURL, in: context)
+
+        #expect(returnedHash == hash)
+        #expect(returnedSize == size)
+        if case .exactMatch = result {} else {
+            Issue.record("Expected .exactMatch, got \(result)")
+        }
+    }
+
+    @Test func checkUniqueFileReturnsUnique() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let fm = FileManager.default
+
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-dedup-unique-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let jpegURL = tmpDir.appendingPathComponent("unique.jpg")
+        try TestFixtures.createTinyJPEG(at: jpegURL, width: 8, height: 8)
+
+        let service = DeduplicationService()
+        let (result, hash, size) = try await service.check(fileURL: jpegURL, in: context)
+
+        #expect(!hash.isEmpty)
+        #expect(size > 0)
+        if case .unique = result {} else {
+            Issue.record("Expected .unique, got \(result)")
+        }
+    }
+
+    @Test func checkReturnsSHA256AndSize() async throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let fm = FileManager.default
+
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-dedup-hash-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let jpegURL = tmpDir.appendingPathComponent("hashcheck.jpg")
+        try TestFixtures.createTinyJPEG(at: jpegURL, width: 8, height: 8)
+
+        // Independently compute hash
+        let hasher = HasherService()
+        let (expectedHash, expectedSize) = try await hasher.sha256AndSize(of: jpegURL)
+
+        let service = DeduplicationService()
+        let (_, hash, size) = try await service.check(fileURL: jpegURL, in: context)
+
+        #expect(hash == expectedHash)
+        #expect(size == expectedSize)
+    }
+}
+
+// MARK: - Image Conversion Tests
+
+@Suite @MainActor
+struct ImageConversionTests {
+    @Test func convertToJPEGChangesExtension() async throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-conv-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let sourceURL = tmpDir.appendingPathComponent("photo.heic")
+        try TestFixtures.createTinyJPEG(at: sourceURL, width: 100, height: 100)
+
+        let staging = tmpDir.appendingPathComponent("staging", isDirectory: true)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        let asset = ExportedAsset(fileURL: sourceURL, originalFilename: "photo.heic", creationDate: nil)
+        let coordinator = ExportCoordinator(catalogService: CatalogService(), encryptionService: EncryptionService())
+        let result = await coordinator.convertImage(asset: asset, format: ImageFormat.jpeg, quality: 0.85, maxDimension: MaxDimension.original, staging: staging)
+
+        #expect(result.fileURL.pathExtension == "jpg")
+    }
+
+    @Test func convertToJPEGProducesValidImage() async throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-conv-valid-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let sourceURL = tmpDir.appendingPathComponent("photo.png")
+        try TestFixtures.createTinyJPEG(at: sourceURL, width: 200, height: 150)
+
+        let staging = tmpDir.appendingPathComponent("staging", isDirectory: true)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        let asset = ExportedAsset(fileURL: sourceURL, originalFilename: "photo.png", creationDate: nil)
+        let coordinator = ExportCoordinator(catalogService: CatalogService(), encryptionService: EncryptionService())
+        let result = await coordinator.convertImage(asset: asset, format: ImageFormat.jpeg, quality: 0.85, maxDimension: MaxDimension.original, staging: staging)
+
+        let image = NSImage(contentsOf: result.fileURL)
+        #expect(image != nil)
+        #expect(image!.representations.first!.pixelsWide > 0)
+        #expect(image!.representations.first!.pixelsHigh > 0)
+    }
+
+    @Test func convertWithMaxDimensionScalesDown() async throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-conv-scale-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let sourceURL = tmpDir.appendingPathComponent("large.png")
+        try TestFixtures.createTinyJPEG(at: sourceURL, width: 200, height: 100)
+
+        let staging = tmpDir.appendingPathComponent("staging", isDirectory: true)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        let asset = ExportedAsset(fileURL: sourceURL, originalFilename: "large.png", creationDate: nil)
+        let coordinator = ExportCoordinator(catalogService: CatalogService(), encryptionService: EncryptionService())
+        let result = await coordinator.convertImage(asset: asset, format: ImageFormat.jpeg, quality: 0.85, maxDimension: MaxDimension.capped(50), staging: staging)
+
+        let image = NSImage(contentsOf: result.fileURL)
+        #expect(image != nil)
+        let rep = image!.representations.first!
+        // Longest edge (200) scaled to 50 → scale = 0.25 → 50x25
+        #expect(rep.pixelsWide <= 50)
+        #expect(rep.pixelsHigh <= 25)
+    }
+
+    @Test func convertOriginalFormatReturnsUnchanged() async throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-conv-noop-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let sourceURL = tmpDir.appendingPathComponent("photo.heic")
+        try TestFixtures.createTinyJPEG(at: sourceURL, width: 50, height: 50)
+
+        let staging = tmpDir.appendingPathComponent("staging", isDirectory: true)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        let asset = ExportedAsset(fileURL: sourceURL, originalFilename: "photo.heic", creationDate: nil)
+        let coordinator = ExportCoordinator(catalogService: CatalogService(), encryptionService: EncryptionService())
+        let result = await coordinator.convertImage(asset: asset, format: ImageFormat.original, quality: 0.85, maxDimension: MaxDimension.original, staging: staging)
+
+        // No conversion needed — same URL returned
+        #expect(result.fileURL == sourceURL)
+    }
+
+    @Test func convertPreservesWhenBelowMax() async throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-conv-small-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let sourceURL = tmpDir.appendingPathComponent("small.png")
+        try TestFixtures.createTinyJPEG(at: sourceURL, width: 50, height: 50)
+
+        let staging = tmpDir.appendingPathComponent("staging", isDirectory: true)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        let asset = ExportedAsset(fileURL: sourceURL, originalFilename: "small.png", creationDate: nil)
+        let coordinator = ExportCoordinator(catalogService: CatalogService(), encryptionService: EncryptionService())
+        let result = await coordinator.convertImage(asset: asset, format: ImageFormat.jpeg, quality: 0.85, maxDimension: MaxDimension.capped(200), staging: staging)
+
+        let image = NSImage(contentsOf: result.fileURL)
+        #expect(image != nil)
+        let rep = image!.representations.first!
+        // 50x50 is below 200 cap — should remain 50x50
+        #expect(rep.pixelsWide == 50)
+        #expect(rep.pixelsHigh == 50)
     }
 }

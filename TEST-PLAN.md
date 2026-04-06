@@ -2,7 +2,7 @@
 
 ## Existing Automated Test Assessment
 
-### Summary: 59 tests across 12 suites
+### Summary: 98 tests across 18 suites
 
 | Rating | Suite | Tests | Assessment |
 |--------|-------|-------|------------|
@@ -27,16 +27,17 @@ IntegrityServiceTests duplicates fixture materialization inline instead of using
 
 ### Critical Gaps in Automated Coverage
 
-| Gap | Risk | Why It Matters |
-|-----|------|----------------|
-| B2Service (network layer) | High | Upload, download, list, delete — all untested. A regression here means silent cloud backup failure. |
-| ExportCoordinator (pipeline) | High | Orchestrates hash, encrypt, PAR2, copy, upload. Cancellation, error recovery, and near-dupe detection are all untested. |
-| EncryptionService | High | AES-256-GCM + PBKDF2 key derivation. Encrypt/decrypt round-trip is untested — a regression silently produces unrecoverable archives. |
-| SyncService / SyncCoordinator | Medium | iCloud push/pull merge, `isSyncing` race guard, and deletion routing — all untested. |
-| CatalogBackupService | Medium | Distribute to volumes + B2, restore from any source. If backup silently fails, the user loses their only catalog copy. |
-| ThumbnailService | Low | Cache hit/miss, HEIC/RAW rendering. Visual defects caught by humans faster than unit tests. |
-| PhotosImportService | Low | Requires Photos.app sandbox — hard to unit test, better as manual QA. |
-| Image conversion (JPEG export) | Medium | Quality, max-dimension scaling, format detection — untested. |
+| Gap | Risk | Status |
+|-----|------|--------|
+| EncryptionService | High | **Covered** — 14 tests: key derivation, encrypt/decrypt round-trip, wrong key/AD rejection, nonce uniqueness, file-level operations |
+| B2Service (network layer) | High | **Partially covered** — 7 tests on pure helpers (SHA-1, HTTP response validation). Network methods require URLSession abstraction; covered by manual QA. |
+| ExportCoordinator (pipeline) | High | **Partially covered** — 5 tests on image conversion (JPEG, scaling, pass-through). Full pipeline orchestration requires service mocking; covered by manual QA. |
+| CatalogBackupService | Medium | **Covered** — 5 tests: volume backup/restore round-trip, error reporting, missing catalog handling |
+| DeduplicationService | Medium | **Covered** — 3 tests: unique detection, exact match, SHA-256 + size verification |
+| ExportProgress | Medium | **Covered** — 5 tests: fraction calculation across phases, PAR2 sub-progress, edge cases |
+| SyncService / SyncCoordinator | Medium | Not testable without iCloud provisioning. Catalog merge logic covered by CatalogServiceMergeTests. |
+| ThumbnailService | Low | Not tested — visual correctness validated by manual QA. |
+| PhotosImportService | Low | Not testable — requires Photos.app sandbox entitlement. Covered by manual QA. |
 
 ---
 
