@@ -177,7 +177,7 @@ enum TestFixtures {
 
     /// Creates a minimal valid JPEG file at the given URL with the specified dimensions.
     /// Uses NSBitmapImageRep to produce a real image file that Core Image and ImageIO can read.
-    static func createTinyJPEG(at url: URL, width: Int = 8, height: Int = 8) throws {
+    nonisolated static func createTinyJPEG(at url: URL, width: Int = 8, height: Int = 8) throws {
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil,
             pixelsWide: width,
@@ -199,6 +199,43 @@ enum TestFixtures {
                 let r = CGFloat(x) / CGFloat(max(width - 1, 1))
                 let g = CGFloat(y) / CGFloat(max(height - 1, 1))
                 let color = NSColor(red: r, green: g, blue: 0.5, alpha: 1.0)
+                rep.setColor(color, atX: x, y: y)
+            }
+        }
+
+        guard let data = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.9]) else {
+            throw NSError(domain: "TestFixtures", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to encode JPEG"])
+        }
+        try data.write(to: url)
+    }
+
+    /// Creates a visually distinct JPEG (checkerboard pattern) for perceptual hash difference tests.
+    /// The checkerboard has alternating bright/dark blocks, producing a very different dHash
+    /// from the smooth gradient in createTinyJPEG.
+    nonisolated static func createContrastJPEG(at url: URL, width: Int = 8, height: Int = 8) throws {
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: width,
+            pixelsHigh: height,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            throw NSError(domain: "TestFixtures", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to create bitmap"])
+        }
+
+        // Checkerboard with large blocks — adjacent pixels alternate bright/dark,
+        // producing a fundamentally different dHash from a smooth gradient
+        let blockSize = max(width / 4, 1)
+        for y in 0..<height {
+            for x in 0..<width {
+                let isLight = ((x / blockSize) + (y / blockSize)) % 2 == 0
+                let v: CGFloat = isLight ? 1.0 : 0.0
+                let color = NSColor(red: v, green: v, blue: v, alpha: 1.0)
                 rep.setColor(color, atX: x, y: y)
             }
         }

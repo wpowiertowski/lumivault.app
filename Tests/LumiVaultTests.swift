@@ -1869,3 +1869,370 @@ struct ImageConversionTests {
         #expect(rep.pixelsHigh == 50)
     }
 }
+
+// MARK: - Perceptual Hash Compute Tests
+
+@Suite
+struct PerceptualHashComputeTests {
+    @Test func computeReturnsEightBytes() throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-phash-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let url = tmpDir.appendingPathComponent("test.jpg")
+        try TestFixtures.createTinyJPEG(at: url, width: 32, height: 32)
+
+        let hash = try PerceptualHash.compute(for: url)
+        #expect(hash.count == 8)
+    }
+
+    @Test func computeIsDeterministic() throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-phash-det-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let url = tmpDir.appendingPathComponent("test.jpg")
+        try TestFixtures.createTinyJPEG(at: url, width: 32, height: 32)
+
+        let hash1 = try PerceptualHash.compute(for: url)
+        let hash2 = try PerceptualHash.compute(for: url)
+        #expect(hash1 == hash2)
+    }
+
+    @Test func computeThrowsForNonImageFile() {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-phash-bad-\(UUID().uuidString)")
+        try? fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let url = tmpDir.appendingPathComponent("notanimage.bin")
+        try? Data("this is not an image".utf8).write(to: url)
+
+        do {
+            _ = try PerceptualHash.compute(for: url)
+            Issue.record("Expected PerceptualHashError.unreadable")
+        } catch {
+            // Expected — CIImage cannot read non-image data
+        }
+    }
+}
+
+// MARK: - Volume Sync Additional Tests
+
+@Suite @MainActor
+struct VolumeSyncAdditionalTests {
+    /// Sync a subset of fixtures (single album) from volume A to volume B.
+    @Test func syncSingleAlbumFromVolumeAToVolumeB() async throws {
+        let hasher = HasherService()
+        let volumeService = VolumeService()
+        let fm = FileManager.default
+
+        let volA = try TestFixtures.materializeVolume(label: "sync-album-A")
+        let volB = fm.temporaryDirectory.appendingPathComponent("lumivault-sync-album-B-\(UUID().uuidString)")
+        try fm.createDirectory(at: volB, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: volA); try? fm.removeItem(at: volB) }
+
+        // Only sync Vacation album (3 files)
+        let vacationSpecs = TestFixtures.files(inAlbum: "Vacation")
+        let inputs = vacationSpecs.map { spec in
+            VolumeService.SyncImageInput(
+                sha256: spec.sha256,
+                filename: spec.name,
+                par2Filename: spec.par2Name,
+                albumPath: spec.albumPath,
+                existingLocations: [StorageLocation(volumeID: "vol-a", relativePath: "\(spec.albumPath)/\(spec.name)")]
+            )
+        }
+
+        let (result, newLocations) = await volumeService.syncToVolume(
+            images: inputs,
+            targetVolumeURL: volB,
+            targetVolumeID: "vol-b",
+            sourceVolumes: [("vol-a", volA)]
+        )
+
+        #expect(result.copied == vacationSpecs.count)
+        #expect(result.errors.isEmpty)
+        #expect(newLocations.count == vacationSpecs.count)
+
+        for spec in vacationSpecs {
+            let destURL = volB.appendingPathComponent(spec.albumPath).appendingPathComponent(spec.name)
+            #expect(fm.fileExists(atPath: destURL.path))
+            let hash = try await hasher.sha256(of: destURL)
+            #expect(hash == spec.sha256)
+        }
+    }
+
+    /// Sync with a mix of existing and new files — partial dedup.
+    @Test func syncPartiallyExistingFiles() async throws {
+        let volumeService = VolumeService()
+        let fm = FileManager.default
+
+        let volA = try TestFixtures.materializeVolume(label: "sync-partial-A")
+        let volB = fm.temporaryDirectory.appendingPathComponent("lumivault-sync-partial-B-\(UUID().uuidString)")
+        try fm.createDirectory(at: volB, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: volA); try? fm.removeItem(at: volB) }
+
+        // Pre-place first 3 files on volume B
+        let preplacedSpecs = Array(TestFixtures.files.prefix(3))
+        for spec in preplacedSpecs {
+            let dir = volB.appendingPathComponent(spec.albumPath, isDirectory: true)
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            try TestFixtures.content(for: spec).write(to: dir.appendingPathComponent(spec.name))
+        }
+
+        let inputs = TestFixtures.syncInputs(onVolume: "vol-a")
+        let (result, newLocations) = await volumeService.syncToVolume(
+            images: inputs,
+            targetVolumeURL: volB,
+            targetVolumeID: "vol-b",
+            sourceVolumes: [("vol-a", volA)]
+        )
+
+        #expect(result.deduplicated == 3, "3 pre-existing files should be deduplicated")
+        #expect(result.copied == TestFixtures.files.count - 3, "Remaining files should be copied")
+        #expect(result.errors.isEmpty)
+        #expect(newLocations.count == TestFixtures.files.count)
+    }
+
+    /// Sync with target already tracked in existingLocations — all deduplicated without hash check.
+    @Test func syncAllAlreadyTracked() async {
+        let volumeService = VolumeService()
+        let fm = FileManager.default
+
+        let volB = fm.temporaryDirectory.appendingPathComponent("lumivault-sync-tracked-\(UUID().uuidString)")
+        try? fm.createDirectory(at: volB, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: volB) }
+
+        // Create inputs where vol-b is already in existingLocations
+        let inputs = TestFixtures.files.map { spec in
+            VolumeService.SyncImageInput(
+                sha256: spec.sha256,
+                filename: spec.name,
+                par2Filename: spec.par2Name,
+                albumPath: spec.albumPath,
+                existingLocations: [
+                    StorageLocation(volumeID: "vol-a", relativePath: "\(spec.albumPath)/\(spec.name)"),
+                    StorageLocation(volumeID: "vol-b", relativePath: "\(spec.albumPath)/\(spec.name)")
+                ]
+            )
+        }
+
+        let (result, newLocations) = await volumeService.syncToVolume(
+            images: inputs,
+            targetVolumeURL: volB,
+            targetVolumeID: "vol-b",
+            sourceVolumes: []
+        )
+
+        #expect(result.deduplicated == TestFixtures.files.count)
+        #expect(result.copied == 0)
+        #expect(result.skipped == 0)
+        #expect(newLocations.isEmpty, "Already-tracked files should not produce new locations")
+    }
+}
+
+// MARK: - Encrypt → PAR2 → Decrypt Integration Tests
+
+@Suite
+struct EncryptPAR2IntegrationTests {
+    private static let testPassphrase = "integration-test-key"
+    private static let testSalt = Data(repeating: 0x77, count: 32)
+
+    @Test func encryptPAR2RepairDecryptRoundTrip() async throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-enc-par2-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        // Step 1: Write original file
+        let plaintext = Data((0..<2048).map { UInt8(($0 * 37 + 13) % 256) })
+        let originalURL = tmpDir.appendingPathComponent("original.bin")
+        try plaintext.write(to: originalURL)
+
+        let hasher = HasherService()
+        let (sha256, _) = try await hasher.sha256AndSize(of: originalURL)
+
+        // Step 2: Encrypt
+        let encryptionService = EncryptionService()
+        let (key, keyId) = encryptionService.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+        await encryptionService.setKey(key, keyId: keyId)
+
+        let encryptedURL = tmpDir.appendingPathComponent("encrypted.bin")
+        let (nonce, _) = try await encryptionService.encryptFile(at: originalURL, to: encryptedURL, sha256: sha256)
+
+        // Step 3: Generate PAR2 on the encrypted file
+        let redundancy = RedundancyService()
+        let par2URL = try await redundancy.generatePAR2(for: encryptedURL, outputDirectory: tmpDir)
+
+        // Step 4: Corrupt the encrypted file (flip bytes in the middle)
+        var encryptedData = try Data(contentsOf: encryptedURL)
+        let corruptStart = encryptedData.count / 3
+        for i in corruptStart..<min(corruptStart + 50, encryptedData.count - 16) {
+            encryptedData[i] ^= 0xFF
+        }
+        try encryptedData.write(to: encryptedURL)
+
+        // Step 5: Verify corruption is present (hash differs from pre-corruption)
+        let corruptedHash = try await hasher.sha256(of: encryptedURL)
+        let preCorruptionHash = try await hasher.sha256(of: encryptedURL) // Will match corrupted since we overwrote
+        // Just verify the file was actually changed by checking decryption fails
+        do {
+            let tmpDec = tmpDir.appendingPathComponent("should-fail.bin")
+            try await encryptionService.decryptFile(at: encryptedURL, to: tmpDec, nonce: nonce, sha256: sha256)
+            Issue.record("Decryption should fail on corrupted ciphertext")
+        } catch {
+            // Expected — corrupted ciphertext fails GCM authentication
+        }
+
+        // Step 6: Repair using PAR2
+        let repairedData = try await redundancy.repair(par2URL: par2URL, corruptedFileURL: encryptedURL)
+        #expect(repairedData != nil, "PAR2 should repair the encrypted file")
+
+        // Write repaired data back
+        try repairedData!.write(to: encryptedURL)
+
+        // Step 7: Decrypt the repaired file
+        let decryptedURL = tmpDir.appendingPathComponent("decrypted.bin")
+        try await encryptionService.decryptFile(at: encryptedURL, to: decryptedURL, nonce: nonce, sha256: sha256)
+
+        // Step 8: Verify decrypted content matches original
+        let recovered = try Data(contentsOf: decryptedURL)
+        #expect(recovered == plaintext, "Decrypted content should match original after PAR2 repair")
+    }
+
+    @Test func encryptedFilePassesPAR2VerificationWhenUncorrupted() async throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-enc-par2-ok-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let plaintext = Data((0..<1024).map { UInt8(($0 * 53 + 7) % 256) })
+        let originalURL = tmpDir.appendingPathComponent("original.bin")
+        try plaintext.write(to: originalURL)
+
+        let hasher = HasherService()
+        let (sha256, _) = try await hasher.sha256AndSize(of: originalURL)
+
+        let encryptionService = EncryptionService()
+        let (key, keyId) = encryptionService.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+        await encryptionService.setKey(key, keyId: keyId)
+
+        let encryptedURL = tmpDir.appendingPathComponent("encrypted.bin")
+        _ = try await encryptionService.encryptFile(at: originalURL, to: encryptedURL, sha256: sha256)
+
+        let redundancy = RedundancyService()
+        let par2URL = try await redundancy.generatePAR2(for: encryptedURL, outputDirectory: tmpDir)
+
+        let verified = try await redundancy.verify(par2URL: par2URL, originalFileURL: encryptedURL)
+        #expect(verified, "Uncorrupted encrypted file should pass PAR2 verification")
+    }
+}
+
+// MARK: - Catalog Backup Service Additional Tests
+
+@Suite @MainActor
+struct CatalogBackupRestoreTests {
+    @Test func restoreFromVolumeHappyPath() async throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-vol-restore-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        // Write catalog.json to simulate a volume with backup
+        let catalog = TestFixtures.catalog()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(catalog)
+        try data.write(to: tmpDir.appendingPathComponent("catalog.json"))
+
+        let service = CatalogBackupService()
+        let restored = try await service.restoreFromVolume(volumeURL: tmpDir)
+
+        #expect(restored.version == catalog.version)
+
+        // Verify all fixture hashes present
+        let restoredHashes = Set(
+            restored.years.values
+                .flatMap { $0.months.values }
+                .flatMap { $0.days.values }
+                .flatMap { $0.albums.values }
+                .flatMap { $0.images }
+                .map(\.sha256)
+        )
+        for spec in TestFixtures.files {
+            #expect(restoredHashes.contains(spec.sha256), "\(spec.name) hash missing after restore")
+        }
+    }
+}
+
+// MARK: - Encryption Service Edge Case Tests
+
+@Suite
+struct EncryptionEdgeCaseTests {
+    private static let testPassphrase = "edge-case-passphrase"
+    private static let testSalt = Data(repeating: 0x33, count: 32)
+
+    private func serviceWithKey() async -> EncryptionService {
+        let service = EncryptionService()
+        let (key, keyId) = service.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+        await service.setKey(key, keyId: keyId)
+        return service
+    }
+
+    @Test func encryptDecryptEmptyData() async throws {
+        let service = await serviceWithKey()
+        let empty = Data()
+
+        let (ciphertext, nonce) = try await service.encrypt(data: empty)
+        // GCM tag is 16 bytes, so ciphertext of empty plaintext = 16 bytes
+        #expect(ciphertext.count == 16)
+
+        let decrypted = try await service.decrypt(ciphertext: ciphertext, nonce: Data(nonce))
+        #expect(decrypted == empty)
+        #expect(decrypted.isEmpty)
+    }
+
+    @Test func encryptedSizeEqualsPlaintextPlusTag() async throws {
+        let service = await serviceWithKey()
+
+        for size in [1, 100, 1000, 10000] {
+            let plaintext = Data(repeating: 0xAB, count: size)
+            let (ciphertext, _) = try await service.encrypt(data: plaintext)
+            // AES-GCM: ciphertext = plaintext + 16-byte tag
+            #expect(ciphertext.count == size + 16, "Size \(size): expected \(size + 16), got \(ciphertext.count)")
+        }
+    }
+
+    @Test func encryptDecryptLargeData() async throws {
+        let service = await serviceWithKey()
+        // 1 MB of data
+        let large = Data((0..<1_048_576).map { UInt8($0 % 256) })
+
+        let (ciphertext, nonce) = try await service.encrypt(data: large)
+        let decrypted = try await service.decrypt(ciphertext: ciphertext, nonce: Data(nonce))
+        #expect(decrypted == large)
+    }
+
+    @Test func encryptFileProducesCorrectSize() async throws {
+        let service = await serviceWithKey()
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-enc-size-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let plaintext = Data(repeating: 0x42, count: 4096)
+        let sha256 = CryptoKit.SHA256.hash(data: plaintext).map { String(format: "%02x", $0) }.joined()
+
+        let sourceURL = tmpDir.appendingPathComponent("source.bin")
+        let encryptedURL = tmpDir.appendingPathComponent("encrypted.bin")
+        try plaintext.write(to: sourceURL)
+
+        let (_, encryptedSize) = try await service.encryptFile(at: sourceURL, to: encryptedURL, sha256: sha256)
+        // File-level encryption: ciphertext + 16-byte GCM tag
+        #expect(encryptedSize == Int64(4096 + 16))
+    }
+}

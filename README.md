@@ -122,7 +122,7 @@ LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool
 
 ## Testing
 
-98 tests across 18 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes:
+111 tests across 23 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes:
 
 ```bash
 swift test                                    # Run all tests
@@ -149,6 +149,11 @@ swift test --filter CatalogTests              # Run specific suite
 | CatalogBackupServiceTests | 5 | Volume backup/restore round-trip, error reporting, missing catalog |
 | DeduplicationServiceTests | 3 | Unique file detection, exact match, SHA-256 + size verification |
 | ImageConversionTests | 5 | JPEG conversion, dimension scaling, below-max preservation, no-op pass-through |
+| PerceptualHashComputeTests | 3 | dHash compute returns 8 bytes, deterministic output, non-image rejection |
+| VolumeSyncAdditionalTests | 3 | Single-album sync, partial dedup, already-tracked skip |
+| EncryptPAR2IntegrationTests | 2 | Encrypt→PAR2→corrupt→repair→decrypt round-trip, uncorrupted verification |
+| CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture verification |
+| EncryptionEdgeCaseTests | 4 | Empty data, size = plaintext+16, 1MB large data, file size check |
 
 ## Requirements
 

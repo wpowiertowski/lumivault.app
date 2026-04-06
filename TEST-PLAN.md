@@ -2,7 +2,7 @@
 
 ## Existing Automated Test Assessment
 
-### Summary: 98 tests across 18 suites
+### Summary: 111 tests across 23 suites
 
 | Rating | Suite | Tests | Assessment |
 |--------|-------|-------|------------|
