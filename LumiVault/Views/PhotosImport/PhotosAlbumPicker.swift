@@ -1,16 +1,38 @@
 import SwiftUI
 import Photos
 
+private enum AlbumSortOrder: String, CaseIterable {
+    case name = "Name"
+    case date = "Date"
+    case count = "Count"
+}
+
 struct PhotosAlbumPicker: View {
     @Binding var selectedAlbumId: String?
     @State private var albums: [PhotosAlbum] = []
     @State private var searchText = ""
+    @State private var sortOrder: AlbumSortOrder = .name
+    @State private var sortAscending = true
     @State private var authStatus: PHAuthorizationStatus = .notDetermined
     @State private var isLoading = false
 
     private var filteredAlbums: [PhotosAlbum] {
-        if searchText.isEmpty { return albums }
-        return albums.filter { $0.title.localizedCaseInsensitiveContains(searchText) }
+        let filtered = searchText.isEmpty
+            ? albums
+            : albums.filter { $0.title.localizedCaseInsensitiveContains(searchText) }
+
+        return filtered.sorted { a, b in
+            let result: Bool
+            switch sortOrder {
+            case .name:
+                result = a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+            case .date:
+                result = (a.startDate ?? .distantPast) < (b.startDate ?? .distantPast)
+            case .count:
+                result = a.assetCount < b.assetCount
+            }
+            return sortAscending ? result : !result
+        }
     }
 
     var body: some View {
@@ -47,6 +69,33 @@ struct PhotosAlbumPicker: View {
                     Text("No photo albums found in your Photos library.")
                 }
             } else {
+                HStack(spacing: 8) {
+                    Picker("Sort", selection: $sortOrder) {
+                        ForEach(AlbumSortOrder.allCases, id: \.self) { order in
+                            Text(order.rawValue).tag(order)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 200)
+
+                    Button {
+                        sortAscending.toggle()
+                    } label: {
+                        Image(systemName: sortAscending ? "arrow.up" : "arrow.down")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(sortAscending ? "Ascending" : "Descending")
+
+                    Spacer()
+
+                    Text("\(filteredAlbums.count) albums")
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+
                 List(filteredAlbums, selection: $selectedAlbumId) { album in
                     AlbumPickerRow(album: album)
                         .tag(album.id)

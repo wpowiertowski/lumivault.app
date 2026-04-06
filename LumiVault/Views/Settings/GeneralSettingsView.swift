@@ -2,7 +2,7 @@ import SwiftUI
 
 struct GeneralSettingsView: View {
     @Environment(SyncCoordinator.self) private var syncCoordinator
-    @AppStorage("catalogPath") private var catalogPath = "~/.photovault/catalog.json"
+    @AppStorage("catalogPath") private var catalogPath = "~/.lumivault/catalog.json"
     @AppStorage("redundancyPercentage") private var redundancyPercentage = 10.0
     @AppStorage("thumbnailCacheLimit") private var thumbnailCacheLimit = 2.0 // GB
     @AppStorage("b2Enabled") private var b2Enabled = false
@@ -82,7 +82,7 @@ struct GeneralSettingsView: View {
     }
 
     private func detectExisting() {
-        let defaultPath = NSString("~/.photovault/catalog.json").expandingTildeInPath
+        let defaultPath = NSString("~/.lumivault/catalog.json").expandingTildeInPath
         if FileManager.default.fileExists(atPath: defaultPath) {
             catalogPath = defaultPath
         }

@@ -105,14 +105,17 @@ actor PhotosImportService {
     private func exportAsset(_ asset: PHAsset, to directory: URL) async throws -> ExportedAsset {
         let resources = PHAssetResource.assetResources(for: asset)
 
-        // Prefer original photo resource
-        guard let resource = resources.first(where: { $0.type == .photo })
-                ?? resources.first(where: { $0.type == .fullSizePhoto })
+        // Prefer edited (fullSizePhoto) over unedited original (photo)
+        // so that user edits from Photos are preserved in the export
+        guard let resource = resources.first(where: { $0.type == .fullSizePhoto })
+                ?? resources.first(where: { $0.type == .photo })
                 ?? resources.first else {
             throw PhotosImportError.noResourceFound
         }
 
-        let filename = resource.originalFilename
+        // Use the original resource's filename (fullSizePhoto always reports "FullSizeRender.jpeg")
+        let originalResource = resources.first(where: { $0.type == .photo })
+        let filename = originalResource?.originalFilename ?? resource.originalFilename
         let destURL = directory.appendingPathComponent(filename)
 
         // Handle filename collisions

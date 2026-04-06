@@ -7,6 +7,10 @@ struct SettingsView: View {
                 .tabItem {
                     Label("General", systemImage: "gearshape")
                 }
+            ExportDefaultsSettingsView()
+                .tabItem {
+                    Label("Export", systemImage: "square.and.arrow.up")
+                }
             VolumesSettingsView()
                 .tabItem {
                     Label("Volumes", systemImage: "externaldrive")
@@ -32,6 +36,6 @@ struct SettingsView: View {
                     Label("Support", systemImage: "heart")
                 }
         }
-        .frame(width: 480, height: 450)
+        .frame(width: 540, height: 550)
     }
 }

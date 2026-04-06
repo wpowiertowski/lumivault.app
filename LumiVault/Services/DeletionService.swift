@@ -104,9 +104,17 @@ actor DeletionService {
                     let remotePath = "\(image.albumPath)/\(image.filename)"
                     let encodedPath = remotePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? remotePath
 
+                    // Look up current file version by name — stored fileId may be stale
                     do {
-                        try await b2Service.deleteFile(fileId: fileId, fileName: encodedPath, credentials: credentials)
-                        result.b2FilesRemoved += 1
+                        let listings = try await b2Service.listAllFiles(
+                            bucketId: credentials.bucketId,
+                            credentials: credentials,
+                            prefix: encodedPath
+                        )
+                        if let listing = listings.first(where: { $0.fileName == encodedPath }) {
+                            try await b2Service.deleteFile(fileId: listing.fileId, fileName: encodedPath, credentials: credentials)
+                            result.b2FilesRemoved += 1
+                        }
                     } catch {
                         result.errors.append("B2 delete failed: \(image.filename) — \(error.localizedDescription)")
                     }
@@ -116,7 +124,6 @@ actor DeletionService {
                         let par2Remote = "\(image.albumPath)/\(image.par2Filename)"
                         let par2Encoded = par2Remote.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? par2Remote
 
-                        // We need the PAR2 file's B2 fileId — look it up
                         do {
                             let listings = try await b2Service.listAllFiles(
                                 bucketId: credentials.bucketId,

@@ -1,5 +1,28 @@
 import Foundation
 import SwiftData
+import AppKit
+import os
+
+enum ImageFormat: String, Sendable, CaseIterable {
+    case original = "Original"
+    case jpeg = "JPEG"
+}
+
+enum MaxDimension: Sendable, Hashable {
+    case original
+    case capped(Int)
+
+    var label: String {
+        switch self {
+        case .original: "Original"
+        case .capped(let px): "\(px)px"
+        }
+    }
+
+    static let presets: [MaxDimension] = [
+        .original, .capped(4096), .capped(3072), .capped(2048), .capped(1600), .capped(1024)
+    ]
+}
 
 struct ExportSettings: Sendable {
     var albumName: String
@@ -12,6 +35,9 @@ struct ExportSettings: Sendable {
     var uploadToB2: Bool = false
     var targetVolumeIDs: [String] = []
     var b2Credentials: B2Credentials?
+    var imageFormat: ImageFormat = .original
+    var jpegQuality: Double = 0.85
+    var maxDimension: MaxDimension = .original
 }
 
 @Observable
@@ -25,12 +51,38 @@ final class ExportProgress: @unchecked Sendable {
     var nearDuplicatesFound: Int = 0
     var filesUploaded: Int = 0
     var filesCopied: Int = 0
+    var filesConverted: Int = 0
+    var filesEncrypted: Int = 0
+    var filesProtected: Int = 0
+    var par2FileFraction: Double = 0
     var errors: [String] = []
     var nearDuplicates: [NearDuplicateMatch] = []
 
+    /// Active phases in order, set at export start based on settings
+    var activePhases: [ExportPhase] = [.exporting, .hashing, .par2, .cataloging]
+
     var fraction: Double {
-        guard totalFiles > 0 else { return 0 }
-        return Double(currentFile) / Double(totalFiles)
+        guard totalFiles > 0, !activePhases.isEmpty else { return 0 }
+
+        let phaseCount = activePhases.count
+        guard let phaseIndex = activePhases.firstIndex(of: phase) else {
+            return phase == .complete ? 1.0 : 0.0
+        }
+
+        let phaseWeight = 1.0 / Double(phaseCount)
+        let baseFraction = Double(phaseIndex) * phaseWeight
+
+        // Per-file progress within current phase
+        var phaseFraction: Double
+        if phase == .par2 {
+            let fileFraction = totalFiles > 0 ? Double(max(currentFile - 1, 0)) / Double(totalFiles) : 0
+            let subFraction = totalFiles > 0 ? par2FileFraction / Double(totalFiles) : 0
+            phaseFraction = fileFraction + subFraction
+        } else {
+            phaseFraction = totalFiles > 0 ? Double(currentFile) / Double(totalFiles) : 0
+        }
+
+        return baseFraction + phaseFraction * phaseWeight
     }
 }
 
@@ -45,6 +97,7 @@ struct NearDuplicateMatch: Identifiable, Sendable {
 
 enum ExportPhase: String, Sendable {
     case exporting = "Exporting from Photos"
+    case converting = "Converting images"
     case hashing = "Hashing & deduplicating"
     case encrypting = "Encrypting files"
     case par2 = "Generating PAR2 recovery data"
@@ -57,6 +110,7 @@ enum ExportPhase: String, Sendable {
     var verb: String {
         switch self {
         case .exporting: "Exporting"
+        case .converting: "Converting"
         case .hashing: "Hashing"
         case .encrypting: "Encrypting"
         case .par2: "PAR2"
@@ -89,10 +143,33 @@ class ExportCoordinator {
         modelContext: ModelContext,
         progress: ExportProgress
     ) async throws {
+        // Shared cancellation flag for non-async work (PAR2 OperationQueue)
+        let cancelFlag = OSAllocatedUnfairLock(initialState: false)
+
+        /// Check Swift Task cancellation and propagate to shared flag
+        func checkCancellation() throws {
+            if Task.isCancelled {
+                cancelFlag.withLock { $0 = true }
+                throw CancellationError()
+            }
+        }
+
         // 1. Create staging directory
         let staging = FileManager.default.temporaryDirectory
             .appendingPathComponent("lumivault-export-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: staging) }
+
+        // Determine active phases for accurate progress tracking
+        let needsConversion = settings.imageFormat == .jpeg || settings.maxDimension != .original
+        var phases: [ExportPhase] = [.exporting]
+        if needsConversion { phases.append(.converting) }
+        phases.append(.hashing)
+        if settings.encryptFiles { phases.append(.encrypting) }
+        if settings.generatePAR2 { phases.append(.par2) }
+        if !settings.targetVolumeIDs.isEmpty { phases.append(.copying) }
+        if settings.uploadToB2 { phases.append(.uploading) }
+        phases.append(.cataloging)
+        progress.activePhases = phases
 
         // 2. Export from Photos library
         progress.phase = .exporting
@@ -107,25 +184,58 @@ class ExportCoordinator {
         }
 
         progress.totalFiles = exported.count
+        try checkCancellation()
+
+        // 2.5. Convert images if needed (JPEG conversion / resize)
+        var processedAssets = exported
+        if needsConversion {
+            progress.phase = .converting
+            progress.currentFile = 0
+
+            var converted: [ExportedAsset] = []
+            for (index, asset) in exported.enumerated() {
+                try checkCancellation()
+                progress.currentFile = index + 1
+                progress.currentFilename = asset.originalFilename
+
+                let result = convertImage(
+                    asset: asset,
+                    format: settings.imageFormat,
+                    quality: settings.jpegQuality,
+                    maxDimension: settings.maxDimension,
+                    staging: staging
+                )
+                converted.append(result)
+                progress.filesConverted += 1
+            }
+            processedAssets = converted
+        }
+
+        try checkCancellation()
         progress.currentFile = 0
         progress.phase = .hashing
 
         // 3. Hash, dedup, create records
-        var imageRecords: [(record: ImageRecord, fileURL: URL)] = []
+        var imageRecords: [(record: ImageRecord, fileURL: URL, isNew: Bool)] = []
 
-        for (index, asset) in exported.enumerated() {
+        for (index, asset) in processedAssets.enumerated() {
+            try checkCancellation()
             progress.currentFile = index + 1
             progress.currentFilename = asset.originalFilename
 
             let (hash, size) = try await hasher.sha256AndSize(of: asset.fileURL)
 
-            // Check for duplicates
+            // Check for exact duplicates
             let descriptor = FetchDescriptor<ImageRecord>(
                 predicate: #Predicate { $0.sha256 == hash }
             )
             let existing = try modelContext.fetch(descriptor)
 
-            if existing.isEmpty {
+            if let existingRecord = existing.first {
+                // Reuse existing record — still include for album linking, copy, upload
+                imageRecords.append((existingRecord, asset.fileURL, false))
+                progress.filesDeduplicated += 1
+            } else {
                 let record = ImageRecord(
                     sha256: hash,
                     filename: asset.originalFilename,
@@ -167,17 +277,17 @@ class ExportCoordinator {
                 }
 
                 modelContext.insert(record)
-                imageRecords.append((record, asset.fileURL))
-            } else {
-                progress.filesDeduplicated += 1
+                imageRecords.append((record, asset.fileURL, true))
             }
 
             progress.filesHashed += 1
         }
 
-        // 4. Encrypt files (if enabled) — before PAR2 so recovery data protects ciphertext
+        try checkCancellation()
+
+        // 4. Encrypt new files (if enabled) — before PAR2 so recovery data protects ciphertext
         var fileURLsForStorage: [String: URL] = [:] // sha256 -> file URL to use for PAR2/copy/upload
-        var encryptedSizes: [String: Int64] = [:]  // sha256 -> encrypted file size
+        var encryptedSizes: [String: Int64] = [:]
         for item in imageRecords {
             fileURLsForStorage[item.record.sha256] = item.fileURL
         }
@@ -187,47 +297,80 @@ class ExportCoordinator {
             progress.phase = .encrypting
             progress.currentFile = 0
 
+            let key = await encryptionService.cachedKey!
             let keyId = await encryptionService.cachedKeyId
 
-            for (index, item) in imageRecords.enumerated() {
-                progress.currentFile = index + 1
-                progress.currentFilename = item.record.filename
+            let newItems = imageRecords.enumerated().filter { $0.element.isNew }
+            let results = try await withThrowingTaskGroup(
+                of: (index: Int, sha256: String, nonce: Data, encSize: Int64, encryptedURL: URL).self
+            ) { group in
+                for (index, item) in newItems {
+                    let fileURL = item.fileURL
+                    let sha256 = item.record.sha256
+                    let filename = item.record.filename
+                    let encryptedURL = staging.appendingPathComponent(filename + ".enc")
 
-                let encryptedURL = staging.appendingPathComponent(item.record.filename + ".enc")
-                let (nonce, encSize) = try await encryptionService.encryptFile(
-                    at: item.fileURL,
-                    to: encryptedURL,
-                    sha256: item.record.sha256
-                )
+                    group.addTask {
+                        try Task.checkCancellation()
+                        let (nonce, encSize) = try EncryptionService.encryptFileWithKey(
+                            at: fileURL, to: encryptedURL, sha256: sha256, key: key
+                        )
+                        return (index, sha256, nonce, encSize, encryptedURL)
+                    }
+                }
 
+                var collected: [(index: Int, sha256: String, nonce: Data, encSize: Int64, encryptedURL: URL)] = []
+                for try await result in group {
+                    collected.append(result)
+                    progress.filesEncrypted += 1
+                    progress.currentFile = progress.filesEncrypted
+                    progress.currentFilename = imageRecords[result.index].record.filename
+                }
+                return collected
+            }
+
+            for result in results {
+                let item = imageRecords[result.index]
                 item.record.isEncrypted = true
-                item.record.encryptionNonce = nonce
+                item.record.encryptionNonce = result.nonce
                 item.record.encryptionKeyId = keyId
-
-                fileURLsForStorage[item.record.sha256] = encryptedURL
-                encryptedSizes[item.record.sha256] = encSize
+                fileURLsForStorage[result.sha256] = result.encryptedURL
+                encryptedSizes[result.sha256] = result.encSize
             }
         }
 
-        // 5. Generate PAR2 recovery data (on ciphertext if encrypted)
+        // 5. Generate PAR2 recovery data for new files
+        try checkCancellation()
         if settings.generatePAR2 {
             progress.phase = .par2
             progress.currentFile = 0
 
-            for (index, item) in imageRecords.enumerated() {
-                progress.currentFile = index + 1
+            let newItems = imageRecords.filter { $0.isNew }
+            for (position, item) in newItems.enumerated() {
+                try checkCancellation()
+                progress.currentFile = position + 1
+                progress.currentFilename = item.record.filename
+                progress.par2FileFraction = 0
 
                 let fileForPAR2 = fileURLsForStorage[item.record.sha256] ?? item.fileURL
                 if let par2URL = try? await redundancyService.generatePAR2(
                     for: fileForPAR2,
-                    outputDirectory: staging
+                    outputDirectory: staging,
+                    onProgress: { fraction in
+                        DispatchQueue.main.async {
+                            progress.par2FileFraction = fraction
+                        }
+                    },
+                    cancelFlag: cancelFlag
                 ) {
                     item.record.par2Filename = par2URL.lastPathComponent
+                    progress.filesProtected += 1
                 }
             }
         }
 
-        // 5. Copy to external volumes
+        // 6. Copy to external volumes
+        try checkCancellation()
         if !settings.targetVolumeIDs.isEmpty {
             progress.phase = .copying
             progress.currentFile = 0
@@ -251,6 +394,7 @@ class ExportCoordinator {
                 try FileManager.default.createDirectory(at: destBase, withIntermediateDirectories: true)
 
                 for item in imageRecords {
+                    try checkCancellation()
                     let sourceFile = fileURLsForStorage[item.record.sha256] ?? item.fileURL
                     let dest = destBase.appendingPathComponent(item.record.filename)
                     if !FileManager.default.fileExists(atPath: dest.path) {
@@ -280,12 +424,14 @@ class ExportCoordinator {
             }
         }
 
-        // 6. Upload to B2
+        // 7. Upload to B2
+        try checkCancellation()
         if settings.uploadToB2, let credentials = settings.b2Credentials {
             progress.phase = .uploading
             progress.currentFile = 0
 
             for (index, item) in imageRecords.enumerated() {
+                try checkCancellation()
                 progress.currentFile = index + 1
                 progress.currentFilename = item.record.filename
 
@@ -310,7 +456,18 @@ class ExportCoordinator {
                         item.record.b2FileId = fileId
                         progress.filesUploaded += 1
                     } else {
-                        progress.filesDeduplicated += 1
+                        // File already in B2 — look up its fileId so the record is linked
+                        if item.record.b2FileId == nil {
+                            let listings = try await b2Service.listAllFiles(
+                                bucketId: credentials.bucketId,
+                                credentials: credentials,
+                                prefix: encodedPath
+                            )
+                            if let listing = listings.first(where: { $0.fileName == encodedPath }) {
+                                item.record.b2FileId = listing.fileId
+                            }
+                        }
+                        progress.filesUploaded += 1
                     }
 
                     // Also upload PAR2 if not already in B2
@@ -340,7 +497,7 @@ class ExportCoordinator {
             }
         }
 
-        // 7. Create album record and update catalog
+        // 8. Create album record and update catalog
         progress.phase = .cataloging
 
         let albumRecord = AlbumRecord(
@@ -382,5 +539,94 @@ class ExportCoordinator {
         try await catalogService.save(to: URL(fileURLWithPath: catalogPath))
 
         progress.phase = .complete
+    }
+
+    // MARK: - Image Conversion
+
+    private func convertImage(
+        asset: ExportedAsset,
+        format: ImageFormat,
+        quality: Double,
+        maxDimension: MaxDimension,
+        staging: URL
+    ) -> ExportedAsset {
+        guard let image = NSImage(contentsOf: asset.fileURL),
+              let srcRep = image.representations.first else { return asset }
+
+        // Use actual pixel dimensions, not point size (which differs on Retina)
+        let pixelWidth = CGFloat(srcRep.pixelsWide)
+        let pixelHeight = CGFloat(srcRep.pixelsHigh)
+
+        var targetWidth = pixelWidth
+        var targetHeight = pixelHeight
+        if case .capped(let maxPx) = maxDimension {
+            let maxSide = max(pixelWidth, pixelHeight)
+            if maxSide > CGFloat(maxPx) {
+                let scale = CGFloat(maxPx) / maxSide
+                targetWidth = (pixelWidth * scale).rounded()
+                targetHeight = (pixelHeight * scale).rounded()
+            }
+        }
+
+        let needsResize = targetWidth != pixelWidth || targetHeight != pixelHeight
+        let needsJPEG = format == .jpeg
+
+        guard needsResize || needsJPEG else { return asset }
+
+        // Draw into bitmap at target pixel size
+        guard let bitmapRep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(targetWidth),
+            pixelsHigh: Int(targetHeight),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return asset }
+
+        // Set bitmap size to match pixel dimensions (1:1 point-to-pixel)
+        bitmapRep.size = NSSize(width: targetWidth, height: targetHeight)
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmapRep)
+        image.draw(in: NSRect(x: 0, y: 0, width: targetWidth, height: targetHeight),
+                   from: NSRect(x: 0, y: 0, width: image.size.width, height: image.size.height),
+                   operation: .copy, fraction: 1.0)
+        NSGraphicsContext.restoreGraphicsState()
+
+        let outputData: Data?
+        let outputFilename: String
+
+        if needsJPEG {
+            outputData = bitmapRep.representation(
+                using: .jpeg,
+                properties: [.compressionFactor: quality]
+            )
+            let stem = (asset.originalFilename as NSString).deletingPathExtension
+            outputFilename = stem + ".jpg"
+        } else {
+            // Keep original format but resized — write as PNG
+            outputData = bitmapRep.representation(using: .png, properties: [:])
+            outputFilename = asset.originalFilename
+        }
+
+        guard let data = outputData else { return asset }
+
+        let convertedDir = staging.appendingPathComponent("converted", isDirectory: true)
+        try? FileManager.default.createDirectory(at: convertedDir, withIntermediateDirectories: true)
+        let outputURL = convertedDir.appendingPathComponent(outputFilename)
+        do {
+            try data.write(to: outputURL, options: .atomic)
+            return ExportedAsset(
+                fileURL: outputURL,
+                originalFilename: outputFilename,
+                creationDate: asset.creationDate
+            )
+        } catch {
+            return asset // fall back to original on write failure
+        }
     }
 }

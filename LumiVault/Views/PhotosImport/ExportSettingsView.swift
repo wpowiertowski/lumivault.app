@@ -7,6 +7,12 @@ struct ExportSettingsView: View {
     @AppStorage("b2Enabled") private var b2Enabled = false
     @AppStorage("encryptionEnabled") private var encryptionEnabled = false
 
+    @AppStorage("exportFormat") private var defaultFormat = ImageFormat.original.rawValue
+    @AppStorage("exportJpegQuality") private var defaultJpegQuality = 0.85
+    @AppStorage("exportMaxDimension") private var defaultMaxDimension = 0
+    @AppStorage("exportGeneratePAR2") private var defaultGeneratePAR2 = true
+    @AppStorage("exportDetectNearDuplicates") private var defaultDetectNearDuplicates = true
+
     private var encryptionKeyAvailable: Bool {
         encryptionEnabled && EncryptionService.storedKeyId() != nil
     }
@@ -26,6 +32,41 @@ struct ExportSettingsView: View {
                         .frame(minWidth: 55)
                 }
                 .font(Constants.Design.monoBody)
+            }
+
+            Section("Image Format") {
+                Picker("Format", selection: $settings.imageFormat) {
+                    ForEach(ImageFormat.allCases, id: \.self) { format in
+                        Text(format.rawValue).tag(format)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .font(Constants.Design.monoBody)
+
+                if settings.imageFormat == .jpeg {
+                    HStack {
+                        Text("Quality")
+                            .font(Constants.Design.monoBody)
+                        Slider(value: $settings.jpegQuality, in: 0.1...1.0, step: 0.05)
+                        Text("\(Int(settings.jpegQuality * 100))%")
+                            .font(Constants.Design.monoCaption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 36, alignment: .trailing)
+                    }
+                }
+
+                Picker("Max dimension", selection: $settings.maxDimension) {
+                    ForEach(MaxDimension.presets, id: \.self) { dim in
+                        Text(dim.label).tag(dim)
+                    }
+                }
+                .font(Constants.Design.monoBody)
+
+                if settings.imageFormat == .jpeg || settings.maxDimension != .original {
+                    Text("Images will be converted during export. Originals in Photos are not modified.")
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(.tertiary)
+                }
             }
 
             Section("Recovery") {
@@ -98,6 +139,13 @@ struct ExportSettingsView: View {
     }
 
     private func applyDefaults() {
+        // Apply saved export defaults
+        settings.imageFormat = ImageFormat(rawValue: defaultFormat) ?? .original
+        settings.jpegQuality = defaultJpegQuality
+        settings.maxDimension = defaultMaxDimension == 0 ? .original : .capped(defaultMaxDimension)
+        settings.generatePAR2 = defaultGeneratePAR2
+        settings.detectNearDuplicates = defaultDetectNearDuplicates
+
         // Pre-select all configured volumes
         if settings.targetVolumeIDs.isEmpty && !volumes.isEmpty {
             settings.targetVolumeIDs = volumes.map(\.volumeID)

@@ -13,27 +13,29 @@ Your photos, preserved forever. Native macOS archiving with iCloud sync, dedupli
 
 ## Overview
 
-LumiVault is a native macOS 26 application for long-term photo archiving. It reimagines the existing PhotoVault CLI as a first-class desktop experience built entirely with Apple frameworks — zero third-party dependencies.
+LumiVault is a native macOS 26 application for long-term photo archiving built entirely with Apple frameworks — zero third-party dependencies.
 
 Photos are organized into date-based albums, deduplicated across multiple external volumes, protected with Reed-Solomon error correction, and synced via iCloud. The app reads and writes the same `catalog.json` format as the CLI tool, so both workflows can coexist.
 
 ## Features
 
-- **Apple Photos Import** — browse and select albums from your Photos library, export originals via PhotoKit, and archive them in one step
+- **Apple Photos Import** — browse, search, and sort albums from your Photos library; exports the current edited state (crops, filters, adjustments) via PhotoKit and archives in one step
 - **Backblaze B2 Cloud Upload** — upload photos and PAR2 recovery data to B2 cloud storage via the REST API with SHA-1 verification; existence checks prevent duplicate uploads
 - **iCloud Catalog Sync** — catalog.json syncs across devices via iCloud Drive with conflict-free merge (union by SHA-256, newest timestamp wins)
 - **Catalog Backup & Restore** — catalog.json is automatically distributed to all external volumes and B2 after every mutation; restore from any backup source (volume, B2, or local file) on fresh run or via Settings
 - **Thumbnail Generation** — HEIC/RAW/CR2/CR3/NEF/ARW/DNG support with a multi-resolution cache (256px grid, 64px list) keyed by content hash
-- **Deduplication** — exact (SHA-256) and near-duplicate (perceptual hash dHash) detection across all connected volumes
+- **Deduplication** — exact (SHA-256) and near-duplicate (perceptual hash dHash) detection across all connected volumes; duplicate images are reused across albums without re-processing
 - **Multi-Volume Mirroring** �� mirror albums to multiple external drives with security-scoped bookmarks for persistent access; sync existing catalog to newly added volumes with dedup-by-hash
 - **Storage Reconciliation** — scan all volumes and B2 for discrepancies (dangling references, orphan files, missing entries) with per-item resolution actions via the Integrity settings tab
-- **Album & Image Deletion** — remove albums or individual photos from the catalog, all external volumes, and B2 in one operation with progress tracking
-- **Reed-Solomon Error Correction** — GF(2^8) Vandermonde-matrix redundancy with PAR2-compatible file format, including single-block repair with cross-verification
+- **Album & Image Deletion** — remove albums or individual photos from the catalog, all external volumes, and B2 in one operation with progress tracking; B2 files are resolved by name for reliable deletion
+- **Reed-Solomon Error Correction** — GF(2^8) Vandermonde-matrix redundancy with PAR2-compatible file format, GPU-accelerated via Metal compute shaders (CPU fallback), adaptive block sizing for guaranteed 10% recovery, and single-block repair with cross-verification
+- **Image Format Conversion** — optional JPEG conversion with configurable quality and max dimension during export; originals in Photos are never modified
+- **Export Cancellation** — cancel in-progress exports with immediate termination of all spawned work (hashing, encryption, PAR2, copy, upload)
 - **Integrity Verification** — background checks surface corruption by re-hashing files against stored SHA-256 digests
 - **Drag & Drop Import** — native file import via `UniformTypeIdentifiers` with image-type filtering
 - **Per-File Encryption** — optional AES-256-GCM encryption with PBKDF2 key derivation (600K iterations); pipeline order Hash(raw) → Encrypt → PAR2(ciphertext) → Store enables key-free PAR2 repair and raw-data dedup
 - **Tip Jar** — StoreKit 2 in-app purchases to support development (4 consumable tip tiers)
-- **Settings** — configure external volumes, iCloud sync, Backblaze B2 credentials, encryption passphrase, storage integrity scanning, and catalog restore
+- **Settings** — configure external volumes, iCloud sync, Backblaze B2 credentials, encryption passphrase, export defaults (format, quality, dimensions, PAR2, near-duplicates), storage integrity scanning, and catalog restore
 
 ## Technology Stack
 
@@ -49,6 +51,7 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 | Encryption      | CryptoKit (AES-256-GCM), CommonCrypto (PBKDF2)         |
 | In-App Purchase | StoreKit 2                                             |
 | Redundancy      | Custom GF(2^8) Reed-Solomon (Vandermonde matrix)       |
+| GPU Compute     | Metal (compute shaders for PAR2 generation)            |
 | Concurrency     | Swift Concurrency (async/await, TaskGroup, actors)     |
 
 ## Architecture
@@ -99,6 +102,7 @@ LumiVault/
 ├── App/                  App entry point, ContentView, SyncCoordinator, menu commands
 ├── Models/               Codable catalog structs, SwiftData models, B2/reconciliation types
 ├── Services/             Actor-based domain services + coordinators
+│   ├── MetalPAR2Service  GPU-accelerated PAR2 via Metal compute shaders
 │   └── Persistence/      SwiftData container factory
 ├── Views/
 │   ├── Sidebar/          Year-grouped album list, volume status, album deletion
@@ -106,7 +110,7 @@ LumiVault/
 │   ├── Detail/           Full-resolution preview + metadata inspector
 │   ├── Import/           Drag-and-drop file import with progress
 │   ├── PhotosImport/     Photos library album picker + export wizard
-│   ├── Settings/         General, Volumes, iCloud, B2, Encryption, Integrity, Support
+│   ├── Settings/         General, Volumes, iCloud, B2, Encryption, Export, Integrity, Support
 │   └── Shared/           Reusable components (EmptyStateView)
 ├── Utilities/            Perceptual hashing, file coordination, bookmarks
 └── Resources/            Asset catalog, StoreKit configuration
@@ -114,7 +118,7 @@ LumiVault/
 
 ## Migration from CLI
 
-LumiVault reads and writes the same `catalog.json` format as the PhotoVault CLI. In Settings, use the "Detect Existing" button to locate `~/.photovault/catalog.json` and import it into the app's local index. Both tools can coexist — changes made in either are merged on sync.
+LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool. In Settings, use the "Detect Existing" button to locate `~/.lumivault/catalog.json` and import it into the app's local index.
 
 ## Testing
 

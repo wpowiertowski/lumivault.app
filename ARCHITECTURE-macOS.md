@@ -1,6 +1,6 @@
-# PhotoVault for macOS — Architecture Document
+# LumiVault for macOS — Architecture Document
 
-> Native macOS 26 application reimagining the existing PhotoVault CLI as a first-class
+> Native macOS 26 application reimagining the existing LumiVault CLI as a first-class
 > desktop experience built entirely with Apple frameworks.
 
 ---
@@ -30,6 +30,7 @@
 | Hashing | CryptoKit (SHA256) | File integrity, deduplication fingerprints |
 | Concurrency | Swift Concurrency (async/await, TaskGroup, actors) | Parallel import, background hashing |
 | Redundancy | Custom GF(2^8) Reed-Solomon (Vandermonde matrix) | PAR2-compatible error correction with repair |
+| GPU Compute | Metal | GPU-accelerated PAR2 generation via compute shaders |
 | Photos Import | PhotoKit (Photos framework) | Apple Photos album enumeration & asset export |
 | Cloud Storage | URLSession | Backblaze B2 REST API uploads |
 | Encryption | CryptoKit (AES-256-GCM), CommonCrypto (PBKDF2) | Per-file encryption at rest |
@@ -165,7 +166,7 @@ Uses the app's iCloud container (hidden from the user in Finder):
 | Read | `NSMetadataQuery` monitors for remote changes, triggers reload |
 | Conflict | Timestamp-based: newest `last_updated` wins at album level; per-image merge by SHA-256 (union) |
 | Frequency | On every catalog mutation + on app foreground + on `NSMetadataQuery` notification |
-| Fallback | Local catalog in `~/.photovault/catalog.json` always authoritative if iCloud unavailable |
+| Fallback | Local catalog in `~/.lumivault/catalog.json` always authoritative if iCloud unavailable |
 
 Conflict resolution strategy (merge, not overwrite):
 
@@ -231,7 +232,7 @@ Original file
 **Cache layout**:
 
 ```
-~/Library/Caches/com.photovault/thumbnails/
+~/Library/Caches/com.lumivault/thumbnails/
   ├─ 256/
   │   └─ {sha256-prefix-2}/{sha256}.heic
   └─ 64/
@@ -265,14 +266,15 @@ PHAssetCollection.fetchAssetCollections(with: .smartAlbum) → Favorites, Recent
 
 ```text
 1. User selects album in PhotosAlbumPicker
-2. Configure: album name, date, PAR2 toggle, volume targets, B2 toggle
+2. Configure: album name, date, format, PAR2 toggle, encryption, volume targets, B2 toggle
 3. ExportCoordinator orchestrates:
    Photos export → staging dir
+     → Image format conversion (optional JPEG + resize)
      → SHA-256 hash + dedup check
      → Thumbnail generation
      → Perceptual hash
      → AES-256-GCM encryption (optional)
-     → PAR2 generation on ciphertext (optional)
+     → PAR2 generation on ciphertext (optional, GPU-accelerated)
      → Copy to external volumes
      → Upload to B2 (optional)
      → Update SwiftData index + catalog.json
@@ -280,7 +282,13 @@ PHAssetCollection.fetchAssetCollections(with: .smartAlbum) → Favorites, Recent
 ```
 
 Each `PHAsset` is exported via `PHAssetResourceManager.writeData(for:toFile:)` with
-`isNetworkAccessAllowed = true` to handle iCloud-originals transparently.
+`isNetworkAccessAllowed = true` to handle iCloud-originals transparently. The export
+prefers the `.fullSizePhoto` resource (edited version with all Photos adjustments) over
+the `.photo` resource (unmodified original), while using the original resource's filename
+to avoid generic names like `FullSizeRender.jpeg`.
+
+**Album picker** supports search (`.searchable`) and sort (by name, date, or photo count
+with ascending/descending toggle).
 
 ### 5.4 Backblaze B2 Cloud Upload
 
@@ -312,9 +320,10 @@ Each `PHAsset` is exported via `PHAssetResourceManager.writeData(for:toFile:)` w
 **Deletion flow** (per file):
 
 ```text
-1. Call b2_delete_file_version with stored fileId + fileName
-2. Look up PAR2 companion via b2_list_file_names prefix search
-3. Delete PAR2 file version if found (best-effort)
+1. Look up current file version by name via b2_list_file_names (stored fileId may be stale)
+2. Call b2_delete_file_version with resolved fileId + fileName
+3. Look up PAR2 companion via b2_list_file_names prefix search
+4. Delete PAR2 file version if found (best-effort)
 ```
 
 **Remote path convention**: `{year}/{month}/{day}/{albumName}/{filename}` — mirrors
@@ -517,6 +526,7 @@ LumiVault/
 │   ├── ThumbnailService.swift           // Generate + cache thumbnails
 │   ├── DeduplicationService.swift       // SHA-256 + perceptual hash index
 │   ├── RedundancyService.swift          // Reed-Solomon ECC (GF(2^8) Vandermonde)
+│   ├── MetalPAR2Service.swift          // GPU-accelerated PAR2 via Metal compute shaders
 │   ├── VolumeService.swift              // Disk discovery, bookmarks, sync to volume
 │   ├── IntegrityService.swift           // Scheduled verification
 │   ├── EncryptionService.swift         // AES-256-GCM encrypt/decrypt, PBKDF2 key derivation
@@ -548,6 +558,7 @@ LumiVault/
 │       ├── CloudSettingsView.swift       // iCloud sync toggle + status
 │       ├── B2SettingsView.swift          // Backblaze B2 credentials + test
 │       ├── EncryptionSettingsView.swift  // Passphrase management, key status
+│       ├── ExportDefaultsSettingsView.swift // Default format, quality, dimensions, PAR2
 │       └── SupportSettingsView.swift     // Tip jar via StoreKit 2
 │
 └── Utilities/
@@ -630,6 +641,19 @@ arithmetic with Vandermonde matrix coefficients (`(r+1)^b` in GF(2^8)), replacin
 format with header: magic (`PV2R`), fileSize (8B), blockSize (4B), blockCount (4B),
 recoveryCount (4B), followed by recovery blocks.
 
+**GPU acceleration**: `MetalPAR2Service` compiles a Metal compute shader at runtime
+(from an embedded source string — no Metal Toolchain build dependency) that dispatches
+one thread per (byte position × recovery block). A 256×256 GF(2^8) multiplication
+table is uploaded to the GPU once at init. Falls back to CPU if Metal is unavailable.
+
+**CPU fallback**: `OperationQueue` with concurrency limited to half of available cores
+to avoid system stutter. A shared `OSAllocatedUnfairLock<Bool>` flag enables
+cooperative cancellation from the UI.
+
+**Adaptive block size**: Block size scales as a power-of-2 (minimum 4096) to keep
+`blockCount × redundancyPercentage ≤ 255` (GF(2^8) field limit), guaranteeing 10%
+recovery data for files of any size including 100 MB+ images.
+
 Minimum 2 recovery blocks enables cross-verification to disambiguate which block is
 corrupted during repair.
 
@@ -645,7 +669,7 @@ allowing flexible source selection (volumes, staging directories).
 
 | Step | Action |
 |------|--------|
-| 1 | On first launch, detect `~/.photovault/catalog.json` |
+| 1 | On first launch, detect `~/.lumivault/catalog.json` |
 | 2 | Parse with existing Codable structs (same JSON schema) |
 | 3 | Populate SwiftData index from catalog entries |
 | 4 | Resolve external paths → create VolumeRecord + security-scoped bookmarks |

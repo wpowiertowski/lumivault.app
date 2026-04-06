@@ -15,6 +15,7 @@ struct PhotosExportSheet: View {
     )
     @State private var progress = ExportProgress()
     @State private var isExporting = false
+    @State private var exportTask: Task<Void, Never>?
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @Environment(\.encryptionService) private var encryptionService
 
@@ -47,8 +48,11 @@ struct PhotosExportSheet: View {
 
             // Navigation buttons
             HStack {
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
+                Button("Cancel") {
+                    exportTask?.cancel()
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
 
                 Spacer()
 
@@ -103,12 +107,22 @@ struct PhotosExportSheet: View {
 
     private var exportingStep: some View {
         VStack(spacing: 16) {
-            Text(progress.phase.rawValue)
-                .font(Constants.Design.monoHeadline)
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(progress.phase.rawValue)
+                    .font(Constants.Design.monoHeadline)
+            }
 
             VStack(spacing: 6) {
-                ProgressView(value: progress.fraction)
-                    .padding(.horizontal, 40)
+                HStack(spacing: 8) {
+                    ProgressView(value: progress.fraction)
+                    Text("\(Int(progress.fraction * 100))%")
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, alignment: .trailing)
+                }
+                .padding(.horizontal, 40)
 
                 // Live status line: stage + filename + counter
                 HStack(spacing: 0) {
@@ -133,11 +147,18 @@ struct PhotosExportSheet: View {
             }
 
             HStack(spacing: 24) {
+                if progress.filesConverted > 0 {
+                    ExportStat(label: "Converted", value: progress.filesConverted)
+                }
                 ExportStat(label: "Hashed", value: progress.filesHashed)
                 ExportStat(label: "Deduped", value: progress.filesDeduplicated)
                 if progress.nearDuplicatesFound > 0 {
                     ExportStat(label: "Near-dupes", value: progress.nearDuplicatesFound)
                 }
+                if progress.filesEncrypted > 0 {
+                    ExportStat(label: "Encrypted", value: progress.filesEncrypted)
+                }
+                ExportStat(label: "PAR2", value: progress.filesProtected)
                 ExportStat(label: "Copied", value: progress.filesCopied)
                 ExportStat(label: "Uploaded", value: progress.filesUploaded)
             }
@@ -283,7 +304,7 @@ struct PhotosExportSheet: View {
         let encSvc = encryptionService
         let sync = syncCoordinator
 
-        Task { @MainActor in
+        exportTask = Task { @MainActor in
             let coordinator = ExportCoordinator(catalogService: catSvc, encryptionService: encSvc)
             do {
                 try await coordinator.export(
@@ -293,6 +314,9 @@ struct PhotosExportSheet: View {
                     progress: prog
                 )
                 await sync.pushAfterLocalChange()
+            } catch is CancellationError {
+                prog.phase = .failed
+                prog.errors.append("Export cancelled")
             } catch {
                 prog.errors.append("Export failed: \(error.localizedDescription)")
                 prog.phase = .failed

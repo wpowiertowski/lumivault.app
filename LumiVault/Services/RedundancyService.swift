@@ -1,43 +1,91 @@
 import Foundation
+import os
 
 actor RedundancyService {
     private static let redundancyPercentage: Double = 0.10 // 10% recovery data
+    nonisolated(unsafe) private static let metalService: MetalPAR2Service? = MetalPAR2Service()
 
-    func generatePAR2(for fileURL: URL, outputDirectory: URL) throws -> URL {
+    // 256x256 GF(2^8) multiplication lookup table — eliminates per-byte loop
+    nonisolated private static let mulTable: [[UInt8]] = {
+        var table = [[UInt8]](repeating: [UInt8](repeating: 0, count: 256), count: 256)
+        for a in 0..<256 {
+            for b in 0..<256 {
+                var result: UInt16 = 0
+                var av = UInt16(a)
+                var bv = UInt16(b)
+                for _ in 0..<8 {
+                    if bv & 1 != 0 { result ^= av }
+                    let highBit = av & 0x80
+                    av <<= 1
+                    if highBit != 0 { av ^= 0x11D }
+                    bv >>= 1
+                }
+                table[a][b] = UInt8(result & 0xFF)
+            }
+        }
+        return table
+    }()
+
+    /// Generate PAR2 off the actor so progress callbacks can reach MainActor.
+    /// Pass a cancellation flag to allow stopping from the calling Task.
+    nonisolated func generatePAR2(
+        for fileURL: URL,
+        outputDirectory: URL,
+        onProgress: (@Sendable (Double) -> Void)? = nil,
+        cancelFlag: OSAllocatedUnfairLock<Bool>? = nil
+    ) throws -> URL {
         let data = try Data(contentsOf: fileURL)
         let filename = fileURL.lastPathComponent
         let par2Filename = filename + ".par2"
         let par2URL = outputDirectory.appendingPathComponent(par2Filename)
 
         // Reed-Solomon encoding using GF(2^8) Vandermonde matrix
-        let blockSize = 4096
+        // Adaptive block size: ensure blockCount * redundancy% ≤ 255 (GF(2^8) limit)
+        // Max blocks at 10% = 2550, so blockSize = ceil(fileSize / 2550), min 4096, power-of-2
+        let maxBlocks = Int(255.0 / Self.redundancyPercentage) // 2550
+        let minBlockSize = max(4096, (data.count + maxBlocks - 1) / maxBlocks)
+        let blockSize = minBlockSize <= 4096 ? 4096 : Int(pow(2.0, ceil(log2(Double(minBlockSize)))))
         let blockCount = (data.count + blockSize - 1) / blockSize
         let recoveryBlockCount = max(2, Int(Double(blockCount) * Self.redundancyPercentage))
 
-        var recoveryData = Data()
-
-        // Generate recovery blocks using Vandermonde coefficients: α^(r*b)
-        // where α = (r+1) and exponent = b, giving coefficient = galoisPow(r+1, b)
+        // Precompute Vandermonde coefficients
+        var coefficients = [UInt8](repeating: 0, count: recoveryBlockCount * blockCount)
         for r in 0..<recoveryBlockCount {
-            var parityBlock = Data(repeating: 0, count: blockSize)
-
             for b in 0..<blockCount {
-                let start = b * blockSize
-                let end = min(start + blockSize, data.count)
-                let block = data[start..<end]
-
-                let coefficient = vandermondeCoefficient(row: r, col: b)
-                for (i, byte) in block.enumerated() {
-                    parityBlock[i] ^= galoisMultiply(byte, coefficient)
-                }
+                coefficients[r * blockCount + b] = vandermondeCoefficient(row: r, col: b)
             }
+        }
 
-            recoveryData.append(parityBlock)
+        // Try GPU (Metal) first, fall back to CPU
+        let recoveryData: Data
+        if let metal = Self.metalService,
+           let gpuResult = metal.generateRecoveryData(
+               data: data,
+               blockSize: blockSize,
+               blockCount: blockCount,
+               recoveryBlockCount: recoveryBlockCount,
+               coefficients: coefficients,
+               onProgress: onProgress
+           ) {
+            recoveryData = gpuResult
+        } else {
+            // CPU fallback with limited parallelism
+            recoveryData = try generateRecoveryDataCPU(
+                data: data,
+                blockSize: blockSize,
+                blockCount: blockCount,
+                recoveryBlockCount: recoveryBlockCount,
+                coefficients: coefficients,
+                onProgress: onProgress,
+                cancelFlag: cancelFlag
+            )
         }
 
         // Write PAR2-style header + recovery data
         var output = Data()
-        // Header: magic + original file size + block size + block count + recovery count
+        let headerSize = 4 + 8 + 4 + 4 + 4
+        output.reserveCapacity(headerSize + recoveryData.count)
+
         let magic = "PV2R".data(using: .ascii)!
         output.append(magic)
         var fileSize = UInt64(data.count)
@@ -52,6 +100,73 @@ actor RedundancyService {
 
         try output.write(to: par2URL, options: .atomic)
         return par2URL
+    }
+
+    // MARK: - CPU Fallback
+
+    nonisolated private func generateRecoveryDataCPU(
+        data: Data,
+        blockSize: Int,
+        blockCount: Int,
+        recoveryBlockCount: Int,
+        coefficients: [UInt8],
+        onProgress: (@Sendable (Double) -> Void)?,
+        cancelFlag: OSAllocatedUnfairLock<Bool>?
+    ) throws -> Data {
+        let recoveryBuffer = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: recoveryBlockCount * blockSize)
+        defer { recoveryBuffer.deallocate() }
+        recoveryBuffer.initialize(repeating: 0)
+
+        let mulTable = Self.mulTable
+        let totalWork = recoveryBlockCount * blockCount
+        let completedWork = OSAllocatedUnfairLock(initialState: 0)
+        let reportInterval = max(1, totalWork / 50)
+        let maxConcurrency = max(2, ProcessInfo.processInfo.activeProcessorCount / 2)
+
+        data.withUnsafeBytes { rawData in
+            let dataBytes = rawData.bindMemory(to: UInt8.self)
+
+            let queue = OperationQueue()
+            queue.maxConcurrentOperationCount = maxConcurrency
+            queue.qualityOfService = .userInitiated
+
+            for r in 0..<recoveryBlockCount {
+                queue.addOperation {
+                    if let flag = cancelFlag, flag.withLock({ $0 }) { return }
+
+                    let parityStart = r * blockSize
+                    let coeffBase = r * blockCount
+
+                    for b in 0..<blockCount {
+                        if b % 64 == 0, let flag = cancelFlag, flag.withLock({ $0 }) { return }
+
+                        let srcStart = b * blockSize
+                        let srcEnd = min(srcStart + blockSize, dataBytes.count)
+                        let coeff = Int(coefficients[coeffBase + b])
+                        let coeffRow = mulTable[coeff]
+
+                        for i in srcStart..<srcEnd {
+                            recoveryBuffer[parityStart + (i - srcStart)] ^= coeffRow[Int(dataBytes[i])]
+                        }
+
+                        let completed = completedWork.withLock { state -> Int in
+                            state += 1
+                            return state
+                        }
+                        if completed % reportInterval == 0 || completed == totalWork {
+                            onProgress?(Double(completed) / Double(totalWork))
+                        }
+                    }
+                }
+            }
+            queue.waitUntilAllOperationsAreFinished()
+        }
+
+        if let flag = cancelFlag, flag.withLock({ $0 }) {
+            throw CancellationError()
+        }
+
+        return Data(UnsafeBufferPointer(start: recoveryBuffer.baseAddress!, count: recoveryBlockCount * blockSize))
     }
 
     func verify(par2URL: URL, originalFileURL: URL) throws -> Bool {
@@ -162,15 +277,17 @@ actor RedundancyService {
         return nil
     }
 
+    // MARK: - GF(2^8) Arithmetic (nonisolated for concurrent access)
+
     // Vandermonde coefficient: (row+1)^col in GF(2^8)
     // This produces a Vandermonde matrix which is guaranteed non-singular
     // as long as all row values (1, 2, 3, ...) are distinct in GF(2^8).
-    private func vandermondeCoefficient(row: Int, col: Int) -> UInt8 {
+    nonisolated private func vandermondeCoefficient(row: Int, col: Int) -> UInt8 {
         galoisPow(UInt8(row + 1), col)
     }
 
     // GF(2^8) exponentiation by squaring
-    private func galoisPow(_ base: UInt8, _ exp: Int) -> UInt8 {
+    nonisolated private func galoisPow(_ base: UInt8, _ exp: Int) -> UInt8 {
         guard exp > 0 else { return 1 }
         var result: UInt8 = 1
         var b = base
@@ -186,7 +303,7 @@ actor RedundancyService {
     }
 
     // GF(2^8) multiplication with primitive polynomial 0x11D
-    private func galoisMultiply(_ a: UInt8, _ b: UInt8) -> UInt8 {
+    nonisolated private func galoisMultiply(_ a: UInt8, _ b: UInt8) -> UInt8 {
         var result: UInt16 = 0
         var a = UInt16(a)
         var b = UInt16(b)
@@ -207,7 +324,7 @@ actor RedundancyService {
     }
 
     // GF(2^8) multiplicative inverse via brute force (field is small)
-    private func galoisInverse(_ a: UInt8) -> UInt8 {
+    nonisolated private func galoisInverse(_ a: UInt8) -> UInt8 {
         guard a != 0 else { return 0 }
         for b: UInt16 in 1...255 {
             if galoisMultiply(a, UInt8(b)) == 1 {
