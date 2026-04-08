@@ -5,7 +5,7 @@ import CryptoKit
 actor CatalogBackupService {
     private let b2Service = B2Service()
 
-    /// Save catalog.json to all mounted external volumes.
+    /// Save catalog.json, its SHA-256 checksum, and PAR2 recovery data to all mounted external volumes.
     func backupToVolumes(catalog: Catalog, volumes: [VolumeSnapshot]) async -> [String] {
         var errors: [String] = []
 
@@ -21,14 +21,34 @@ actor CatalogBackupService {
             return ["Failed to encode catalog: \(error.localizedDescription)"]
         }
 
+        let checksum = Catalog.sha256Hex(of: data)
+
+        // Generate PAR2 once for all volumes
+        let par2Data: Data? = {
+            let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: tmpDir) }
+            let tmpCatalog = tmpDir.appendingPathComponent("catalog.json")
+            try? data.write(to: tmpCatalog, options: .atomic)
+            let redundancy = RedundancyService()
+            guard let par2URL = try? redundancy.generatePAR2(for: tmpCatalog, outputDirectory: tmpDir) else { return nil }
+            return try? Data(contentsOf: par2URL)
+        }()
+
         for volume in volumes {
             guard let mountURL = volume.mountURL else {
                 continue
             }
 
             let destURL = mountURL.appendingPathComponent("catalog.json")
+            let checksumURL = mountURL.appendingPathComponent("catalog.json.sha256")
+            let par2URL = mountURL.appendingPathComponent("catalog.json.par2")
             do {
                 try data.write(to: destURL, options: .atomic)
+                try checksum.write(to: checksumURL, atomically: true, encoding: .utf8)
+                if let par2Data {
+                    try par2Data.write(to: par2URL, options: .atomic)
+                }
             } catch {
                 errors.append("Failed to save catalog to \(volume.label): \(error.localizedDescription)")
             }
@@ -63,6 +83,36 @@ actor CatalogBackupService {
                 fileName: "catalog.json",
                 sha1: sha1,
                 contentType: "application/json"
+            )
+
+            // Upload SHA-256 checksum sidecar
+            let checksum = Catalog.sha256Hex(of: data)
+            let checksumData = Data(checksum.utf8)
+            let checksumSha1 = sha1Hash(of: checksumData)
+            try await b2Service.getUploadURL(bucketId: credentials.bucketId)
+            _ = try await b2Service.uploadFile(
+                fileData: checksumData,
+                fileName: "catalog.json.sha256",
+                sha1: checksumSha1,
+                contentType: "text/plain"
+            )
+
+            // Upload PAR2 recovery data
+            let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: tmpDir) }
+            let tmpCatalog = tmpDir.appendingPathComponent("catalog.json")
+            try data.write(to: tmpCatalog, options: .atomic)
+            let redundancy = RedundancyService()
+            let par2URL = try redundancy.generatePAR2(for: tmpCatalog, outputDirectory: tmpDir)
+            let par2Data = try Data(contentsOf: par2URL)
+            let par2Sha1 = sha1Hash(of: par2Data)
+            try await b2Service.getUploadURL(bucketId: credentials.bucketId)
+            _ = try await b2Service.uploadFile(
+                fileData: par2Data,
+                fileName: "catalog.json.par2",
+                sha1: par2Sha1,
+                contentType: "application/octet-stream"
             )
             return nil
         } catch {

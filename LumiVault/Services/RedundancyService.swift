@@ -169,7 +169,7 @@ actor RedundancyService {
         return Data(UnsafeBufferPointer(start: recoveryBuffer.baseAddress!, count: recoveryBlockCount * blockSize))
     }
 
-    func verify(par2URL: URL, originalFileURL: URL) throws -> Bool {
+    nonisolated func verify(par2URL: URL, originalFileURL: URL) throws -> Bool {
         let par2Data = try Data(contentsOf: par2URL)
         guard par2Data.count >= 24,
               String(data: par2Data[0..<4], encoding: .ascii) == "PV2R" else {
@@ -187,7 +187,7 @@ actor RedundancyService {
     /// Returns the repaired data, or nil if repair fails.
     /// Supports repairing single-block corruption using cross-verification
     /// across multiple recovery blocks.
-    func repair(par2URL: URL, corruptedFileURL: URL) throws -> Data? {
+    nonisolated func repair(par2URL: URL, corruptedFileURL: URL) throws -> Data? {
         let par2Data = try Data(contentsOf: par2URL)
         guard par2Data.count >= 24,
               String(data: par2Data[0..<4], encoding: .ascii) == "PV2R" else {

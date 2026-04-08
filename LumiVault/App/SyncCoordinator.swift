@@ -10,6 +10,7 @@ final class SyncCoordinator: @unchecked Sendable {
     private(set) var lastSyncedAt: Date?
     private(set) var lastError: String?
     private(set) var isICloudAvailable: Bool = false
+    private(set) var catalogIntegrity: Catalog.IntegrityStatus?
 
     private let catalogService = CatalogService()
     private let backupService = CatalogBackupService()
@@ -28,7 +29,15 @@ final class SyncCoordinator: @unchecked Sendable {
         let catalogPath = await MainActor.run {
             NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
         }
-        try? await catalogService.load(from: URL(fileURLWithPath: catalogPath))
+        let catalogURL = URL(fileURLWithPath: catalogPath)
+
+        // Verify catalog integrity before loading
+        if FileManager.default.fileExists(atPath: catalogPath) {
+            let status = await MainActor.run { Catalog.verifyIntegrity(at: catalogURL) }
+            await MainActor.run { catalogIntegrity = status }
+        }
+
+        try? await catalogService.load(from: catalogURL)
 
         // Initialize sync service
         let service = SyncService(catalogService: catalogService)

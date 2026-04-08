@@ -3,11 +3,14 @@ import SwiftData
 
 struct ContentView: View {
     @Query private var albums: [AlbumRecord]
+    @Environment(SyncCoordinator.self) private var syncCoordinator
     @State private var selectedAlbum: AlbumRecord?
     @State private var selectedImage: ImageRecord?
     @State private var columnVisibility: NavigationSplitViewVisibility = .detailOnly
     @State private var showingPhotosImport = false
     @State private var showingNearDuplicates = false
+    @State private var showingIntegrityAlert = false
+    @State private var showingRepairNotice = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -65,6 +68,33 @@ struct ContentView: View {
             if !albums.isEmpty {
                 columnVisibility = .all
             }
+        }
+        .onChange(of: syncCoordinator.catalogIntegrity) {
+            switch syncCoordinator.catalogIntegrity {
+            case .corrupt:
+                showingIntegrityAlert = true
+            case .repaired:
+                showingRepairNotice = true
+            default:
+                break
+            }
+        }
+        .alert("Catalog Integrity Warning", isPresented: $showingIntegrityAlert) {
+            Button("Restore from Backup...") {
+                // Navigate to welcome/restore flow
+            }
+            Button("Continue Anyway", role: .cancel) { }
+        } message: {
+            if case .corrupt(let expected, let actual) = syncCoordinator.catalogIntegrity {
+                Text("The catalog file is corrupted and PAR2 repair failed.\n\nExpected: \(String(expected.prefix(16)))...\nActual: \(String(actual.prefix(16)))...\n\nRestore from an external volume or B2 backup.")
+            } else {
+                Text("The catalog file may be corrupted.")
+            }
+        }
+        .alert("Catalog Repaired", isPresented: $showingRepairNotice) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Corruption was detected in catalog.json and automatically repaired using PAR2 error correction data.")
         }
     }
 }
