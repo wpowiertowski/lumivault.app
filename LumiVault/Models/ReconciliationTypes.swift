@@ -24,6 +24,7 @@ enum DiscrepancyKind: Sendable, Hashable {
     case danglingB2FileId                               // DB says in B2, not found
     case orphanInB2(fileId: String, fileName: String)   // In B2, not in DB
     case missingFromVolume(volumeID: String)            // On other volumes but not this one
+    case hashMismatch(volumeID: String, expected: String, actual: String) // File exists but hash differs
 }
 
 struct Discrepancy: Sendable, Identifiable {
@@ -61,6 +62,7 @@ struct ReconciliationReport: Sendable {
 enum ReconciliationPhase: String, Sendable {
     case idle = "Idle"
     case scanningVolumes = "Scanning volumes"
+    case verifyingHashes = "Verifying file integrity"
     case scanningB2 = "Scanning B2"
     case resolving = "Resolving"
     case complete = "Complete"

@@ -9,6 +9,7 @@ struct ReconciliationView: View {
     @State private var progress = ReconciliationProgress()
     @State private var report: ReconciliationReport?
     @State private var isScanning = false
+    @State private var verifyHashes = false
 
     private let reconciliationService = ReconciliationService()
 
@@ -30,6 +31,13 @@ struct ReconciliationView: View {
                     Text("\(report.discrepancies.count) issues found")
                         .font(Constants.Design.monoCaption)
                         .foregroundStyle(.secondary)
+                } else {
+                    Toggle("Verify file hashes", isOn: $verifyHashes)
+                        .font(Constants.Design.monoCaption)
+                        .toggleStyle(.checkbox)
+                        .disabled(isScanning)
+                        .help("Compute SHA-256 of every file on volumes to detect corruption. Slower but thorough.")
+                        .accessibilityIdentifier("integrity.verifyHashes")
                 }
                 Spacer()
                 Button(isScanning ? "Scanning..." : "Scan") { startScan() }
@@ -144,12 +152,14 @@ struct ReconciliationView: View {
         }
 
         let progress = self.progress
+        let verifyHashes = self.verifyHashes
 
         Task { @MainActor in
             let result = await reconciliationService.reconcile(
                 snapshots: snapshots,
                 volumes: volumeSnapshots,
                 b2Credentials: b2Creds,
+                verifyHashes: verifyHashes,
                 progress: progress
             )
 
@@ -176,6 +186,7 @@ struct ReconciliationView: View {
         var danglingB2: [Discrepancy] = []
         var orphansB2: [Discrepancy] = []
         var missing: [Discrepancy] = []
+        var hashMismatches: [Discrepancy] = []
 
         for d in discrepancies {
             switch d.kind {
@@ -184,10 +195,12 @@ struct ReconciliationView: View {
             case .danglingB2FileId: danglingB2.append(d)
             case .orphanInB2: orphansB2.append(d)
             case .missingFromVolume: missing.append(d)
+            case .hashMismatch: hashMismatches.append(d)
             }
         }
 
         var groups: [DiscrepancyGroup] = []
+        if !hashMismatches.isEmpty { groups.append(.init(title: "Corrupted Files", items: hashMismatches)) }
         if !dangling.isEmpty { groups.append(.init(title: "Missing from Volume", items: dangling)) }
         if !orphansVolume.isEmpty { groups.append(.init(title: "Untracked on Volume", items: orphansVolume)) }
         if !danglingB2.isEmpty { groups.append(.init(title: "Missing from B2", items: danglingB2)) }
@@ -223,6 +236,7 @@ private struct DiscrepancyRow: View {
         case .danglingLocation, .danglingB2FileId: "exclamationmark.triangle"
         case .orphanOnVolume, .orphanInB2: "questionmark.circle"
         case .missingFromVolume: "arrow.right.circle"
+        case .hashMismatch: "xmark.shield"
         }
     }
 
@@ -231,6 +245,7 @@ private struct DiscrepancyRow: View {
         case .danglingLocation, .danglingB2FileId: .orange
         case .orphanOnVolume, .orphanInB2: .yellow
         case .missingFromVolume: .blue
+        case .hashMismatch: .red
         }
     }
 
@@ -241,6 +256,7 @@ private struct DiscrepancyRow: View {
         case .danglingB2FileId: "B2 file ID recorded but file not found in bucket"
         case .orphanInB2(_, let name): "In B2 as \(name), not tracked in catalog"
         case .missingFromVolume(let vid): "Not mirrored to volume \(vid)"
+        case .hashMismatch(let vid, let expected, let actual): "Hash mismatch on \(vid): expected \(String(expected.prefix(8)))… got \(String(actual.prefix(8)))…"
         }
     }
 }

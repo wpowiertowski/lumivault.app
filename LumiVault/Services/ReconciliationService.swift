@@ -10,17 +10,25 @@ actor ReconciliationService {
         snapshots: [ImageSnapshot],
         volumes: [VolumeSnapshot],
         b2Credentials: B2Credentials?,
+        verifyHashes: Bool = false,
         progress: ReconciliationProgress
     ) async -> ReconciliationReport {
         var discrepancies: [Discrepancy] = []
         var scannedB2Files = 0
 
-        // Phase 1: Scan volumes
+        // Phase 1: Scan volumes (existence check)
         await MainActor.run { progress.phase = .scanningVolumes }
         let volumeResults = await scanVolumes(snapshots: snapshots, volumes: volumes, progress: progress)
         discrepancies.append(contentsOf: volumeResults)
 
-        // Phase 2: Scan B2
+        // Phase 2: Verify file hashes on volumes (optional, slow)
+        if verifyHashes {
+            await MainActor.run { progress.phase = .verifyingHashes }
+            let hashResults = await verifyFileHashes(snapshots: snapshots, volumes: volumes, progress: progress)
+            discrepancies.append(contentsOf: hashResults)
+        }
+
+        // Phase 3: Scan B2
         if let credentials = b2Credentials {
             await MainActor.run { progress.phase = .scanningB2 }
             do {
@@ -156,6 +164,58 @@ actor ReconciliationService {
         return orphans
     }
 
+    // MARK: - Hash Verification
+
+    private func verifyFileHashes(
+        snapshots: [ImageSnapshot],
+        volumes: [VolumeSnapshot],
+        progress: ReconciliationProgress
+    ) async -> [Discrepancy] {
+        var discrepancies: [Discrepancy] = []
+        let volumeMap = Dictionary(uniqueKeysWithValues: volumes.map { ($0.volumeID, $0) })
+
+        // Count total files to verify for progress
+        let totalFiles = snapshots.reduce(0) { $0 + $1.storageLocations.count }
+        await MainActor.run {
+            progress.totalItems = totalFiles
+            progress.processedItems = 0
+        }
+
+        var verified = 0
+        for snapshot in snapshots {
+            for location in snapshot.storageLocations {
+                guard let volume = volumeMap[location.volumeID] else {
+                    verified += 1
+                    continue
+                }
+
+                let fileURL = volume.mountURL.appendingPathComponent(location.relativePath)
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    if let actualHash = try? await hasher.sha256(of: fileURL),
+                       actualHash != snapshot.sha256 {
+                        discrepancies.append(Discrepancy(
+                            sha256: snapshot.sha256,
+                            filename: snapshot.filename,
+                            kind: .hashMismatch(
+                                volumeID: location.volumeID,
+                                expected: snapshot.sha256,
+                                actual: actualHash
+                            )
+                        ))
+                    }
+                }
+
+                verified += 1
+                await MainActor.run {
+                    progress.processedItems = verified
+                    progress.discrepanciesFound = discrepancies.count
+                }
+            }
+        }
+
+        return discrepancies
+    }
+
     // MARK: - B2 Scanning (pure function for testability)
 
     nonisolated static func diffB2(
@@ -196,10 +256,14 @@ actor ReconciliationService {
             }
         }
 
+        // Catalog metadata files managed by CatalogBackupService — not image data
+        let catalogMetadataFiles: Set<String> = ["catalog.json", "catalog.json.sha256", "catalog.json.par2"]
+
         // Check: B2 files not referenced by any snapshot
         for b2File in b2Files {
-            // Skip PAR2 companion files
+            // Skip PAR2 companion files and catalog metadata
             if b2File.fileName.hasSuffix(".par2") { continue }
+            if catalogMetadataFiles.contains(b2File.fileName) { continue }
 
             if !referencedB2Ids.contains(b2File.fileId) {
                 discrepancies.append(Discrepancy(
