@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="Delete albums and photos from LumiVault, external volumes, and B2.">
+    <meta name="keywords" content="delete, remove, album, photo, cleanup">
+    <title>Deleting Albums &amp; Photos</title>
+    <link rel="stylesheet" href="help.css">
+</head>
+<body>
+    <a href="index.html" class="back">&larr; LumiVault Help</a>
+    <h1>Deleting Albums &amp; Photos</h1>
+
+    <p>LumiVault can remove photos and albums from the catalog, external volumes, and B2 in one step.</p>
+
+    <h2>Deleting an Album</h2>
+    <ol>
+        <li>Right-click (or Control-click) an album in the sidebar.</li>
+        <li>Select <strong>Delete Album</strong> from the context menu.</li>
+        <li>Confirm the deletion in the alert dialog.</li>
+    </ol>
+    <p>This removes:</p>
+    <ul>
+        <li>The album entry and all its photo records from the catalog.</li>
+        <li>All associated files from every configured external volume.</li>
+        <li>All associated files from B2 (if B2 is enabled).</li>
+        <li>PAR2 parity files alongside the originals.</li>
+    </ul>
+
+    <h2>Deleting Individual Photos</h2>
+    <ol>
+        <li>Select a photo in the grid.</li>
+        <li>Right-click and select <strong>Delete Photo</strong>, or press <kbd>&#x232B;</kbd> (Delete).</li>
+        <li>Confirm the deletion.</li>
+    </ol>
+    <p>The photo is removed from the album, all volumes, and B2.</p>
+
+    <h2>What Deletion Does Not Affect</h2>
+    <ul>
+        <li><strong>Your Photos library</strong> &mdash; LumiVault never modifies Apple Photos. Deleting from LumiVault only removes the archived copies.</li>
+        <li><strong>Other albums</strong> &mdash; if the same image (by SHA-256) exists in another album, those references are unaffected.</li>
+    </ul>
+
+    <div class="warning">
+        <strong>Warning:</strong> Deletion is permanent. Files are removed from all storage locations. Make sure you have the originals in Photos or another backup before deleting.
+    </div>
+</body>
+</html>

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="Set up Backblaze B2 cloud storage for LumiVault photo backups.">
+    <meta name="keywords" content="backblaze, b2, cloud, upload, backup, credentials">
+    <title>Backblaze B2 Cloud Storage</title>
+    <link rel="stylesheet" href="help.css">
+</head>
+<body>
+    <a href="index.html" class="back">&larr; LumiVault Help</a>
+    <h1>Backblaze B2 Cloud Storage</h1>
+
+    <p>LumiVault can upload archived photos to Backblaze B2 for off-site cloud backup. Uploads include SHA-1 verification to ensure data integrity.</p>
+
+    <h2>Setting Up B2</h2>
+    <ol>
+        <li>Create a <a href="https://www.backblaze.com/b2/cloud-storage.html">Backblaze B2</a> account if you don't have one.</li>
+        <li>Create a bucket in the B2 dashboard. Note the <strong>Bucket ID</strong> and <strong>Bucket Name</strong>.</li>
+        <li>Create an application key with read/write access to your bucket. Note the <strong>Key ID</strong> and <strong>Application Key</strong>.</li>
+        <li>In LumiVault, open <strong>Settings &gt; B2</strong> (<kbd>&#x2318;,</kbd>).</li>
+        <li>Enable B2, enter your credentials, and click <strong>Save</strong>.</li>
+        <li>Click <strong>Test Connection</strong> to verify your credentials work.</li>
+    </ol>
+
+    <h2>Uploading</h2>
+    <p>During export, enable the <strong>B2 Upload</strong> toggle. After files are copied to local volumes, LumiVault uploads each file to B2 with:</p>
+    <ul>
+        <li><strong>SHA-1 verification</strong> &mdash; B2 verifies the uploaded file matches the SHA-1 hash sent with the request.</li>
+        <li><strong>Same folder structure</strong> &mdash; files are stored in B2 using the same date/album path as local volumes.</li>
+        <li><strong>PAR2 files included</strong> &mdash; if PAR2 is enabled, parity files are uploaded alongside the originals.</li>
+    </ul>
+
+    <h2>Catalog Backup</h2>
+    <p>LumiVault automatically uploads <code>catalog.json</code> to B2 after each export, providing an off-site catalog backup.</p>
+
+    <h2>Deletion</h2>
+    <p>When you delete albums or photos, LumiVault removes the corresponding files from B2 as well as from local volumes.</p>
+
+    <div class="warning">
+        <strong>Important:</strong> B2 storage incurs costs based on storage used and downloads. Review Backblaze pricing before enabling large uploads.
+    </div>
+</body>
+</html>

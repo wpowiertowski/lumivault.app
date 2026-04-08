@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="Back up and restore your LumiVault catalog.">
+    <meta name="keywords" content="catalog, backup, restore, json, recovery">
+    <title>Catalog Backup &amp; Restore</title>
+    <link rel="stylesheet" href="help.css">
+</head>
+<body>
+    <a href="index.html" class="back">&larr; LumiVault Help</a>
+    <h1>Catalog Backup &amp; Restore</h1>
+
+    <p>The catalog (<code>catalog.json</code>) is the central database of your LumiVault library. It records every album, photo, hash, and storage location. LumiVault automatically distributes backup copies to keep it safe.</p>
+
+    <h2>Automatic Backups</h2>
+    <p>After each export, LumiVault saves a copy of <code>catalog.json</code> to:</p>
+    <ul>
+        <li><strong>Each external volume</strong> &mdash; stored at the root of the LumiVault folder on each configured drive.</li>
+        <li><strong>Backblaze B2</strong> &mdash; uploaded alongside your photos (if B2 is enabled).</li>
+    </ul>
+
+    <h2>Restoring from Backup</h2>
+    <p>If your local catalog is lost or corrupted, you can restore from any backup copy:</p>
+    <ul>
+        <li><strong>From a file</strong> &mdash; click <strong>Restore from File</strong> on the welcome screen or in <strong>Settings &gt; General</strong>. Select a <code>catalog.json</code> file from any location.</li>
+        <li><strong>From a volume</strong> &mdash; click <strong>Restore from Volume</strong> and select an external drive. LumiVault finds the catalog on that volume automatically.</li>
+        <li><strong>From B2</strong> &mdash; click <strong>Restore from B2</strong>. LumiVault downloads the latest catalog from your configured B2 bucket.</li>
+    </ul>
+
+    <h2>Detect Existing Catalog</h2>
+    <p>The <strong>Detect Existing</strong> button scans connected volumes for a <code>catalog.json</code> and offers to import it. Useful when setting up LumiVault on a new Mac with your existing archive drives.</p>
+
+    <div class="warning">
+        <strong>Important:</strong> Restoring a catalog replaces your current catalog entirely. Make sure you're restoring from the most recent backup to avoid losing recent imports.
+    </div>
+</body>
+</html>

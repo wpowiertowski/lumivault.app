@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="Verify file integrity and reconcile storage in LumiVault.">
+    <meta name="keywords" content="integrity, reconciliation, verify, hash, corruption, repair">
+    <title>Integrity &amp; Reconciliation</title>
+    <link rel="stylesheet" href="help.css">
+</head>
+<body>
+    <a href="index.html" class="back">&larr; LumiVault Help</a>
+    <h1>Integrity &amp; Reconciliation</h1>
+
+    <p>LumiVault provides tools to verify that your archived photos remain intact and that all storage locations are in sync.</p>
+
+    <h2>Integrity Verification</h2>
+    <p>Open <strong>Settings &gt; Integrity</strong> and click <strong>Verify All</strong> to scan your archive:</p>
+    <ol>
+        <li>LumiVault reads each file from connected volumes.</li>
+        <li>Computes a fresh SHA-256 hash.</li>
+        <li>Compares it against the hash stored in the catalog.</li>
+        <li>Reports any mismatches, indicating potential corruption.</li>
+    </ol>
+
+    <h2>Reconciliation</h2>
+    <p>Click <strong>Reconcile</strong> to compare the catalog against actual storage:</p>
+    <ul>
+        <li><strong>Missing files</strong> &mdash; files listed in the catalog but not found on a volume.</li>
+        <li><strong>Extra files</strong> &mdash; files on a volume that aren't in the catalog.</li>
+        <li><strong>B2 discrepancies</strong> &mdash; files missing from or extra in B2 cloud storage.</li>
+    </ul>
+
+    <h2>Repairing Corruption</h2>
+    <p>If a file fails integrity verification:</p>
+    <ol>
+        <li>Check if a healthy copy exists on another volume.</li>
+        <li>If PAR2 parity data is available, use it to repair the corrupted file.</li>
+        <li>Re-download from B2 if the cloud copy is intact.</li>
+    </ol>
+
+    <div class="note">
+        <strong>Tip:</strong> Run integrity verification periodically (e.g., monthly) to catch corruption early, while PAR2 repair is still possible.
+    </div>
+</body>
+</html>

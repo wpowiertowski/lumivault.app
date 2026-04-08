@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="AES-256-GCM encryption for photos in LumiVault.">
+    <meta name="keywords" content="encryption, aes, gcm, passphrase, security, privacy">
+    <title>Encryption</title>
+    <link rel="stylesheet" href="help.css">
+</head>
+<body>
+    <a href="index.html" class="back">&larr; LumiVault Help</a>
+    <h1>Encryption</h1>
+
+    <p>LumiVault can encrypt your archived photos with AES-256-GCM, ensuring that files on external volumes and B2 are unreadable without your passphrase.</p>
+
+    <h2>Setting Up Encryption</h2>
+    <ol>
+        <li>Open <strong>Settings &gt; Encryption</strong> (<kbd>&#x2318;,</kbd>).</li>
+        <li>Enter and confirm a passphrase.</li>
+        <li>Click <strong>Create Key</strong>. LumiVault derives an encryption key using PBKDF2 with a random salt.</li>
+    </ol>
+
+    <h2>Encrypting Photos</h2>
+    <p>During export, enable the <strong>Encryption</strong> toggle. Each file is encrypted individually:</p>
+    <ul>
+        <li><strong>Algorithm</strong> &mdash; AES-256-GCM (authenticated encryption).</li>
+        <li><strong>Key derivation</strong> &mdash; PBKDF2 with your passphrase and a per-key salt.</li>
+        <li><strong>Per-file nonce</strong> &mdash; each file gets a unique random nonce.</li>
+        <li><strong>Authentication tag</strong> &mdash; GCM provides built-in integrity verification. Any tampering is detected during decryption.</li>
+    </ul>
+
+    <h2>Viewing Encrypted Photos</h2>
+    <p>When you select an encrypted photo in the grid, LumiVault decrypts it on-the-fly for the preview. You must unlock the encryption key at app launch by entering your passphrase.</p>
+
+    <h2>Encrypted File Format</h2>
+    <p>Encrypted files use the <code>.enc</code> extension appended to the original filename (e.g., <code>IMG_1234.jpg.enc</code>). The nonce and authentication tag are stored within the encrypted file.</p>
+
+    <div class="warning">
+        <strong>Important:</strong> If you lose your passphrase, encrypted files cannot be recovered. There is no recovery mechanism. Store your passphrase securely.
+    </div>
+</body>
+</html>

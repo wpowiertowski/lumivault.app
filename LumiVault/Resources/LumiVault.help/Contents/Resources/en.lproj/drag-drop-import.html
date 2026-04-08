@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="Import image files directly from Finder into LumiVault.">
+    <meta name="keywords" content="drag, drop, import, finder, files">
+    <title>Drag &amp; Drop Import</title>
+    <link rel="stylesheet" href="help.css">
+</head>
+<body>
+    <a href="index.html" class="back">&larr; LumiVault Help</a>
+    <h1>Drag &amp; Drop Import</h1>
+
+    <p>You can import image files directly from Finder into an existing album without going through the Photos library.</p>
+
+    <h2>How to Import</h2>
+    <ol>
+        <li>Select an album in the sidebar (or create one via Photos import first).</li>
+        <li>Drag image files from Finder onto the photo grid area.</li>
+        <li>Alternatively, click <strong>Import Files</strong> in the toolbar or use the drop zone's <strong>Choose Files</strong> button.</li>
+        <li>Review the file list and click <strong>Import</strong>.</li>
+    </ol>
+
+    <h2>Supported Formats</h2>
+    <p>LumiVault accepts any image format supported by macOS: JPEG, HEIF/HEIC, PNG, TIFF, RAW (CR2, ARW, DNG, etc.), and WebP.</p>
+
+    <h2>What Happens During Import</h2>
+    <ul>
+        <li><strong>Hashing</strong> &mdash; each file is hashed with SHA-256 for deduplication and integrity tracking.</li>
+        <li><strong>Deduplication</strong> &mdash; files already in the catalog (by hash) are skipped.</li>
+        <li><strong>Cataloging</strong> &mdash; new files are added to the album's catalog entry.</li>
+        <li><strong>Copying</strong> &mdash; files are written to configured external volumes.</li>
+    </ul>
+
+    <div class="note">
+        <strong>Note:</strong> Drag &amp; drop import does not apply format conversion, PAR2, or encryption. These options are only available through the Photos import flow. Dragged files are archived in their original format.
+    </div>
+</body>
+</html>

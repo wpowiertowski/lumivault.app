@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="PAR2 Reed-Solomon error correction in LumiVault.">
+    <meta name="keywords" content="par2, reed-solomon, error correction, bit rot, corruption, repair">
+    <title>PAR2 Error Correction</title>
+    <link rel="stylesheet" href="help.css">
+</head>
+<body>
+    <a href="index.html" class="back">&larr; LumiVault Help</a>
+    <h1>PAR2 Error Correction</h1>
+
+    <p>PAR2 (Parity Archive Volume 2) uses Reed-Solomon error correction codes to protect your archived photos against bit rot and storage corruption.</p>
+
+    <h2>How It Works</h2>
+    <ol>
+        <li>During export, LumiVault generates PAR2 parity files alongside each image.</li>
+        <li>Parity files contain redundant data computed from the original file using Reed-Solomon coding.</li>
+        <li>If a file is later damaged (bit rot, bad sectors), the parity data can reconstruct the missing or corrupted bytes.</li>
+    </ol>
+
+    <h2>Enabling PAR2</h2>
+    <p>Toggle <strong>PAR2</strong> in the export configuration step, or set it as default in <strong>Settings &gt; Export</strong>.</p>
+
+    <h2>Redundancy Percentage</h2>
+    <p>Configure the redundancy percentage in <strong>Settings &gt; General</strong>. This controls how much parity data is generated:</p>
+    <ul>
+        <li><strong>5%</strong> &mdash; recovers from minor corruption (few bad bytes).</li>
+        <li><strong>10%</strong> (default) &mdash; good balance of protection and file size overhead.</li>
+        <li><strong>20%+</strong> &mdash; maximum protection, larger parity files.</li>
+    </ul>
+
+    <h2>PAR2 Files</h2>
+    <p>For each archived image, PAR2 generates:</p>
+    <ul>
+        <li><code>photo.jpg.par2</code> &mdash; index file with verification checksums.</li>
+        <li><code>photo.jpg.vol00+01.par2</code> &mdash; recovery volume(s) with parity data.</li>
+    </ul>
+    <p>These files are stored alongside the originals on external volumes and uploaded to B2 if enabled.</p>
+
+    <h2>GPU Acceleration</h2>
+    <p>LumiVault uses Metal GPU acceleration for PAR2 generation when available, significantly speeding up parity computation on Apple Silicon Macs.</p>
+
+    <div class="note">
+        <strong>Tip:</strong> PAR2 protects against silent data corruption (bit rot) that can occur on any storage medium over time. It's especially valuable for long-term archival storage.
+    </div>
+</body>
+</html>

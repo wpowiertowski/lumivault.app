@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="Getting started with LumiVault photo archiving.">
+    <meta name="keywords" content="getting started, first launch, welcome, import, layout">
+    <title>Getting Started with LumiVault</title>
+    <link rel="stylesheet" href="help.css">
+</head>
+<body>
+    <a href="index.html" class="back">&larr; LumiVault Help</a>
+    <h1>Getting Started</h1>
+
+    <h2>First Launch</h2>
+    <p>When you open LumiVault for the first time, you'll see a welcome screen with two options:</p>
+    <ul>
+        <li><strong>Import from Photos</strong> &mdash; click the toolbar button (top-left) to select an album from your Photos library and begin archiving.</li>
+        <li><strong>Restore from backup</strong> &mdash; if you have a previous <code>catalog.json</code> backup on an external volume, in B2, or as a local file, use the restore buttons to import it.</li>
+    </ul>
+
+    <h2>Understanding the Layout</h2>
+    <p>LumiVault uses a three-column layout:</p>
+    <ol>
+        <li><strong>Sidebar</strong> (left) &mdash; your album library, organized by year. Search albums by name. Click the drive icon to see connected volumes.</li>
+        <li><strong>Photo Grid</strong> (center) &mdash; thumbnails of all photos in the selected album. Click a photo to view it.</li>
+        <li><strong>Detail Inspector</strong> (right) &mdash; full-resolution preview with metadata: file info, EXIF data, camera settings, SHA-256 hash, storage locations, encryption status, and GPS map when available.</li>
+    </ol>
+
+    <h2>Basic Workflow</h2>
+    <ol>
+        <li>Add one or more external volumes in <strong>Settings &gt; Volumes</strong>.</li>
+        <li>Click <strong>Import from Photos</strong> in the toolbar.</li>
+        <li>Select an album, configure export options (format, PAR2, encryption), and choose target volumes.</li>
+        <li>Click <strong>Start Export</strong>. LumiVault hashes, deduplicates, optionally encrypts, generates PAR2 recovery data, copies to volumes, and uploads to B2.</li>
+        <li>Your photos are now archived with redundancy across multiple storage locations.</li>
+    </ol>
+
+    <h2>Settings</h2>
+    <p>Open <strong>Settings</strong> (<kbd>&#x2318;,</kbd>) to configure:</p>
+    <ul>
+        <li><strong>General</strong> &mdash; catalog path, redundancy percentage, thumbnail cache</li>
+        <li><strong>Export</strong> &mdash; default image format, quality, dimensions, PAR2, near-duplicate detection</li>
+        <li><strong>Volumes</strong> &mdash; add/remove external drives</li>
+        <li><strong>iCloud</strong> &mdash; catalog sync across devices</li>
+        <li><strong>B2</strong> &mdash; Backblaze cloud storage credentials</li>
+        <li><strong>Encryption</strong> &mdash; passphrase and key management</li>
+        <li><strong>Integrity</strong> &mdash; storage reconciliation scans</li>
+        <li><strong>Support</strong> &mdash; tip jar</li>
+    </ul>
+</body>
+</html>

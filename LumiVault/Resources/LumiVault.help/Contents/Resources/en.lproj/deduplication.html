@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="SHA-256 and perceptual hash deduplication in LumiVault.">
+    <meta name="keywords" content="deduplication, sha256, hash, near-duplicate, perceptual">
+    <title>Deduplication</title>
+    <link rel="stylesheet" href="help.css">
+</head>
+<body>
+    <a href="index.html" class="back">&larr; LumiVault Help</a>
+    <h1>Deduplication</h1>
+
+    <p>LumiVault prevents wasted storage by detecting exact duplicates and near-duplicates before archiving.</p>
+
+    <h2>Exact Deduplication (SHA-256)</h2>
+    <p>Every imported file is hashed with SHA-256. If a file with the same hash already exists in the catalog, it is skipped. This catches byte-for-byte identical files regardless of filename.</p>
+
+    <h2>Near-Duplicate Detection</h2>
+    <p>Enable <strong>Near-Duplicates</strong> during export to detect visually similar images that aren't byte-identical (e.g., slightly different crops, edits, or re-exports).</p>
+
+    <h3>How It Works</h3>
+    <ol>
+        <li>LumiVault computes a perceptual hash (pHash) for each image &mdash; a compact fingerprint of the visual content.</li>
+        <li>Perceptual hashes are compared using Hamming distance (number of differing bits).</li>
+        <li>Pairs with a Hamming distance below the threshold are flagged as near-duplicates.</li>
+    </ol>
+
+    <h3>Reviewing Near-Duplicates</h3>
+    <p>After export, the completion screen shows near-duplicate pairs with:</p>
+    <ul>
+        <li>Side-by-side thumbnail previews.</li>
+        <li>Hamming distance score (lower = more similar).</li>
+    </ul>
+    <p>You can also review near-duplicates later via the <strong>Near-Duplicates</strong> toolbar button.</p>
+
+    <div class="note">
+        <strong>Note:</strong> Near-duplicate detection is informational. LumiVault flags potential duplicates but does not automatically skip them. You decide which to keep.
+    </div>
+</body>
+</html>

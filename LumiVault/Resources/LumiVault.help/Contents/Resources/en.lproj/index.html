@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="LumiVault Help">
+    <meta name="keywords" content="LumiVault, photo, archive, backup">
+    <title>LumiVault Help</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+            background: #fff;
+            -webkit-font-smoothing: antialiased;
+        }
+        @media (prefers-color-scheme: dark) {
+            body { background: #1e1e1e; color: #e0e0e0; }
+            a { color: #5a9fd4; }
+            h1, h2, h3 { color: #f0f0f0; }
+            .topic-card { background: #2a2a2a; border-color: #3a3a3a; }
+            .topic-card:hover { background: #333; }
+            kbd { background: #3a3a3a; border-color: #555; color: #e0e0e0; }
+        }
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .subtitle {
+            color: #888;
+            font-size: 13px;
+            margin-bottom: 24px;
+        }
+        h2 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-top: 28px;
+            margin-bottom: 12px;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .topic-card {
+            display: block;
+            padding: 12px 14px;
+            margin-bottom: 6px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            text-decoration: none;
+            color: inherit;
+            transition: background 0.15s;
+        }
+        .topic-card:hover {
+            background: #f5f5f5;
+        }
+        .topic-title {
+            font-weight: 500;
+            font-size: 14px;
+            margin-bottom: 2px;
+        }
+        .topic-desc {
+            font-size: 12px;
+            color: #888;
+        }
+        kbd {
+            display: inline-block;
+            padding: 1px 5px;
+            font-family: -apple-system, monospace;
+            font-size: 11px;
+            background: #f0f0f0;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <h1>LumiVault Help</h1>
+    <p class="subtitle">Your photos, preserved forever.</p>
+
+    <h2>Getting Started</h2>
+    <a class="topic-card" href="getting-started.html">
+        <div class="topic-title">Getting Started with LumiVault</div>
+        <div class="topic-desc">First launch, importing your first album, and understanding the layout.</div>
+    </a>
+
+    <h2>Importing Photos</h2>
+    <a class="topic-card" href="photos-import.html">
+        <div class="topic-title">Import from Photos Library</div>
+        <div class="topic-desc">Select albums, configure export settings, and archive your photos.</div>
+    </a>
+    <a class="topic-card" href="drag-drop-import.html">
+        <div class="topic-title">Drag &amp; Drop Import</div>
+        <div class="topic-desc">Import image files directly from Finder into an existing album.</div>
+    </a>
+
+    <h2>Export &amp; Conversion</h2>
+    <a class="topic-card" href="export-settings.html">
+        <div class="topic-title">Export Formats &amp; Quality</div>
+        <div class="topic-desc">Choose between Original, JPEG, or HEIF. Configure quality and max dimensions.</div>
+    </a>
+
+    <h2>Storage &amp; Backup</h2>
+    <a class="topic-card" href="volumes.html">
+        <div class="topic-title">External Volumes</div>
+        <div class="topic-desc">Add external drives, mirror your library, and sync between volumes.</div>
+    </a>
+    <a class="topic-card" href="backblaze-b2.html">
+        <div class="topic-title">Backblaze B2 Cloud Storage</div>
+        <div class="topic-desc">Set up B2 credentials, upload photos, and manage cloud backups.</div>
+    </a>
+    <a class="topic-card" href="icloud-sync.html">
+        <div class="topic-title">iCloud Catalog Sync</div>
+        <div class="topic-desc">Sync your catalog across devices via iCloud Drive.</div>
+    </a>
+    <a class="topic-card" href="catalog-backup.html">
+        <div class="topic-title">Catalog Backup &amp; Restore</div>
+        <div class="topic-desc">Automatic distribution of catalog.json to volumes and B2. Restore from any backup.</div>
+    </a>
+
+    <h2>Data Protection</h2>
+    <a class="topic-card" href="par2.html">
+        <div class="topic-title">PAR2 Error Correction</div>
+        <div class="topic-desc">Reed-Solomon redundancy protects against bit rot and storage corruption.</div>
+    </a>
+    <a class="topic-card" href="encryption.html">
+        <div class="topic-title">Encryption</div>
+        <div class="topic-desc">AES-256-GCM file encryption with PBKDF2 key derivation.</div>
+    </a>
+    <a class="topic-card" href="deduplication.html">
+        <div class="topic-title">Deduplication</div>
+        <div class="topic-desc">Exact SHA-256 and perceptual hash near-duplicate detection.</div>
+    </a>
+    <a class="topic-card" href="integrity.html">
+        <div class="topic-title">Integrity &amp; Reconciliation</div>
+        <div class="topic-desc">Verify file hashes, scan for discrepancies, and repair corruption.</div>
+    </a>
+
+    <h2>Managing Your Library</h2>
+    <a class="topic-card" href="deletion.html">
+        <div class="topic-title">Deleting Albums &amp; Photos</div>
+        <div class="topic-desc">Remove photos from the catalog, external volumes, and B2 in one step.</div>
+    </a>
+
+    <h2>Keyboard Shortcuts</h2>
+    <a class="topic-card" href="shortcuts.html">
+        <div class="topic-title">Keyboard Shortcuts</div>
+        <div class="topic-desc">Quick reference for all keyboard shortcuts.</div>
+    </a>
+</body>
+</html>

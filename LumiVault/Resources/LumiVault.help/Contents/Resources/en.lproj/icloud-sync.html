@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="Sync your LumiVault catalog across devices via iCloud Drive.">
+    <meta name="keywords" content="icloud, sync, catalog, devices, cloud">
+    <title>iCloud Catalog Sync</title>
+    <link rel="stylesheet" href="help.css">
+</head>
+<body>
+    <a href="index.html" class="back">&larr; LumiVault Help</a>
+    <h1>iCloud Catalog Sync</h1>
+
+    <p>LumiVault can store its catalog in iCloud Drive, keeping your album metadata synchronized across all your Macs.</p>
+
+    <h2>Enabling iCloud Sync</h2>
+    <ol>
+        <li>Open <strong>Settings &gt; iCloud</strong> (<kbd>&#x2318;,</kbd>).</li>
+        <li>Enable iCloud catalog sync.</li>
+        <li>LumiVault moves the catalog to your iCloud Drive container.</li>
+    </ol>
+
+    <h2>What Syncs</h2>
+    <ul>
+        <li><strong>Catalog metadata</strong> &mdash; album names, dates, file lists, SHA-256 hashes, storage locations.</li>
+        <li><strong>Settings</strong> &mdash; volume bookmarks are device-specific and do not sync.</li>
+    </ul>
+
+    <h2>What Does Not Sync</h2>
+    <ul>
+        <li><strong>Photo files</strong> &mdash; actual image data stays on your external volumes and B2. Only the catalog (metadata) syncs.</li>
+        <li><strong>Thumbnails</strong> &mdash; regenerated locally from available volumes.</li>
+        <li><strong>Volume bookmarks</strong> &mdash; each Mac manages its own volume access.</li>
+    </ul>
+
+    <h2>Conflict Resolution</h2>
+    <p>If the catalog is modified on two devices simultaneously, iCloud Drive's file-level conflict resolution applies. LumiVault will detect the conflict on next launch and prompt you to choose which version to keep.</p>
+
+    <div class="note">
+        <strong>Tip:</strong> iCloud sync is for catalog metadata only. Your photos remain safely stored on external volumes and B2 regardless of iCloud status.
+    </div>
+</body>
+</html>

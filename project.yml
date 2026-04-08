@@ -29,6 +29,7 @@ targets:
           - Info.plist
     resources:
       - path: LumiVault/Resources/Assets.xcassets
+      - path: LumiVault/Resources/LumiVault.help
     settings:
       base:
         INFOPLIST_FILE: LumiVault/Info.plist

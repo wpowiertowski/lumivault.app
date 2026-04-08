@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="Add external drives and mirror your photo library with LumiVault.">
+    <meta name="keywords" content="volumes, external, drives, mirror, storage, backup">
+    <title>External Volumes</title>
+    <link rel="stylesheet" href="help.css">
+</head>
+<body>
+    <a href="index.html" class="back">&larr; LumiVault Help</a>
+    <h1>External Volumes</h1>
+
+    <p>LumiVault copies archived photos to external drives for redundant offline storage. Each volume receives a complete mirror of your exported files.</p>
+
+    <h2>Adding a Volume</h2>
+    <ol>
+        <li>Connect an external drive to your Mac.</li>
+        <li>Open <strong>Settings &gt; Volumes</strong> (<kbd>&#x2318;,</kbd>).</li>
+        <li>Click <strong>Add Volume</strong> and select the drive in the file picker.</li>
+        <li>LumiVault creates a security-scoped bookmark so it can access the volume in future sessions without re-prompting.</li>
+    </ol>
+
+    <h2>Volume Structure</h2>
+    <p>On each volume, LumiVault creates a <code>LumiVault/</code> directory with this structure:</p>
+    <pre><code>LumiVault/
+  2026/
+    04/
+      06/
+        My Album/
+          IMG_1234.jpg
+          IMG_1234.jpg.par2
+          IMG_1234.jpg.vol00+01.par2
+  catalog.json</code></pre>
+    <p>The date-based folder hierarchy matches the export date you set during import.</p>
+
+    <h2>Removing a Volume</h2>
+    <p>In <strong>Settings &gt; Volumes</strong>, click the remove button next to a volume. This only removes the volume from LumiVault's tracking &mdash; files on the drive are not deleted.</p>
+
+    <h2>Volume Status</h2>
+    <p>The sidebar shows a drive icon indicating volume connectivity. Click it to see which volumes are currently mounted and their sync status.</p>
+
+    <div class="note">
+        <strong>Tip:</strong> For best redundancy, use at least two external volumes stored in different physical locations. LumiVault mirrors to all selected volumes during export.
+    </div>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="Configure export formats, quality, and dimensions in LumiVault.">
+    <meta name="keywords" content="export, format, jpeg, heif, quality, dimensions, conversion">
+    <title>Export Formats &amp; Quality</title>
+    <link rel="stylesheet" href="help.css">
+</head>
+<body>
+    <a href="index.html" class="back">&larr; LumiVault Help</a>
+    <h1>Export Formats &amp; Quality</h1>
+
+    <p>When importing from Photos, LumiVault can convert images to a different format or keep the original. These settings apply per-export and can also be configured as defaults in <strong>Settings &gt; Export</strong>.</p>
+
+    <h2>Image Format</h2>
+    <table>
+        <tr><th>Format</th><th>Description</th></tr>
+        <tr><td>Original</td><td>Keep the format from Photos (usually HEIF or JPEG). No conversion applied.</td></tr>
+        <tr><td>JPEG</td><td>Convert to JPEG. Widely compatible. Quality slider controls compression (0&ndash;100%).</td></tr>
+        <tr><td>HEIF</td><td>Convert to HEIF/HEIC. Smaller file size at equivalent quality. Quality slider controls compression.</td></tr>
+    </table>
+
+    <h2>Quality Slider</h2>
+    <p>When JPEG or HEIF is selected, a quality slider appears (0&ndash;100%). Higher values produce larger files with better image fidelity. The default is 90%.</p>
+
+    <h2>Max Dimension</h2>
+    <p>Optionally cap the longest edge of exported images. For example, setting 2048 will resize a 4032&times;3024 image to 2048&times;1536. The original aspect ratio is always preserved. Set to 0 or leave blank to export at full resolution.</p>
+
+    <h2>Default Export Settings</h2>
+    <p>Open <strong>Settings &gt; Export</strong> (<kbd>&#x2318;,</kbd>) to set defaults that pre-fill every new export:</p>
+    <ul>
+        <li>Default image format</li>
+        <li>Default quality percentage</li>
+        <li>Default max dimension</li>
+        <li>PAR2 on/off</li>
+        <li>Near-duplicate detection on/off</li>
+    </ul>
+    <p>You can always override these per-export in the configuration step.</p>
+</body>
+</html>
