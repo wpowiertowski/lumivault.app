@@ -37,7 +37,7 @@ struct ExportDefaultsSettingsView: View {
                 .pickerStyle(.segmented)
                 .font(Constants.Design.monoBody)
 
-                if format.wrappedValue == .jpeg {
+                if format.wrappedValue == .jpeg || format.wrappedValue == .heif {
                     HStack {
                         Text("Quality")
                             .font(Constants.Design.monoBody)
@@ -56,7 +56,7 @@ struct ExportDefaultsSettingsView: View {
                 }
                 .font(Constants.Design.monoBody)
 
-                if format.wrappedValue == .jpeg || maxDimension.wrappedValue != .original {
+                if format.wrappedValue != .original || maxDimension.wrappedValue != .original {
                     Text("Images will be converted during export. Originals in Photos are not modified.")
                         .font(Constants.Design.monoCaption)
                         .foregroundStyle(.tertiary)

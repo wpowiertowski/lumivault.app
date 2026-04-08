@@ -1,11 +1,13 @@
 import Foundation
 import SwiftData
 import AppKit
+import CoreImage
 import os
 
 enum ImageFormat: String, Sendable, CaseIterable {
     case original = "Original"
     case jpeg = "JPEG"
+    case heif = "HEIF"
 }
 
 enum MaxDimension: Sendable, Hashable {
@@ -580,9 +582,9 @@ class ExportCoordinator {
         }
 
         let needsResize = targetWidth != pixelWidth || targetHeight != pixelHeight
-        let needsJPEG = format == .jpeg
+        let needsConversion = format == .jpeg || format == .heif
 
-        guard needsResize || needsJPEG else { return asset }
+        guard needsResize || needsConversion else { return asset }
 
         // Draw into bitmap at target pixel size
         guard let bitmapRep = NSBitmapImageRep(
@@ -610,15 +612,36 @@ class ExportCoordinator {
 
         let outputData: Data?
         let outputFilename: String
+        let stem = (asset.originalFilename as NSString).deletingPathExtension
 
-        if needsJPEG {
+        switch format {
+        case .jpeg:
             outputData = bitmapRep.representation(
                 using: .jpeg,
                 properties: [.compressionFactor: quality]
             )
-            let stem = (asset.originalFilename as NSString).deletingPathExtension
             outputFilename = stem + ".jpg"
-        } else {
+        case .heif:
+            // Use CIImage + CIContext for HEIF encoding (NSBitmapImageRep doesn't support HEIF directly)
+            if let ciImage = CIImage(bitmapImageRep: bitmapRep) {
+                let context = CIContext()
+                let colorSpace = ciImage.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+                let tempURL = staging.appendingPathComponent("heif-\(UUID().uuidString).heic")
+                let options: [CIImageRepresentationOption: Any] = [
+                    CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): quality
+                ]
+                try? context.writeHEIFRepresentation(of: ciImage,
+                                                     to: tempURL,
+                                                     format: .RGBA8,
+                                                     colorSpace: colorSpace,
+                                                     options: options)
+                outputData = try? Data(contentsOf: tempURL)
+                try? FileManager.default.removeItem(at: tempURL)
+            } else {
+                outputData = nil
+            }
+            outputFilename = stem + ".heic"
+        case .original:
             // Keep original format but resized — write as PNG
             outputData = bitmapRep.representation(using: .png, properties: [:])
             outputFilename = asset.originalFilename
