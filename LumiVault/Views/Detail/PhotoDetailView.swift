@@ -1,11 +1,13 @@
 import SwiftUI
 import SwiftData
+import ImageIO
 
 struct PhotoDetailView: View {
     let image: ImageRecord
     @Query private var volumes: [VolumeRecord]
     @Environment(\.encryptionService) private var encryptionService
     @State private var fullImage: NSImage?
+    @State private var exifData: EXIFData?
     @State private var showingInspector = true
 
     var body: some View {
@@ -26,7 +28,7 @@ struct PhotoDetailView: View {
 
             // Metadata inspector
             if showingInspector {
-                MetadataInspector(image: image)
+                MetadataInspector(image: image, exif: exifData)
                     .frame(minWidth: 260, idealWidth: 280, maxWidth: 320)
             }
         }
@@ -41,6 +43,7 @@ struct PhotoDetailView: View {
         }
         .task(id: image.sha256) {
             fullImage = nil
+            exifData = nil
             await loadFullImage()
         }
     }
@@ -63,11 +66,13 @@ struct PhotoDetailView: View {
                       ) else {
                     continue
                 }
+                exifData = EXIFData.extract(from: plaintext)
                 if let loaded = NSImage(data: plaintext) {
                     fullImage = loaded
                     return
                 }
             } else {
+                exifData = EXIFData.extract(from: fileURL)
                 if let loaded = NSImage(contentsOf: fileURL) {
                     fullImage = loaded
                     return

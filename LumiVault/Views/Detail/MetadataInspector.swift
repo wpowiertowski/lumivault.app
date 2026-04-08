@@ -1,7 +1,9 @@
 import SwiftUI
+import MapKit
 
 struct MetadataInspector: View {
     let image: ImageRecord
+    var exif: EXIFData?
 
     var body: some View {
         ScrollView {
@@ -11,6 +13,59 @@ struct MetadataInspector: View {
                     InspectorRow(label: "Name", value: image.filename)
                     InspectorRow(label: "Size", value: formattedSize)
                     InspectorRow(label: "Added", value: image.addedAt.formatted(date: .abbreviated, time: .shortened))
+                }
+
+                // EXIF — Camera & Capture
+                if let exif, hasExifContent(exif) {
+                    InspectorSection(title: "Camera") {
+                        if let make = exif.cameraMake {
+                            InspectorRow(label: "Make", value: make)
+                        }
+                        if let model = exif.cameraModel {
+                            InspectorRow(label: "Model", value: model)
+                        }
+                        if let lens = exif.lensModel {
+                            InspectorRow(label: "Lens", value: lens)
+                        }
+                        if let software = exif.software {
+                            InspectorRow(label: "Software", value: software)
+                        }
+                    }
+
+                    if hasExposureData(exif) {
+                        InspectorSection(title: "Exposure") {
+                            if let shutter = exif.exposureString {
+                                InspectorRow(label: "Shutter", value: shutter)
+                            }
+                            if let aperture = exif.fNumberString {
+                                InspectorRow(label: "Aperture", value: aperture)
+                            }
+                            if let iso = exif.isoString {
+                                InspectorRow(label: "ISO", value: iso)
+                            }
+                            if let fl = exif.focalLengthString {
+                                InspectorRow(label: "Focal Length", value: fl)
+                            }
+                        }
+                    }
+
+                    if let dims = exif.dimensionsString {
+                        InspectorSection(title: "Image") {
+                            InspectorRow(label: "Dimensions", value: dims)
+                            if let cs = exif.colorSpace {
+                                InspectorRow(label: "Color Space", value: cs)
+                            }
+                            if let depth = exif.bitDepth {
+                                InspectorRow(label: "Bit Depth", value: "\(depth) bit")
+                            }
+                        }
+                    }
+
+                    if let date = exif.dateTaken {
+                        InspectorSection(title: "Date Taken") {
+                            InspectorRow(label: "Original", value: date.formatted(date: .abbreviated, time: .shortened))
+                        }
+                    }
                 }
 
                 // Integrity
@@ -83,6 +138,28 @@ struct MetadataInspector: View {
                             .font(Constants.Design.monoCaption)
                     }
                 }
+
+                // GPS Map
+                if let exif, let coordinate = exif.coordinate {
+                    InspectorSection(title: "Location") {
+                        if let coords = exif.coordinateString {
+                            InspectorRow(label: "Coordinates", value: coords)
+                        }
+                        if let alt = exif.altitudeString {
+                            InspectorRow(label: "Altitude", value: alt)
+                        }
+                    }
+
+                    Map(initialPosition: .region(MKCoordinateRegion(
+                        center: coordinate,
+                        span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+                    ))) {
+                        Marker(image.filename, coordinate: coordinate)
+                    }
+                    .frame(height: 200)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .allowsHitTesting(false)
+                }
             }
             .padding()
         }
@@ -106,6 +183,15 @@ struct MetadataInspector: View {
         case .generated: "Generated"
         case .failed: "Failed"
         }
+    }
+
+    private func hasExifContent(_ exif: EXIFData) -> Bool {
+        exif.cameraMake != nil || exif.cameraModel != nil || exif.lensModel != nil ||
+        exif.exposureTime != nil || exif.pixelWidth != nil || exif.dateTaken != nil
+    }
+
+    private func hasExposureData(_ exif: EXIFData) -> Bool {
+        exif.exposureTime != nil || exif.fNumber != nil || exif.iso != nil || exif.focalLength != nil
     }
 }
 
