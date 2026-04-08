@@ -448,12 +448,13 @@ class ExportCoordinator {
                 progress.currentFile = index + 1
                 progress.currentFilename = item.record.filename
 
+                // B2 stores decoded file names (decodes X-Bz-File-Name on upload).
+                // Use raw paths for listing/existence checks; encoding only for upload headers.
                 let remotePath = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)/\(item.record.filename)"
-                let encodedPath = remotePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? remotePath
 
                 do {
                     let alreadyExists = try await b2Service.fileExists(
-                        fileName: encodedPath,
+                        fileName: remotePath,
                         bucketId: credentials.bucketId,
                         credentials: credentials
                     )
@@ -474,9 +475,9 @@ class ExportCoordinator {
                             let listings = try await b2Service.listAllFiles(
                                 bucketId: credentials.bucketId,
                                 credentials: credentials,
-                                prefix: encodedPath
+                                prefix: remotePath
                             )
-                            if let listing = listings.first(where: { $0.fileName == encodedPath }) {
+                            if let listing = listings.first(where: { $0.fileName == remotePath }) {
                                 item.record.b2FileId = listing.fileId
                             }
                         }
@@ -488,9 +489,8 @@ class ExportCoordinator {
                         let par2URL = staging.appendingPathComponent(item.record.par2Filename)
                         if FileManager.default.fileExists(atPath: par2URL.path) {
                             let par2Remote = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)/\(item.record.par2Filename)"
-                            let par2Encoded = par2Remote.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? par2Remote
                             let par2Exists = try await b2Service.fileExists(
-                                fileName: par2Encoded,
+                                fileName: par2Remote,
                                 bucketId: credentials.bucketId,
                                 credentials: credentials
                             )

@@ -184,9 +184,9 @@ actor ReconciliationService {
             let b2HasById = b2Files.contains { $0.fileId == b2Id }
             if !b2HasById {
                 // Also check by path in case fileId changed
+                // B2 stores decoded file names, so use the raw unencoded path
                 let expectedPath = "\(snapshot.albumPath)/\(snapshot.filename)"
-                let encodedPath = expectedPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? expectedPath
-                if b2ByName[encodedPath] == nil {
+                if b2ByName[expectedPath] == nil {
                     discrepancies.append(Discrepancy(
                         sha256: snapshot.sha256,
                         filename: snapshot.filename,

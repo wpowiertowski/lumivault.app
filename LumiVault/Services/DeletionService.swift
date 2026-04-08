@@ -101,18 +101,20 @@ actor DeletionService {
 
             for image in images {
                 if let fileId = image.b2FileId, !fileId.isEmpty {
+                    // B2 stores decoded file names (it decodes the percent-encoded
+                    // X-Bz-File-Name header on upload). Use the raw unencoded path
+                    // for listing prefix, comparison, and deletion.
                     let remotePath = "\(image.albumPath)/\(image.filename)"
-                    let encodedPath = remotePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? remotePath
 
                     // Look up current file version by name — stored fileId may be stale
                     do {
                         let listings = try await b2Service.listAllFiles(
                             bucketId: credentials.bucketId,
                             credentials: credentials,
-                            prefix: encodedPath
+                            prefix: remotePath
                         )
-                        if let listing = listings.first(where: { $0.fileName == encodedPath }) {
-                            try await b2Service.deleteFile(fileId: listing.fileId, fileName: encodedPath, credentials: credentials)
+                        if let listing = listings.first(where: { $0.fileName == remotePath }) {
+                            try await b2Service.deleteFile(fileId: listing.fileId, fileName: listing.fileName, credentials: credentials)
                             result.b2FilesRemoved += 1
                         }
                     } catch {
@@ -122,16 +124,15 @@ actor DeletionService {
                     // Also delete PAR2 from B2 if it exists
                     if !image.par2Filename.isEmpty {
                         let par2Remote = "\(image.albumPath)/\(image.par2Filename)"
-                        let par2Encoded = par2Remote.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? par2Remote
 
                         do {
                             let listings = try await b2Service.listAllFiles(
                                 bucketId: credentials.bucketId,
                                 credentials: credentials,
-                                prefix: par2Encoded
+                                prefix: par2Remote
                             )
-                            if let par2Listing = listings.first(where: { $0.fileName == par2Encoded }) {
-                                try await b2Service.deleteFile(fileId: par2Listing.fileId, fileName: par2Encoded, credentials: credentials)
+                            if let par2Listing = listings.first(where: { $0.fileName == par2Remote }) {
+                                try await b2Service.deleteFile(fileId: par2Listing.fileId, fileName: par2Listing.fileName, credentials: credentials)
                             }
                         } catch {
                             // PAR2 B2 deletion is best-effort
