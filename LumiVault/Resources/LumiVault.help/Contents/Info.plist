@@ -17,7 +17,9 @@
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>HPDBookAccessPath</key>
-    <string>index.html</string>
+    <string>en.lproj/index.html</string>
+    <key>HPDBookKBProduct</key>
+    <string>LumiVault</string>
     <key>HPDBookTitle</key>
     <string>LumiVault Help</string>
     <key>HPDBookType</key>

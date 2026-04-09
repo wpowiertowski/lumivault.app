@@ -27,9 +27,12 @@ targets:
         excludes:
           - "**/*.entitlements"
           - Info.plist
+          - Resources/LumiVault.help
+      - path: LumiVault/Resources/LumiVault.help
+        type: folder
+        buildPhase: resources
     resources:
       - path: LumiVault/Resources/Assets.xcassets
-      - path: LumiVault/Resources/LumiVault.help
     settings:
       base:
         INFOPLIST_FILE: LumiVault/Info.plist

@@ -5,7 +5,34 @@
     <meta name="description" content="PAR2 Reed-Solomon error correction in LumiVault.">
     <meta name="keywords" content="par2, reed-solomon, error correction, bit rot, corruption, repair">
     <title>PAR2 Error Correction</title>
-    <link rel="stylesheet" href="help.css">
+    <style>
+        :root { color-scheme: light dark; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            font-size: 13px;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+        h1 { font-size: 22px; font-weight: 600; margin-top: 0; }
+        h2 { font-size: 15px; font-weight: 600; margin-top: 24px; }
+        h3 { font-size: 13px; font-weight: 600; margin-top: 18px; }
+        .back { display: inline-block; font-size: 12px; text-decoration: none; margin-bottom: 12px; }
+        .back:hover { text-decoration: underline; }
+        pre { padding: 10px 14px; border-radius: 6px; overflow-x: auto; margin: 12px 0; border: 1px solid rgba(128,128,128,0.3); }
+        pre code { padding: 0; }
+        code { font-family: "SF Mono", Menlo, monospace; font-size: 12px; padding: 1px 4px; border-radius: 3px; }
+        kbd { display: inline-block; padding: 1px 5px; font-family: -apple-system, monospace; font-size: 11px; border: 1px solid rgba(128,128,128,0.3); border-radius: 3px; }
+        ul, ol { padding-left: 20px; }
+        li { margin-bottom: 6px; }
+        .note { border-left: 3px solid rgba(90,159,212,0.6); padding: 10px 14px; border-radius: 4px; margin: 14px 0; font-size: 12px; }
+        .warning { border-left: 3px solid rgba(212,165,90,0.6); padding: 10px 14px; border-radius: 4px; margin: 14px 0; font-size: 12px; }
+        table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+        th, td { text-align: left; padding: 6px 10px; border: 1px solid rgba(128,128,128,0.3); }
+        th { font-weight: 600; }
+    </style>
 </head>
 <body>
     <a href="index.html" class="back">&larr; LumiVault Help</a>
@@ -23,19 +50,13 @@
     <h2>Enabling PAR2</h2>
     <p>Toggle <strong>PAR2</strong> in the export configuration step, or set it as default in <strong>Settings &gt; Export</strong>.</p>
 
-    <h2>Redundancy Percentage</h2>
-    <p>Configure the redundancy percentage in <strong>Settings &gt; General</strong>. This controls how much parity data is generated:</p>
-    <ul>
-        <li><strong>5%</strong> &mdash; recovers from minor corruption (few bad bytes).</li>
-        <li><strong>10%</strong> (default) &mdash; good balance of protection and file size overhead.</li>
-        <li><strong>20%+</strong> &mdash; maximum protection, larger parity files.</li>
-    </ul>
+    <h2>Redundancy</h2>
+    <p>LumiVault generates 10% redundancy for each file &mdash; enough to recover from typical storage corruption while keeping parity files compact.</p>
 
     <h2>PAR2 Files</h2>
-    <p>For each archived image, PAR2 generates:</p>
+    <p>For each archived image, LumiVault generates a single parity file:</p>
     <ul>
-        <li><code>photo.jpg.par2</code> &mdash; index file with verification checksums.</li>
-        <li><code>photo.jpg.vol00+01.par2</code> &mdash; recovery volume(s) with parity data.</li>
+        <li><code>photo.jpg.par2</code> &mdash; contains both verification checksums and recovery data.</li>
     </ul>
     <p>These files are stored alongside the originals on external volumes and uploaded to B2 if enabled.</p>
 
