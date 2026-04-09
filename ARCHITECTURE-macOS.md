@@ -28,7 +28,7 @@
 | Image Pipeline | Core Image, ImageIO | Thumbnail generation, HEIC/RAW decode, perceptual hashing |
 | File Access | FileManager, NSURL bookmarks, Security-Scoped Resources | External volume management |
 | Hashing | CryptoKit (SHA256) | File integrity, deduplication fingerprints |
-| Concurrency | Swift Concurrency (async/await, TaskGroup, actors) | Parallel import, background hashing |
+| Concurrency | Swift Concurrency (async/await, TaskGroup, actors, AsyncStream) | Pipelined export, parallel import, background hashing |
 | Redundancy | Custom GF(2^8) Reed-Solomon (Vandermonde matrix) | PAR2-compatible error correction with repair |
 | GPU Compute | Metal | GPU-accelerated PAR2 generation via compute shaders |
 | Photos Import | PhotoKit (Photos framework) | Apple Photos album enumeration & asset export |
@@ -68,7 +68,8 @@
           │ DeletionService         │  ← remove files from volumes + B2
           │ IntegrityService        │  ← scheduled verification sweeps
           │ EncryptionService       │  ← AES-256-GCM encrypt/decrypt, key derivation
-          │ ExportCoordinator       │  ← orchestrates full export pipeline
+          │ PipelinedExportCoordinator│ ← pipelined export (AsyncChannel between phases)
+          │ ExportCoordinator       │  ← legacy sequential export (retained)
           └────────────┬────────────┘
                        │
           ┌────────────┴────────────┐
@@ -267,19 +268,39 @@ PHAssetCollection.fetchAssetCollections(with: .smartAlbum) → Favorites, Recent
 ```text
 1. User selects album in PhotosAlbumPicker
 2. Configure: album name, date, format, PAR2 toggle, encryption, volume targets, B2 toggle
-3. ExportCoordinator orchestrates:
-   Photos export → staging dir
-     → Image format conversion (optional JPEG + resize)
-     → SHA-256 hash + dedup check
-     → Thumbnail generation
-     → Perceptual hash
-     → AES-256-GCM encryption (optional)
-     → PAR2 generation on ciphertext (optional, GPU-accelerated)
-     → Copy to external volumes
-     → Upload to B2 (optional)
-     → Update SwiftData index + catalog.json
-4. Cleanup staging directory
+3. PipelinedExportCoordinator orchestrates via async pipeline:
+
+   ┌──────────┐   ┌────────────┐   ┌─────────┐   ┌────────────┐   ┌──────┐   ┌──────┐   ┌────────┐   ┌─────────┐
+   │  Photos  │──>│ Conversion │──>│ Hashing │──>│ Encryption │──>│ PAR2 │──>│ Copy │──>│ Upload │──>│ Catalog │
+   │  Export  │   │ (optional) │   │ & Dedup │   │ (optional) │   │(opt.)│   │(opt.)│   │ (opt.) │   │  Sink   │
+   └──────────┘   └────────────┘   └─────────┘   └────────────┘   └──────┘   └──────┘   └────────┘   └─────────┘
+
+   Each phase runs as an independent Task on @MainActor, connected by
+   AsyncChannel (bounded async streams with backpressure). Images flow
+   through phases independently — image #1 can be in PAR2 while image
+   #5 is still hashing. Disabled phases are skipped by wiring channels
+   directly to the next active phase.
+
+   Concurrency limits per phase:
+     Export: 1 | Conversion: 2 | Hashing: 4 | Encryption: 4
+     PAR2: 1 (GPU) | Copy: serial | Upload: serial | Catalog: serial
+
+4. Cleanup staging directory (via defer)
 ```
+
+**Backpressure**: `AsyncChannel` uses `AsyncSemaphore` (counting semaphore actor) to
+block fast producers when slow consumers fall behind. Buffer sizes range from 2 (PAR2)
+to 8 (hashing), keeping memory bounded regardless of album size.
+
+**Cancellation**: A sentinel task monitors the parent Task via `withTaskCancellationHandler`.
+On cancel, it: (1) sets the `cancelFlag` for PAR2's OperationQueue, (2) cancels all child
+tasks, (3) calls `channel.cancel()` on every channel — which resumes blocked semaphore
+waiters and terminates all `for await` loops. Empty album records are cleaned up on cancel.
+
+**PipelineItem**: A `Sendable` struct flows through the pipeline, accumulating results
+(converted URL, SHA-256, encryption nonce, PAR2 filename, etc.). An `ImageRecordSnapshot`
+captures the `PersistentIdentifier` so downstream phases can look up the SwiftData record
+without passing non-Sendable `@Model` objects across isolation boundaries.
 
 Each `PHAsset` is exported via `PHAssetResourceManager.writeData(for:toFile:)` with
 `isNetworkAccessAllowed = true` to handle iCloud-originals transparently. The export
@@ -520,7 +541,9 @@ LumiVault/
 │   ├── CatalogBackupService.swift       // Distribute catalog to volumes + B2, restore
 │   ├── PhotosImportService.swift        // PhotoKit album enumeration + export
 │   ├── B2Service.swift                  // B2 REST API (upload/download/list/delete)
-│   ├── ExportCoordinator.swift          // Orchestrates full export pipeline
+│   ├── PipelinedExportCoordinator.swift  // Pipelined async export (active)
+│   ├── PipelineItem.swift               // Sendable item + ImageRecordSnapshot
+│   ├── ExportCoordinator.swift          // Legacy sequential export (retained)
 │   ├── DeletionService.swift            // Remove files from volumes + B2
 │   ├── ReconciliationService.swift      // Scan volumes + B2 for discrepancies
 │   ├── SyncService.swift                // iCloud coordination
@@ -563,6 +586,8 @@ LumiVault/
 │       └── SupportSettingsView.swift     // Tip jar via StoreKit 2
 │
 └── Utilities/
+    ├── AsyncSemaphore.swift             // Counting semaphore actor (backpressure + cancelAll)
+    ├── AsyncChannel.swift               // Bounded async channel with backpressure
     ├── PerceptualHash.swift             // dHash via Core Image
     ├── Constants.swift                  // Design tokens, paths
     ├── FileCoordination.swift           // NSFileCoordinator helpers
@@ -592,16 +617,38 @@ actor ThumbnailService {
 }
 ```
 
-Import pipeline uses `TaskGroup` with bounded concurrency:
+### Export Pipeline Concurrency
+
+The export pipeline uses `AsyncChannel` (bounded `AsyncStream` + `AsyncSemaphore`) to
+connect phases. Each phase runs as an unstructured `Task` on `@MainActor` (required for
+SwiftData `ModelContext` access). Backpressure prevents fast phases from overwhelming
+slow ones — a producer calling `channel.send()` suspends when the buffer is full.
 
 ```swift
-func importImages(_ urls: [URL], to album: AlbumRecord) async throws {
-    try await withThrowingTaskGroup(of: ImageRecord.self) { group in
-        let maxConcurrent = ProcessInfo.processInfo.activeProcessorCount
-        // ... bounded parallel hashing + PAR2 + copy
+// Simplified pipeline wiring (from PipelinedExportCoordinator)
+let hashingCh = AsyncChannel<PipelineItem>(bufferSize: 8)
+let par2Ch = AsyncChannel<PipelineItem>(bufferSize: 2)
+
+let hashTask = Task { @MainActor in
+    for await item in hashingCh.stream {
+        await hashingCh.consumed()       // free buffer slot
+        var result = item
+        result.sha256 = try await hasher.sha256AndSize(of: item.fileURL)
+        await par2Ch.send(result)         // suspends if PAR2 is behind
     }
+    par2Ch.finish()
 }
 ```
+
+Cancellation propagates via a sentinel task that calls `channel.cancel()` on all
+channels — this resumes any producers blocked on backpressure (`AsyncSemaphore.cancelAll()`)
+and terminates all consumer `for await` loops (`continuation.finish()`).
+
+### Other Concurrent Operations
+
+`TaskGroup` is used for bounded concurrency in non-pipeline contexts (thumbnail warm-up,
+integrity verification batches). Drag-and-drop import uses the legacy `ExportCoordinator`
+with sequential phases.
 
 ---
 
