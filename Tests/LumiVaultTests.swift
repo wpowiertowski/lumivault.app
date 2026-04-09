@@ -1672,6 +1672,28 @@ struct ExportProgressTests {
         // Phase 0 of 1 → base = 0, weight = 1.0, phaseFraction = 2/4 = 0.5
         #expect(abs(progress.fraction - 0.5) < 0.001)
     }
+
+    @Test func pipelinedFractionBasedOnFilesCataloged() {
+        let progress = ExportProgress()
+        progress.isPipelined = true
+        progress.totalFiles = 20
+        progress.phase = .cataloging
+        progress.filesCataloged = 10
+
+        // Pipeline: 0.1 + (10/20) * 0.9 = 0.1 + 0.45 = 0.55
+        #expect(abs(progress.fraction - 0.55) < 0.001)
+    }
+
+    @Test func pipelinedFractionDuringExport() {
+        let progress = ExportProgress()
+        progress.isPipelined = true
+        progress.totalFiles = 20
+        progress.phase = .exporting
+        progress.currentFile = 10
+
+        // Export phase: (10/20) * 0.1 = 0.05
+        #expect(abs(progress.fraction - 0.05) < 0.001)
+    }
 }
 
 // MARK: - Catalog Backup Service Tests

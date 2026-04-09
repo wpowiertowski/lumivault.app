@@ -133,18 +133,30 @@ struct PhotosExportSheet: View {
                 // Live status line: stage + filename + counter
                 HStack(spacing: 0) {
                     if !progress.currentFilename.isEmpty {
-                        Text(progress.phase.verb)
-                            .foregroundStyle(.quaternary)
-                        Text(" ")
-                        Text(progress.currentFilename)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .foregroundStyle(.tertiary)
+                        if progress.isPipelined && progress.phase != .exporting {
+                            Text(progress.currentFilename)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .foregroundStyle(.tertiary)
+                        } else {
+                            Text(progress.phase.verb)
+                                .foregroundStyle(.quaternary)
+                            Text(" ")
+                            Text(progress.currentFilename)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                     Spacer(minLength: 4)
                     if progress.totalFiles > 0 {
-                        Text("\(progress.currentFile)/\(progress.totalFiles)")
-                            .foregroundStyle(.quaternary)
+                        if progress.isPipelined && progress.phase != .exporting {
+                            Text("\(progress.filesCataloged)/\(progress.totalFiles)")
+                                .foregroundStyle(.quaternary)
+                        } else {
+                            Text("\(progress.currentFile)/\(progress.totalFiles)")
+                                .foregroundStyle(.quaternary)
+                        }
                     }
                 }
                 .font(Constants.Design.monoCaption2)

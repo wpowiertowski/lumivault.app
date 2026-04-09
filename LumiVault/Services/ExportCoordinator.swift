@@ -57,15 +57,34 @@ final class ExportProgress: @unchecked Sendable {
     var filesEncrypted: Int = 0
     var filesProtected: Int = 0
     var par2FileFraction: Double = 0
+    var filesCataloged: Int = 0
     var errors: [String] = []
     var nearDuplicates: [NearDuplicateMatch] = []
 
     /// Active phases in order, set at export start based on settings
     var activePhases: [ExportPhase] = [.exporting, .hashing, .par2, .cataloging]
 
-    var fraction: Double {
-        guard totalFiles > 0, !activePhases.isEmpty else { return 0 }
+    /// When true, fraction is based on files fully processed (cataloged) rather than phase index.
+    /// Used by PipelinedExportCoordinator where phases run concurrently.
+    var isPipelined: Bool = false
 
+    var fraction: Double {
+        guard totalFiles > 0 else { return 0 }
+
+        if isPipelined {
+            if phase == .exporting {
+                // Still in the initial Photos export phase — show export progress
+                return Double(currentFile) / Double(totalFiles) * 0.1
+            }
+            if phase == .complete { return 1.0 }
+            // Once the pipeline is running, track files fully cataloged
+            let pipelineFraction = Double(filesCataloged) / Double(totalFiles)
+            // Reserve 0-10% for Photos export, 10-100% for the pipeline
+            return 0.1 + pipelineFraction * 0.9
+        }
+
+        // Legacy sequential mode: phase-weighted progress
+        guard !activePhases.isEmpty else { return 0 }
         let phaseCount = activePhases.count
         guard let phaseIndex = activePhases.firstIndex(of: phase) else {
             return phase == .complete ? 1.0 : 0.0
@@ -105,7 +124,7 @@ enum ExportPhase: String, Sendable {
     case par2 = "Generating PAR2 recovery data"
     case copying = "Copying to external volumes"
     case uploading = "Uploading to B2"
-    case cataloging = "Updating catalog"
+    case cataloging = "Processing images"
     case complete = "Complete"
     case failed = "Failed"
 

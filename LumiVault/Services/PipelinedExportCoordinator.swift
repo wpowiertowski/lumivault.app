@@ -60,6 +60,7 @@ class PipelinedExportCoordinator: @unchecked Sendable {
         if needsUpload { phases.append(.uploading) }
         phases.append(.cataloging)
         progress.activePhases = phases
+        progress.isPipelined = true
 
         // 1. Export from Photos
         progress.phase = .exporting
@@ -632,6 +633,8 @@ class PipelinedExportCoordinator: @unchecked Sendable {
                     day: settings.day
                 )
                 catalogItemCount += 1
+                progress.filesCataloged = catalogItemCount
+                progress.currentFilename = snap.filename
             }
         }
 
