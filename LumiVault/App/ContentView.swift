@@ -6,7 +6,7 @@ struct ContentView: View {
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @State private var selectedAlbum: AlbumRecord?
     @State private var selectedImage: ImageRecord?
-    @State private var columnVisibility: NavigationSplitViewVisibility = .detailOnly
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var showingPhotosImport = false
     @State private var showingNearDuplicates = false
     @State private var showingIntegrityAlert = false
@@ -21,7 +21,7 @@ struct ContentView: View {
             if let album = selectedAlbum {
                 PhotoGridView(album: album, selectedImage: $selectedImage)
             } else if albums.isEmpty {
-                WelcomeView()
+                WelcomeView(sidebarVisible: columnVisibility == .all)
             } else {
                 EmptyStateView(message: "Select an album")
             }
@@ -32,7 +32,7 @@ struct ContentView: View {
                 EmptyStateView(message: "Select a photo to view details")
             }
         }
-        .navigationSplitViewStyle(.balanced)
+        .navigationSplitViewStyle(.prominentDetail)
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
@@ -63,11 +63,6 @@ struct ContentView: View {
         }
         .onChange(of: selectedAlbum) {
             selectedImage = nil
-        }
-        .onChange(of: albums.isEmpty) {
-            if !albums.isEmpty {
-                columnVisibility = .all
-            }
         }
         .onChange(of: syncCoordinator.catalogIntegrity) {
             switch syncCoordinator.catalogIntegrity {
@@ -102,6 +97,7 @@ struct ContentView: View {
 // MARK: - Welcome View
 
 private struct WelcomeView: View {
+    var sidebarVisible: Bool
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @AppStorage("b2Enabled") private var b2Enabled = false
     @State private var isRestoring = false
@@ -111,18 +107,20 @@ private struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Line pointing up toward the import button
-            HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 14, weight: .medium))
-                    Text("Click to import\nfrom Photos")
-                        .font(Constants.Design.monoCaption)
-                }
-                .foregroundStyle(Constants.Design.accentColor.opacity(0.6))
-                .padding(.leading, 20)
-                .padding(.top, 12)
+            if sidebarVisible {
+                HStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 14, weight: .medium))
+                        Text("Click to import\nfrom Photos")
+                            .font(Constants.Design.monoCaption)
+                    }
+                    .foregroundStyle(Constants.Design.accentColor.opacity(0.6))
+                    .padding(.leading, 20)
+                    .padding(.top, 12)
 
-                Spacer()
+                    Spacer()
+                }
             }
 
             Spacer()
