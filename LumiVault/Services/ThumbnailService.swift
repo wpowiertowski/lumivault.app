@@ -83,6 +83,18 @@ actor ThumbnailService {
         }
     }
 
+    // MARK: - Removal
+
+    func removeThumbnails(for sha256: String) {
+        let fm = FileManager.default
+        for size in [ThumbnailSize.grid, .list] {
+            let key = NSString(string: "\(size.rawValue)/\(sha256)")
+            memoryCache.removeObject(forKey: key)
+            let fileURL = cacheURL(for: sha256, size: size)
+            try? fm.removeItem(at: fileURL)
+        }
+    }
+
     // MARK: - Warm Up
 
     func warmUp(hashes: [(sha256: String, url: URL)]) {

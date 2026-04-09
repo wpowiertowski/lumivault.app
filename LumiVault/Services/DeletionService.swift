@@ -87,11 +87,12 @@ actor DeletionService {
                         }
                     }
 
-                    // Clean up empty album directory
-                    let albumDir = filePath.deletingLastPathComponent()
-                    if let contents = try? fm.contentsOfDirectory(atPath: albumDir.path), contents.isEmpty {
-                        try? fm.removeItem(at: albumDir)
-                    }
+                    // Clean up empty directories up to volume root
+                    Self.removeEmptyAncestors(
+                        from: filePath.deletingLastPathComponent(),
+                        stopAt: mountURL,
+                        fileManager: fm
+                    )
                 } catch {
                     result.errors.append("Volume remove failed: \(image.filename) on \(location.volumeID) — \(error.localizedDescription)")
                 }
@@ -151,5 +152,23 @@ actor DeletionService {
         }
 
         return result
+    }
+
+    /// Walk from `directory` up to (but not including) `root`, removing each directory that is empty.
+    /// Stops as soon as a non-empty directory is encountered or `root` is reached.
+    private static nonisolated func removeEmptyAncestors(
+        from directory: URL,
+        stopAt root: URL,
+        fileManager fm: FileManager
+    ) {
+        var current = directory.standardizedFileURL
+        let stop = root.standardizedFileURL
+
+        while current != stop, current.path.hasPrefix(stop.path) {
+            guard let contents = try? fm.contentsOfDirectory(atPath: current.path),
+                  contents.isEmpty else { break }
+            try? fm.removeItem(at: current)
+            current = current.deletingLastPathComponent().standardizedFileURL
+        }
     }
 }

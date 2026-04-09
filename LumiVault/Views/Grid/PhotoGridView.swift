@@ -11,6 +11,7 @@ struct PhotoGridView: View {
     @State private var showingDeletionProgress = false
     @State private var deletionProgress = DeletionProgress()
     @Environment(SyncCoordinator.self) private var syncCoordinator
+    @Environment(\.thumbnailService) private var thumbnailService
 
     private let columns = [
         GridItem(.adaptive(minimum: 140, maximum: 200), spacing: 4)
@@ -104,10 +105,12 @@ struct PhotoGridView: View {
                 url.stopAccessingSecurityScopedResource()
             }
 
-            // Update catalog via shared coordinator (avoids race with separate CatalogService)
+            // Update catalog
             await MainActor.run { progress.phase = .updatingCatalog }
             await syncCoordinator.removeImageFromCatalog(sha256: sha256, albumName: albumName, year: year, month: month, day: day)
-            await syncCoordinator.pushAfterLocalChange()
+
+            // Remove thumbnail
+            await thumbnailService.removeThumbnails(for: sha256)
 
             // Remove from SwiftData
             if selectedImage?.sha256 == sha256 {
@@ -122,6 +125,9 @@ struct PhotoGridView: View {
             }
 
             imageToDelete = nil
+
+            // Distribute updated catalog in background (iCloud, volumes, B2)
+            await syncCoordinator.pushAfterLocalChange()
         }
     }
 }

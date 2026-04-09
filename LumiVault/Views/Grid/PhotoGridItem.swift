@@ -25,6 +25,7 @@ struct PhotoGridItem: View {
             }
         }
         .aspectRatio(1, contentMode: .fit)
+        .contentShape(Rectangle())
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .overlay {
             if isSelected {

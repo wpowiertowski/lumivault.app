@@ -1334,6 +1334,78 @@ struct DeletionServiceTests {
             #expect(!fm.fileExists(atPath: path.path), "\(spec.name) should be deleted")
         }
     }
+
+    @Test func deleteRemovesEmptyAncestorDirectories() async throws {
+        let fm = FileManager.default
+        let root = try TestFixtures.materializeVolume(label: "deletion-ancestors")
+        defer { try? fm.removeItem(at: root) }
+
+        // Delete only the Portraits album (2025/08/01/Portraits — sole album on that date)
+        let portraits = TestFixtures.files(inAlbum: "Portraits")
+        let progress = DeletionProgress()
+        let inputs = portraits.map { spec in
+            DeletionService.ImageDeletionInput(
+                sha256: spec.sha256,
+                filename: spec.name,
+                par2Filename: "",
+                b2FileId: nil,
+                storageLocations: [StorageLocation(volumeID: "vol-1", relativePath: "\(spec.albumPath)/\(spec.name)")],
+                albumPath: spec.albumPath
+            )
+        }
+
+        let service = DeletionService()
+        let result = await service.deleteImageFiles(
+            images: inputs,
+            mountedVolumes: [("vol-1", root)],
+            b2Credentials: nil,
+            progress: progress
+        )
+
+        #expect(result.volumeFilesRemoved == portraits.count)
+
+        // The entire 2025/08 tree should be gone (no other albums in month 08)
+        let month08 = root.appendingPathComponent("2025/08")
+        #expect(!fm.fileExists(atPath: month08.path), "Empty month directory should be removed")
+
+        // But 2025/07 should still exist (Vacation and Nature albums are there)
+        let month07 = root.appendingPathComponent("2025/07")
+        #expect(fm.fileExists(atPath: month07.path), "Month with remaining albums should stay")
+
+        // And 2025/ should still exist
+        let year = root.appendingPathComponent("2025")
+        #expect(fm.fileExists(atPath: year.path), "Year with remaining content should stay")
+    }
+
+    @Test func deleteAllFilesRemovesEntireTree() async throws {
+        let fm = FileManager.default
+        let root = try TestFixtures.materializeVolume(label: "deletion-tree")
+        defer { try? fm.removeItem(at: root) }
+
+        let progress = DeletionProgress()
+        let inputs = TestFixtures.files.map { spec in
+            DeletionService.ImageDeletionInput(
+                sha256: spec.sha256,
+                filename: spec.name,
+                par2Filename: "",
+                b2FileId: nil,
+                storageLocations: [StorageLocation(volumeID: "vol-1", relativePath: "\(spec.albumPath)/\(spec.name)")],
+                albumPath: spec.albumPath
+            )
+        }
+
+        let service = DeletionService()
+        _ = await service.deleteImageFiles(
+            images: inputs,
+            mountedVolumes: [("vol-1", root)],
+            b2Credentials: nil,
+            progress: progress
+        )
+
+        // All ancestor directories should be gone, only volume root remains
+        let contents = try fm.contentsOfDirectory(atPath: root.path)
+        #expect(contents.isEmpty, "Volume root should be empty after deleting all files, found: \(contents)")
+    }
 }
 
 // MARK: - Encryption Service Tests
