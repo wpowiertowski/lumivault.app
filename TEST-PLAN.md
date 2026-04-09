@@ -18,11 +18,11 @@
 | High Value | DeletionServiceTests | 4 | File removal from volumes, PAR2 companion cleanup, unmounted volume skip, bulk delete. Real FS operations. |
 | High Value | ReconciliationDiffTests | 5 | B2 diff logic: matched, dangling B2 IDs, orphans, PAR2 skip, mixed scenarios. Pure logic, well-structured. |
 | Medium Value | B2ServiceHelperTests | 7 | SHA-1 known test vectors, HTTP response validation for success (200, 299) and error (401, 500) status codes |
-| Medium Value | ExportProgressTests | 5 | Fraction calculation: empty state, mid-phase progress, complete, PAR2 sub-progress, single active phase |
+| Medium Value | ExportProgressTests | 5 | Fraction calculation: empty state, mid-phase progress, complete, PAR2 sub-progress, single active phase. Note: progress model is shared between old ExportCoordinator and new PipelinedExportCoordinator — tests remain valid for both. |
 | Medium Value | CatalogBackupServiceTests | 5 | Volume backup write + decode, error on bad path, nil mount skip, file restore round-trip, missing catalog error |
 | Medium Value | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture hash verification |
 | Medium Value | DeduplicationServiceTests | 3 | Unique file detection, exact SHA-256 match, returned hash + size verification (using real JPEG fixtures) |
-| Medium Value | ImageConversionTests | 5 | JPEG conversion with extension change, valid output, dimension scaling, original format pass-through, below-max preservation |
+| Medium Value | ImageConversionTests | 5 | JPEG conversion with extension change, valid output, dimension scaling, original format pass-through, below-max preservation. Tests exercise ExportCoordinator.convertImage; PipelinedExportCoordinator has a duplicated copy — consider extracting shared. |
 | Medium Value | HasherServiceTests | 4 | Fixture hash verification is the trust anchor for the entire test suite. Empty file + consistency checks are useful but simple. |
 | Medium Value | IntegrityServiceTests | 4 | Verify pass/fail/missing and batch-size limit. Solid, but `batchSize` test just checks truncation. |
 | Medium Value | CatalogTests | 5 | Codable round-trip, optional fields, snake_case keys, file I/O. Necessary for CLI compatibility guarantee, but scenarios are basic. |
@@ -42,7 +42,7 @@ IntegrityServiceTests duplicates fixture materialization inline instead of using
 |------|------|--------|
 | EncryptionService | High | **Covered** — 20 tests across 3 suites: key derivation, round-trips, wrong key/AD, nonce uniqueness, file ops, edge cases, encrypt-PAR2-decrypt integration |
 | B2Service (network layer) | High | **Partially covered** — 7 tests on pure helpers (SHA-1, HTTP response validation). Network methods require URLSession abstraction; covered by manual QA. |
-| ExportCoordinator (pipeline) | High | **Partially covered** — 5 tests on image conversion + 5 on ExportProgress. Full pipeline orchestration requires service mocking; covered by manual QA. |
+| ExportCoordinator / PipelinedExportCoordinator | High | **Partially covered** — 5 tests on image conversion + 5 on ExportProgress. PipelinedExportCoordinator replaces sequential ExportCoordinator with async pipeline (AsyncChannel + backpressure). Pipeline orchestration, cancellation teardown, and channel wiring are not unit-tested; covered by manual QA (TC-2, TC-4). |
 | CatalogBackupService | Medium | **Covered** — 6 tests: volume backup/restore round-trip, error reporting, missing catalog, happy path restore |
 | DeduplicationService | Medium | **Covered** — 3 tests: unique detection, exact match, SHA-256 + size verification with real JPEG fixtures |
 | Volume sync | Medium | **Covered** — 8 tests across 2 suites: full A-to-B sync, dedup, mismatch, PAR2 companion, single-album, partial dedup, already-tracked |
@@ -59,7 +59,8 @@ These items would further improve coverage but require architectural changes:
 | Item | Blocker | Effort |
 |------|---------|--------|
 | B2Service network methods (upload, download, list, delete) | Needs URLSession protocol abstraction or URLProtocol subclass for HTTP mocking | Medium — touches B2Service constructor + all callers |
-| ExportCoordinator full pipeline | Single 300-line method orchestrating 8+ services; needs breakup into testable stages or protocol-based service injection | High — significant refactor |
+| PipelinedExportCoordinator pipeline | Pipeline uses AsyncChannel/AsyncSemaphore for inter-phase communication. Channel backpressure, cancellation teardown (sentinel task + channel.cancel), and phase-skipping wiring are testable in isolation. Full end-to-end pipeline still needs protocol-based service injection. | Medium — channel/semaphore unit tests are straightforward; full pipeline test remains high effort |
+| AsyncChannel / AsyncSemaphore | New utilities with cancellation semantics (cancelAll unblocks waiters). No unit tests yet. | Low — pure async logic, easy to test in isolation |
 | SyncService push/pull/merge | Depends on FileManager ubiquity container + NSFileCoordinator; needs filesystem abstraction | Medium — iCloud APIs deeply coupled |
 | SyncCoordinator state machine | Orchestrates 3 services + UserDefaults + SwiftData; needs dependency injection | Medium — requires constructor refactor |
 | ThumbnailService cache logic | Two-level cache (NSCache + disk); needs real image rendering which is unreliable in headless CI (CIContext renders all-white at small sizes) | Low — limited value vs manual QA |
@@ -190,8 +191,8 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 | 2.4 | Change sort order (name/count/date) | Album list re-sorts correctly |
 | 2.5 | Select an album, click "Next" | Export settings screen appears |
 | 2.6 | Configure: PAR2 on, JPEG conversion off, near-dupe detection on | Settings reflected in summary |
-| 2.7 | Click "Export" | Progress bar appears with phase labels (Exporting, Hashing, PAR2, etc.) |
-| 2.8 | Wait for completion | "Complete" screen shows count of exported, deduplicated, skipped images |
+| 2.7 | Click "Export" | Progress bar appears with phase labels (Exporting, Hashing, PAR2, etc.). Pipeline runs phases concurrently — e.g., early images may be hashing while later images still export. |
+| 2.8 | Wait for completion | "Complete" screen shows count of exported, deduplicated, skipped images. All phase counters (Converted, Hashed, PAR2, Copied, Uploaded) reflect final totals. |
 | 2.9 | Check sidebar | New album appears under correct year/month/day |
 | 2.10 | Click album in sidebar | Photo grid shows all imported thumbnails |
 
@@ -211,10 +212,12 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 
 | # | Action | Expected |
 |---|--------|----------|
-| 4.1 | Start a large album export (20+ photos) | Progress begins |
-| 4.2 | Click "Cancel" during export | Export stops within 2-3 seconds |
-| 4.3 | Check sidebar | No partial/corrupt album entry created |
-| 4.4 | Check volumes | No partial files left on disk |
+| 4.1 | Start a large album export (20+ photos) | Progress begins, phases advance as images flow through pipeline |
+| 4.2 | Click "Cancel" during export | Export stops within 2-3 seconds. All pipeline tasks killed (sentinel cancels child tasks + channels). |
+| 4.3 | Check sidebar | No partial/corrupt album entry created (empty album record deleted on cancel) |
+| 4.4 | Check volumes | No partial files left on disk (staging directory cleaned up via defer) |
+| 4.5 | Cancel during PAR2 phase specifically | PAR2 OperationQueue stopped via cancelFlag; channel backpressure unblocked via semaphore.cancelAll() |
+| 4.6 | Cancel while a phase is blocked on backpressure | Producer unblocks immediately (AsyncSemaphore.cancelAll resumes all waiters) |
 
 ---
 
@@ -452,6 +455,8 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 | 23.7 | Filename with special characters (spaces, accents, emoji) | Handled correctly across export, volume copy, B2 upload |
 | 23.8 | Very large image (>50MB RAW) | Exports without timeout or memory crash |
 | 23.9 | Photos library permission denied | App shows permission prompt, Settings link to System Preferences |
+| 23.10 | Pipeline backpressure: export 50+ images with PAR2 (slow) and no B2 | PAR2 phase should not cause unbounded memory growth; earlier phases pause via channel backpressure when PAR2 falls behind |
+| 23.11 | Eject volume mid-pipeline during copy phase | Copy phase errors are per-item; remaining pipeline phases continue for other items; errors shown in completion screen |
 
 ---
 
@@ -480,7 +485,8 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 
 ### P0 — Must Pass (data loss risk)
 
-- TC-2: Photos Import
+- TC-2: Photos Import (pipelined flow)
+- TC-4: Export Cancellation (pipeline teardown — sentinel kills all tasks + channels)
 - TC-6: SHA-256 Dedup
 - TC-8: Multi-Volume Sync
 - TC-10: PAR2 Error Correction
@@ -489,17 +495,18 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 - TC-16: Album Deletion
 - TC-18: Reconciliation
 - TC-23.1-23.2: Disk full / eject during export
+- TC-23.10: Pipeline backpressure under slow PAR2
 
 ### P1 — Should Pass (functionality risk)
 
 - TC-3: JPEG Conversion
-- TC-4: Export Cancellation
 - TC-5: Drag & Drop
 - TC-12: B2 Upload
 - TC-14: iCloud Sync
 - TC-17: Single Image Deletion
 - TC-19: Integrity Verification
 - TC-25: Bookmarks
+- TC-23.11: Volume eject mid-pipeline
 
 ### P2 — Nice to Verify (UX/polish)
 

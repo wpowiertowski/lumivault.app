@@ -311,7 +311,7 @@ struct PhotosExportSheet: View {
         let sync = syncCoordinator
 
         exportTask = Task { @MainActor in
-            let coordinator = ExportCoordinator(catalogService: catSvc, encryptionService: encSvc)
+            let coordinator = PipelinedExportCoordinator(catalogService: catSvc, encryptionService: encSvc)
             do {
                 try await coordinator.export(
                     photosAlbumId: albumId,
