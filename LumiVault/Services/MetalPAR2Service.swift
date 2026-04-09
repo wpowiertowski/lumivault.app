@@ -1,13 +1,15 @@
 import Foundation
 import Metal
 
-/// GPU-accelerated PAR2 recovery block generation using Metal compute shaders.
+/// GPU-accelerated PAR2 2.0 recovery block generation using Metal compute shaders.
+/// Uses GF(2^16) arithmetic with log/antilog tables for PAR2-standard Reed-Solomon coding.
 /// Falls back to nil initialization if Metal is unavailable.
 final class MetalPAR2Service: @unchecked Sendable {
     private nonisolated(unsafe) let device: MTLDevice
     private nonisolated(unsafe) let pipeline: MTLComputePipelineState
     private nonisolated(unsafe) let commandQueue: MTLCommandQueue
-    private nonisolated(unsafe) let mulTableBuffer: MTLBuffer
+    private nonisolated(unsafe) let logTableBuffer: MTLBuffer
+    private nonisolated(unsafe) let antilogTableBuffer: MTLBuffer
 
     /// Returns nil if Metal is unavailable (e.g., VM, old hardware).
     nonisolated init?() {
@@ -23,52 +25,62 @@ final class MetalPAR2Service: @unchecked Sendable {
             return nil
         }
 
-        // Upload the 256x256 GF(2^8) multiplication table once
-        let table = Self.buildMulTable()
-        guard let mulTableBuffer = device.makeBuffer(bytes: table, length: table.count, options: .storageModeShared) else {
-            return nil
-        }
+        // Upload GF(2^16) log and antilog tables (65536 × UInt16 = 128 KB each)
+        let logTable = GF16.logTableBytes
+        let antilogTable = GF16.antilogTableBytes
+
+        guard let logBuf = logTable.withUnsafeBufferPointer({ ptr in
+            device.makeBuffer(bytes: ptr.baseAddress!, length: ptr.count * 2, options: .storageModeShared)
+        }) else { return nil }
+
+        guard let antilogBuf = antilogTable.withUnsafeBufferPointer({ ptr in
+            device.makeBuffer(bytes: ptr.baseAddress!, length: ptr.count * 2, options: .storageModeShared)
+        }) else { return nil }
 
         self.device = device
         self.pipeline = pipeline
         self.commandQueue = commandQueue
-        self.mulTableBuffer = mulTableBuffer
+        self.logTableBuffer = logBuf
+        self.antilogTableBuffer = antilogBuf
     }
 
     struct PAR2Uniforms {
-        var blockSize: UInt32
+        var blockSize: UInt32       // in bytes (must be multiple of 2)
         var blockCount: UInt32
         var recoveryBlockCount: UInt32
-        var dataSize: UInt32
+        var symbolsPerBlock: UInt32 // blockSize / 2
     }
 
-    /// Generate PAR2 recovery data on the GPU.
+    /// Generate PAR2 2.0 recovery data on the GPU using GF(2^16) Reed-Solomon.
+    /// `bases` contains the Vandermonde base values for each source block (one per block).
     /// Returns the raw recovery bytes (recoveryBlockCount * blockSize).
     nonisolated func generateRecoveryData(
         data: Data,
         blockSize: Int,
         blockCount: Int,
         recoveryBlockCount: Int,
-        coefficients: [UInt8],
+        bases: [UInt16],
         onProgress: (@Sendable (Double) -> Void)? = nil
     ) -> Data? {
-        let dataSize = data.count
+        let symbolsPerBlock = blockSize / 2
         let recoverySize = recoveryBlockCount * blockSize
 
         // Create Metal buffers
         guard let dataBuffer = data.withUnsafeBytes({ ptr in
-            device.makeBuffer(bytes: ptr.baseAddress!, length: dataSize, options: .storageModeShared)
+            device.makeBuffer(bytes: ptr.baseAddress!, length: data.count, options: .storageModeShared)
         }) else { return nil }
 
         guard let recoveryBuffer = device.makeBuffer(length: recoverySize, options: .storageModeShared) else { return nil }
 
-        guard let coeffBuffer = device.makeBuffer(bytes: coefficients, length: coefficients.count, options: .storageModeShared) else { return nil }
+        guard let basesBuffer = bases.withUnsafeBufferPointer({ ptr in
+            device.makeBuffer(bytes: ptr.baseAddress!, length: ptr.count * 2, options: .storageModeShared)
+        }) else { return nil }
 
         var uniforms = PAR2Uniforms(
             blockSize: UInt32(blockSize),
             blockCount: UInt32(blockCount),
             recoveryBlockCount: UInt32(recoveryBlockCount),
-            dataSize: UInt32(dataSize)
+            symbolsPerBlock: UInt32(symbolsPerBlock)
         )
 
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
@@ -77,21 +89,22 @@ final class MetalPAR2Service: @unchecked Sendable {
         encoder.setComputePipelineState(pipeline)
         encoder.setBuffer(dataBuffer, offset: 0, index: 0)
         encoder.setBuffer(recoveryBuffer, offset: 0, index: 1)
-        encoder.setBuffer(mulTableBuffer, offset: 0, index: 2)
-        encoder.setBuffer(coeffBuffer, offset: 0, index: 3)
-        encoder.setBytes(&uniforms, length: MemoryLayout<PAR2Uniforms>.size, index: 4)
+        encoder.setBuffer(logTableBuffer, offset: 0, index: 2)
+        encoder.setBuffer(antilogTableBuffer, offset: 0, index: 3)
+        encoder.setBuffer(basesBuffer, offset: 0, index: 4)
+        encoder.setBytes(&uniforms, length: MemoryLayout<PAR2Uniforms>.size, index: 5)
 
-        // Thread grid: (blockSize, recoveryBlockCount)
-        let gridSize = MTLSize(width: blockSize, height: recoveryBlockCount, depth: 1)
+        // Thread grid: (symbolsPerBlock, recoveryBlockCount)
+        // Each thread computes one UInt16 symbol in one recovery block
+        let gridSize = MTLSize(width: symbolsPerBlock, height: recoveryBlockCount, depth: 1)
         let threadgroupSize = MTLSize(
-            width: min(blockSize, pipeline.maxTotalThreadsPerThreadgroup),
+            width: min(symbolsPerBlock, pipeline.maxTotalThreadsPerThreadgroup),
             height: 1,
             depth: 1
         )
         encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadgroupSize)
         encoder.endEncoding()
 
-        // Report progress at 50% when submitted, 100% when complete
         onProgress?(0.5)
 
         commandBuffer.commit()
@@ -118,55 +131,53 @@ final class MetalPAR2Service: @unchecked Sendable {
         uint blockSize;
         uint blockCount;
         uint recoveryBlockCount;
-        uint dataSize;
+        uint symbolsPerBlock;
     };
 
-    kernel void par2Generate(
-        device const uint8_t* data          [[buffer(0)]],
-        device uint8_t*       recovery      [[buffer(1)]],
-        device const uint8_t* mulTable      [[buffer(2)]],
-        device const uint8_t* coefficients  [[buffer(3)]],
-        constant PAR2Uniforms& uniforms     [[buffer(4)]],
-        uint2 tid                           [[thread_position_in_grid]]
-    ) {
-        uint pos = tid.x;
-        uint r   = tid.y;
-        if (pos >= uniforms.blockSize || r >= uniforms.recoveryBlockCount) return;
+    // GF(2^16) multiply using log/antilog tables
+    static inline ushort gf16_mul(ushort a, ushort b,
+                                   device const ushort* logTable,
+                                   device const ushort* antilogTable) {
+        if (a == 0 || b == 0) return 0;
+        uint sum = uint(logTable[a]) + uint(logTable[b]);
+        if (sum >= 65535) sum -= 65535;
+        return antilogTable[sum];
+    }
 
-        uint8_t acc = 0;
-        uint coeffBase = r * uniforms.blockCount;
+    // GF(2^16) pow using log/antilog tables
+    static inline ushort gf16_pow(ushort base, uint exp,
+                                   device const ushort* logTable,
+                                   device const ushort* antilogTable) {
+        if (base == 0) return 0;
+        if (exp == 0) return 1;
+        ulong logBase = ulong(logTable[base]);
+        ulong logResult = (logBase * ulong(exp)) % 65535;
+        return antilogTable[uint(logResult)];
+    }
+
+    kernel void par2Generate(
+        device const ushort* data          [[buffer(0)]],
+        device ushort*       recovery      [[buffer(1)]],
+        device const ushort* logTable      [[buffer(2)]],
+        device const ushort* antilogTable  [[buffer(3)]],
+        device const ushort* bases         [[buffer(4)]],
+        constant PAR2Uniforms& uniforms    [[buffer(5)]],
+        uint2 tid                          [[thread_position_in_grid]]
+    ) {
+        uint symbolPos = tid.x;   // symbol position within a block
+        uint r = tid.y;           // recovery block index
+        if (symbolPos >= uniforms.symbolsPerBlock || r >= uniforms.recoveryBlockCount) return;
+
+        uint exponent = r;         // PAR2 exponents are 0-based (matches stored value)
+        ushort acc = 0;
 
         for (uint b = 0; b < uniforms.blockCount; b++) {
-            uint srcIndex = b * uniforms.blockSize + pos;
-            if (srcIndex >= uniforms.dataSize) break;
-            uint8_t coeff = coefficients[coeffBase + b];
-            uint8_t dataByte = data[srcIndex];
-            acc ^= mulTable[uint(coeff) * 256 + uint(dataByte)];
+            ushort coeff = gf16_pow(bases[b], exponent, logTable, antilogTable);
+            ushort srcSymbol = data[b * uniforms.symbolsPerBlock + symbolPos];
+            acc ^= gf16_mul(coeff, srcSymbol, logTable, antilogTable);
         }
 
-        recovery[r * uniforms.blockSize + pos] = acc;
+        recovery[r * uniforms.symbolsPerBlock + symbolPos] = acc;
     }
     """
-
-    // MARK: - GF(2^8) Multiplication Table
-
-    nonisolated private static func buildMulTable() -> [UInt8] {
-        var table = [UInt8](repeating: 0, count: 256 * 256)
-        for a in 0..<256 {
-            for b in 0..<256 {
-                var result: UInt16 = 0
-                var av = UInt16(a)
-                var bv = UInt16(b)
-                for _ in 0..<8 {
-                    if bv & 1 != 0 { result ^= av }
-                    let highBit = av & 0x80
-                    av <<= 1
-                    if highBit != 0 { av ^= 0x11D }
-                    bv >>= 1
-                }
-                table[a * 256 + b] = UInt8(result & 0xFF)
-            }
-        }
-        return table
-    }
 }

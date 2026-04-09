@@ -74,11 +74,16 @@ actor DeletionService {
                         result.volumeFilesRemoved += 1
                     }
 
-                    // Also remove PAR2 companion
+                    // Also remove PAR2 companion files (index + vol)
                     if !image.par2Filename.isEmpty {
-                        let par2Path = filePath.deletingLastPathComponent().appendingPathComponent(image.par2Filename)
-                        if fm.fileExists(atPath: par2Path.path) {
-                            try fm.removeItem(at: par2Path)
+                        let dir = filePath.deletingLastPathComponent()
+                        let companions = RedundancyService.companionFiles(
+                            forIndex: image.par2Filename, in: dir
+                        )
+                        for companion in companions {
+                            if fm.fileExists(atPath: companion.path) {
+                                try fm.removeItem(at: companion)
+                            }
                         }
                     }
 
@@ -121,18 +126,19 @@ actor DeletionService {
                         result.errors.append("B2 delete failed: \(image.filename) — \(error.localizedDescription)")
                     }
 
-                    // Also delete PAR2 from B2 if it exists
+                    // Also delete PAR2 companion files from B2 (index + vol)
                     if !image.par2Filename.isEmpty {
-                        let par2Remote = "\(image.albumPath)/\(image.par2Filename)"
+                        let baseName = String(image.par2Filename.dropLast(5)) // remove ".par2"
+                        let prefix = "\(image.albumPath)/\(baseName)"
 
                         do {
                             let listings = try await b2Service.listAllFiles(
                                 bucketId: credentials.bucketId,
                                 credentials: credentials,
-                                prefix: par2Remote
+                                prefix: prefix
                             )
-                            if let par2Listing = listings.first(where: { $0.fileName == par2Remote }) {
-                                try await b2Service.deleteFile(fileId: par2Listing.fileId, fileName: par2Listing.fileName, credentials: credentials)
+                            for listing in listings where listing.fileName.hasSuffix(".par2") {
+                                try await b2Service.deleteFile(fileId: listing.fileId, fileName: listing.fileName, credentials: credentials)
                             }
                         } catch {
                             // PAR2 B2 deletion is best-effort

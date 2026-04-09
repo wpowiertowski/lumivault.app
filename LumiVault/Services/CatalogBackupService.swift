@@ -23,16 +23,18 @@ actor CatalogBackupService {
 
         let checksum = Catalog.sha256Hex(of: data)
 
-        // Generate PAR2 once for all volumes
-        let par2Data: Data? = {
-            let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-            try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-            defer { try? FileManager.default.removeItem(at: tmpDir) }
-            let tmpCatalog = tmpDir.appendingPathComponent("catalog.json")
-            try? data.write(to: tmpCatalog, options: .atomic)
-            let redundancy = RedundancyService()
-            guard let par2URL = try? redundancy.generatePAR2(for: tmpCatalog, outputDirectory: tmpDir) else { return nil }
-            return try? Data(contentsOf: par2URL)
+        // Generate PAR2 once in a temp directory, collect all companion files
+        let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let tmpCatalog = tmpDir.appendingPathComponent("catalog.json")
+        try? data.write(to: tmpCatalog, options: .atomic)
+        let redundancy = RedundancyService()
+        let par2IndexURL = try? redundancy.generatePAR2(for: tmpCatalog, outputDirectory: tmpDir)
+        let par2Files: [URL] = {
+            guard let indexURL = par2IndexURL else { return [] }
+            return RedundancyService.companionFiles(forIndex: indexURL.lastPathComponent, in: tmpDir)
         }()
 
         for volume in volumes {
@@ -42,12 +44,13 @@ actor CatalogBackupService {
 
             let destURL = mountURL.appendingPathComponent("catalog.json")
             let checksumURL = mountURL.appendingPathComponent("catalog.json.sha256")
-            let par2URL = mountURL.appendingPathComponent("catalog.json.par2")
             do {
                 try data.write(to: destURL, options: .atomic)
                 try checksum.write(to: checksumURL, atomically: true, encoding: .utf8)
-                if let par2Data {
-                    try par2Data.write(to: par2URL, options: .atomic)
+                for par2File in par2Files {
+                    let dest = mountURL.appendingPathComponent(par2File.lastPathComponent)
+                    let fileData = try Data(contentsOf: par2File)
+                    try fileData.write(to: dest, options: .atomic)
                 }
             } catch {
                 errors.append("Failed to save catalog to \(volume.label): \(error.localizedDescription)")
@@ -97,7 +100,7 @@ actor CatalogBackupService {
                 contentType: "text/plain"
             )
 
-            // Upload PAR2 recovery data
+            // Upload PAR2 recovery data (index + vol files)
             let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -105,15 +108,20 @@ actor CatalogBackupService {
             try data.write(to: tmpCatalog, options: .atomic)
             let redundancy = RedundancyService()
             let par2URL = try redundancy.generatePAR2(for: tmpCatalog, outputDirectory: tmpDir)
-            let par2Data = try Data(contentsOf: par2URL)
-            let par2Sha1 = sha1Hash(of: par2Data)
-            try await b2Service.getUploadURL(bucketId: credentials.bucketId)
-            _ = try await b2Service.uploadFile(
-                fileData: par2Data,
-                fileName: "catalog.json.par2",
-                sha1: par2Sha1,
-                contentType: "application/octet-stream"
+            let par2Files = RedundancyService.companionFiles(
+                forIndex: par2URL.lastPathComponent, in: tmpDir
             )
+            for par2File in par2Files {
+                let par2Data = try Data(contentsOf: par2File)
+                let fileSha1 = sha1Hash(of: par2Data)
+                try await b2Service.getUploadURL(bucketId: credentials.bucketId)
+                _ = try await b2Service.uploadFile(
+                    fileData: par2Data,
+                    fileName: par2File.lastPathComponent,
+                    sha1: fileSha1,
+                    contentType: "application/octet-stream"
+                )
+            }
             return nil
         } catch {
             return "Failed to upload catalog to B2: \(error.localizedDescription)"

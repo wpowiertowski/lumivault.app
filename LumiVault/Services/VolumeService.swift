@@ -68,12 +68,17 @@ actor VolumeService {
             image.storageLocations.append(StorageLocation(volumeID: volumeID, relativePath: relativePath))
             copiedCount += 1
 
-            // Copy PAR2 file if it exists
+            // Copy PAR2 companion files (index + vol)
             if !image.par2Filename.isEmpty {
-                let par2Source = sourceURL.deletingLastPathComponent().appendingPathComponent(image.par2Filename)
-                let par2Dest = basePath.appendingPathComponent(image.par2Filename)
-                if FileManager.default.fileExists(atPath: par2Source.path) {
-                    try FileManager.default.copyItem(at: par2Source, to: par2Dest)
+                let sourceDir = sourceURL.deletingLastPathComponent()
+                let companions = RedundancyService.companionFiles(
+                    forIndex: image.par2Filename, in: sourceDir
+                )
+                for companion in companions {
+                    let dest = basePath.appendingPathComponent(companion.lastPathComponent)
+                    if !FileManager.default.fileExists(atPath: dest.path) {
+                        try FileManager.default.copyItem(at: companion, to: dest)
+                    }
                 }
             }
         }
@@ -164,13 +169,17 @@ actor VolumeService {
                 try FileManager.default.createDirectory(at: destBase, withIntermediateDirectories: true)
                 try FileManager.default.copyItem(at: source, to: destFile)
 
-                // Copy PAR2 if exists
+                // Copy PAR2 companion files (index + vol)
                 if !image.par2Filename.isEmpty {
-                    let par2Source = source.deletingLastPathComponent().appendingPathComponent(image.par2Filename)
-                    let par2Dest = destBase.appendingPathComponent(image.par2Filename)
-                    if FileManager.default.fileExists(atPath: par2Source.path),
-                       !FileManager.default.fileExists(atPath: par2Dest.path) {
-                        try FileManager.default.copyItem(at: par2Source, to: par2Dest)
+                    let sourceDir = source.deletingLastPathComponent()
+                    let companions = RedundancyService.companionFiles(
+                        forIndex: image.par2Filename, in: sourceDir
+                    )
+                    for companion in companions {
+                        let dest = destBase.appendingPathComponent(companion.lastPathComponent)
+                        if !FileManager.default.fileExists(atPath: dest.path) {
+                            try FileManager.default.copyItem(at: companion, to: dest)
+                        }
                     }
                 }
 

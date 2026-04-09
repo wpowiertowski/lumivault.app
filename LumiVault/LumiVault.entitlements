@@ -12,6 +12,9 @@
     <true/>
     <key>com.apple.security.network.client</key>
     <true/>
-    <!-- TODO: Add com.apple.developer.ubiquity-container-identifiers once provisioning profile is available -->
+    <key>com.apple.developer.ubiquity-container-identifiers</key>
+    <array>
+        <string>iCloud.app.lumivault</string>
+    </array>
 </dict>
 </plist>

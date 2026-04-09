@@ -2,14 +2,14 @@
 
 ## Existing Automated Test Assessment
 
-### Summary: 111 tests across 23 suites
+### Summary: 114 tests across 23 suites
 
 | Rating | Suite | Tests | Assessment |
-|--------|-------|-------|------------|
+| -------- | ------- | ------- | ------------ |
 | High Value | EncryptionServiceTests | 14 | Key derivation determinism, encrypt/decrypt round-trip (data + file), wrong key/AD rejection, nonce uniqueness, static method interop |
 | High Value | EncryptPAR2IntegrationTests | 2 | Full encrypt-PAR2-corrupt-repair-decrypt pipeline, uncorrupted encrypted file passes PAR2 verification |
 | High Value | EncryptionEdgeCaseTests | 4 | Empty data, ciphertext size = plaintext+16, 1MB large data round-trip, file-level encrypted size check |
-| High Value | RedundancyServiceTests | 8 | Core data-integrity logic. Covers encode, verify, corrupt-and-repair round-trips, edge cases. Irreplaceable. |
+| High Value | RedundancyServiceTests | 11 | Core data-integrity logic. Covers PAR2 2.0 encode, verify, corrupt-and-repair round-trips, split file format, par2cmdline interop (verify + repair), edge cases. Irreplaceable. |
 | High Value | VolumeSyncToNewVolumeTests | 5 | End-to-end copy + hash verification, dedup detection, hash mismatch, PAR2 companion handling. Tests real file I/O. |
 | High Value | VolumeSyncAdditionalTests | 3 | Single-album sync, partial dedup with pre-placed files, already-tracked dedup skip |
 | High Value | CatalogServiceMergeTests | 5 | Union-by-SHA merge, timestamp precedence, dedup — exactly the logic that protects multi-device iCloud sync. |
@@ -39,7 +39,7 @@ IntegrityServiceTests duplicates fixture materialization inline instead of using
 ### Coverage Status
 
 | Area | Risk | Status |
-|------|------|--------|
+| ------ | ------ | -------- |
 | EncryptionService | High | **Covered** — 20 tests across 3 suites: key derivation, round-trips, wrong key/AD, nonce uniqueness, file ops, edge cases, encrypt-PAR2-decrypt integration |
 | B2Service (network layer) | High | **Partially covered** — 7 tests on pure helpers (SHA-1, HTTP response validation). Network methods require URLSession abstraction; covered by manual QA. |
 | ExportCoordinator / PipelinedExportCoordinator | High | **Partially covered** — 5 tests on image conversion + 5 on ExportProgress. PipelinedExportCoordinator replaces sequential ExportCoordinator with async pipeline (AsyncChannel + backpressure). Pipeline orchestration, cancellation teardown, and channel wiring are not unit-tested; covered by manual QA (TC-2, TC-4). |
@@ -57,7 +57,7 @@ IntegrityServiceTests duplicates fixture materialization inline instead of using
 These items would further improve coverage but require architectural changes:
 
 | Item | Blocker | Effort |
-|------|---------|--------|
+| ------ | --------- | -------- |
 | B2Service network methods (upload, download, list, delete) | Needs URLSession protocol abstraction or URLProtocol subclass for HTTP mocking | Medium — touches B2Service constructor + all callers |
 | PipelinedExportCoordinator pipeline | Pipeline uses AsyncChannel/AsyncSemaphore for inter-phase communication. Channel backpressure, cancellation teardown (sentinel task + channel.cancel), and phase-skipping wiring are testable in isolation. Full end-to-end pipeline still needs protocol-based service injection. | Medium — channel/semaphore unit tests are straightforward; full pipeline test remains high effort |
 | AsyncChannel / AsyncSemaphore | New utilities with cancellation semantics (cancelAll unblocks waiters). No unit tests yet. | Low — pure async logic, easy to test in isolation |
@@ -75,7 +75,7 @@ These items would further improve coverage but require architectural changes:
 The `LumiVaultUITests` target uses XCUIAutomation (Xcode 26) to automate a subset of the manual test cases below. These tests are designed for **local development only** — they require a real app launch and are not suitable for headless CI.
 
 | Test | Covers | What it validates |
-|------|--------|-------------------|
+| ------ | -------- | ------------------- |
 | `testWelcomeScreenRestoreButtons` | TC-1 | Welcome view shows From File / From Volume restore buttons (skips if albums exist) |
 | `testSidebarExists` | TC-21 | NavigationSplitView sidebar is present |
 | `testToolbarImportButton` | TC-21 | Import from Photos toolbar button is accessible |
@@ -142,7 +142,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### Manual Test Cases NOT Automated
 
 | TC | Reason |
-|----|--------|
+| ---- | -------- |
 | TC-5 (Drag & Drop) | XCUIAutomation cannot simulate inter-process drag from Finder |
 | TC-8, TC-9, TC-25 (Volumes) | Require physical external drive mount + NSOpenPanel interaction |
 | TC-10, TC-19 (PAR2/Integrity) | Require file corruption between UI steps |
@@ -159,7 +159,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### Prerequisites
 
 | Item | Details |
-|------|---------|
+| ------ | --------- |
 | macOS | 26+ |
 | External volumes | 2 USB drives (formatted APFS or ExFAT), labeled distinctly (e.g., "QA-Vol-A", "QA-Vol-B") |
 | Apple Photos | Library with at least 2 albums, each containing 5+ photos (mix of HEIC, JPEG, RAW if available) |
@@ -172,7 +172,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-1: First Launch & Welcome Screen
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 1.1 | Launch app with no prior data | Welcome view appears with restore options and arrow pointing to sidebar |
 | 1.2 | Click "Detect Existing" | App searches for `~/.lumivault/catalog.json`. If found, shows import summary. If not, shows "not found" message |
 | 1.3 | Click "Restore from File" | File picker opens, filtered to `.json` files |
@@ -184,7 +184,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-2: Photos Library Import (Happy Path)
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 2.1 | Menu bar > File > Import from Photos | Photos album picker sheet appears |
 | 2.2 | Verify album list | Albums from Photos.app displayed with photo counts, sorted alphabetically |
 | 2.3 | Use search field | Filters albums by name in real-time |
@@ -201,7 +201,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-3: Photos Import with JPEG Conversion
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 3.1 | Import an album with JPEG conversion ON, quality 85%, max dimension 2048px | Export completes without error |
 | 3.2 | Inspect an exported file on volume | File is JPEG, dimensions <= 2048px on longest edge |
 | 3.3 | Verify SHA-256 in metadata inspector | Hash matches the converted JPEG, not the original HEIC |
@@ -211,7 +211,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-4: Export Cancellation
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 4.1 | Start a large album export (20+ photos) | Progress begins, phases advance as images flow through pipeline |
 | 4.2 | Click "Cancel" during export | Export stops within 2-3 seconds. All pipeline tasks killed (sentinel cancels child tasks + channels). |
 | 4.3 | Check sidebar | No partial/corrupt album entry created (empty album record deleted on cancel) |
@@ -224,7 +224,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-5: Drag & Drop Import
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 5.1 | Drag 5 image files from Finder onto the app window | Import sheet appears with file list |
 | 5.2 | Drag a folder containing images | All images inside the folder are listed |
 | 5.3 | Drag a non-image file (.pdf, .txt) | File is filtered out; only images shown |
@@ -235,7 +235,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-6: Deduplication — Exact (SHA-256)
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 6.1 | Import the same album twice | Second import reports all images as "deduplicated", 0 new copies |
 | 6.2 | Check catalog.json | No duplicate SHA-256 entries in the album |
 | 6.3 | Check volume | No duplicate files on disk |
@@ -245,7 +245,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-7: Deduplication — Near-Duplicate (Perceptual Hash)
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 7.1 | Import photos that include slight crops/edits of the same image | Near-duplicate warning appears during export (if detection enabled) |
 | 7.2 | Open Library > Near Duplicates view | Duplicate pairs listed with similarity percentage |
 | 7.3 | Verify Hamming distance threshold | Only pairs within threshold (default <5) are flagged |
@@ -255,7 +255,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-8: Multi-Volume Mirroring
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 8.1 | Settings > Volumes > Add Volume > select QA-Vol-A | Volume appears in list with label and ID |
 | 8.2 | Export an album targeting QA-Vol-A | Files appear on QA-Vol-A under `year/month/day/albumName/` hierarchy |
 | 8.3 | Add QA-Vol-B via Settings > Volumes | Second volume appears |
@@ -269,7 +269,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-9: Volume Removal
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 9.1 | Settings > Volumes > Remove QA-Vol-B | Confirmation dialog appears |
 | 9.2 | Confirm removal | Volume disappears from list |
 | 9.3 | Check image storage locations | QA-Vol-B entries removed from all images |
@@ -280,8 +280,8 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-10: PAR2 Error Correction
 
 | # | Action | Expected |
-|---|--------|----------|
-| 10.1 | Export an album with PAR2 enabled | `.par2` companion files created alongside each image |
+| --- | -------- | ---------- |
+| 10.1 | Export an album with PAR2 enabled | `.par2` index and `.vol0+N.par2` volume files created alongside each image |
 | 10.2 | Right-click image > Verify Integrity | "Passed" result, green checkmark |
 | 10.3 | Hex-edit an image file on the volume (corrupt ~5% of bytes) | — |
 | 10.4 | Verify Integrity on the corrupted file | "Failed" — hash mismatch detected |
@@ -293,7 +293,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-11: Encryption
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 11.1 | Settings > Encryption > Set passphrase "test1234" | Passphrase saved, encryption enabled |
 | 11.2 | Export an album with encryption ON | Files on volume are encrypted (not viewable in Finder preview) |
 | 11.3 | Select encrypted image in grid | Thumbnail loads (decrypted in-memory for display) |
@@ -308,7 +308,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-12: Backblaze B2 Cloud Upload
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 12.1 | Settings > B2 > Enter application key ID, application key, bucket name | Credentials saved |
 | 12.2 | Click "Test Connection" | Success message with bucket info |
 | 12.3 | Export album with B2 upload enabled | Upload progress shown per-file; SHA-1 verification on upload |
@@ -321,7 +321,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-13: B2 Upload with PAR2
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 13.1 | Export album with both PAR2 and B2 enabled | Both image and `.par2` files uploaded to B2 |
 | 13.2 | Verify in B2 console | PAR2 files present alongside images |
 
@@ -330,7 +330,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-14: iCloud Catalog Sync
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 14.1 | Settings > iCloud > Enable sync | Sync status indicator appears |
 | 14.2 | Export an album on Device A | Catalog updates locally and pushes to iCloud |
 | 14.3 | Open LumiVault on Device B (same iCloud account) | Catalog pulls from iCloud; new album visible in sidebar |
@@ -343,7 +343,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-15: Catalog Backup & Restore
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 15.1 | After exporting to volumes and B2, check each volume root | `catalog.json` present on each mounted volume |
 | 15.2 | Check B2 bucket | `catalog.json` uploaded |
 | 15.3 | Delete local app data (reset SwiftData container) | — |
@@ -356,7 +356,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-16: Album Deletion
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 16.1 | Right-click album in sidebar > Delete | Confirmation dialog with count of images and affected locations |
 | 16.2 | Confirm deletion | Progress indicator shows phases: volumes, B2, catalog |
 | 16.3 | Check sidebar | Album removed from tree |
@@ -369,7 +369,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-17: Single Image Deletion
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 17.1 | Select image in grid > Delete (toolbar or context menu) | Confirmation dialog |
 | 17.2 | Confirm | Image removed from grid, files deleted from volumes and B2 |
 | 17.3 | Remaining images in album | Unaffected, counts updated |
@@ -380,7 +380,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-18: Storage Reconciliation
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 18.1 | Settings > Integrity > Run Reconciliation | Scan begins with progress (Scanning Volumes, Scanning B2, Resolving) |
 | 18.2 | With all volumes mounted and B2 healthy | "No discrepancies found" |
 | 18.3 | Manually delete a file from QA-Vol-A, then re-run | Dangling location detected for that file |
@@ -394,7 +394,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-19: Integrity Verification
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 19.1 | Select image > Metadata Inspector > Verify Integrity | Re-hashes file, shows pass/fail with actual vs stored hash |
 | 19.2 | Bulk verify (Settings > Integrity > Verify All) | Batch progress, summary of pass/fail counts |
 | 19.3 | Corrupt a file on disk, then verify | Mismatch detected, repair option offered |
@@ -404,7 +404,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-20: Thumbnail Behavior
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 20.1 | Import album with HEIC images | Grid thumbnails render within 2 seconds |
 | 20.2 | Import RAW images (CR2/CR3/NEF/ARW/DNG) | Thumbnails render correctly (may be slower) |
 | 20.3 | Scroll rapidly through 100+ image grid | No blank thumbnails, no memory spike, smooth scrolling |
@@ -416,7 +416,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-21: Navigation & UI
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 21.1 | Sidebar year groups | Expandable/collapsible, shows album count |
 | 21.2 | Click album | Grid view loads with thumbnails |
 | 21.3 | Click image in grid | Detail view shows full-resolution preview |
@@ -430,7 +430,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-22: Settings Tabs
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 22.1 | General tab | App preferences displayed and editable |
 | 22.2 | Export Defaults tab | Format, quality, max dimension, PAR2 toggle, near-dupe toggle — all persist after closing settings |
 | 22.3 | Volumes tab | Lists registered volumes with mount status |
@@ -445,7 +445,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-23: Edge Cases & Error Handling
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 23.1 | Export to a full disk (no space) | Graceful error with message, no partial corruption |
 | 23.2 | Eject volume during export | Export fails with error, no crash, partial files cleaned up |
 | 23.3 | Invalid B2 credentials | "Test Connection" shows clear error message |
@@ -463,7 +463,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-24: Tip Jar (StoreKit 2)
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 24.1 | Settings > Support | 4 tip tiers displayed with prices |
 | 24.2 | Tap a tip tier | StoreKit purchase sheet appears |
 | 24.3 | Complete purchase (sandbox) | Thank-you confirmation shown |
@@ -474,7 +474,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### TC-25: Security-Scoped Bookmarks
 
 | # | Action | Expected |
-|---|--------|----------|
+| --- | -------- | ---------- |
 | 25.1 | Add volume, quit app, relaunch | Volume still accessible (bookmark persisted) |
 | 25.2 | Rename external volume in Finder | Bookmark resolves to new name; access works or stale bookmark detected |
 | 25.3 | Eject and re-insert volume | Access restored via bookmark without re-adding |

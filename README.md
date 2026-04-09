@@ -28,7 +28,7 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 - **Multi-Volume Mirroring** �� mirror albums to multiple external drives with security-scoped bookmarks for persistent access; sync existing catalog to newly added volumes with dedup-by-hash
 - **Storage Reconciliation** — scan all volumes and B2 for discrepancies (dangling references, orphan files, missing entries) with per-item resolution actions via the Integrity settings tab
 - **Album & Image Deletion** — remove albums or individual photos from the catalog, all external volumes, and B2 in one operation with progress tracking; B2 files are resolved by name for reliable deletion
-- **Reed-Solomon Error Correction** — GF(2^8) Vandermonde-matrix redundancy with PAR2-compatible file format, GPU-accelerated via Metal compute shaders (CPU fallback), adaptive block sizing for guaranteed 10% recovery, and single-block repair with cross-verification
+- **Reed-Solomon Error Correction** — standard PAR2 2.0 format with GF(2^16) Vandermonde-matrix Reed-Solomon coding, fully compatible with par2cmdline and other PAR2 tools; GPU-accelerated via Metal compute shaders (CPU fallback), adaptive block sizing for guaranteed 10% recovery, split file output (.par2 index + .vol0+N.par2 recovery volumes)
 - **Image Format Conversion** — optional JPEG conversion with configurable quality and max dimension during export; originals in Photos are never modified
 - **Export Cancellation** — cancel in-progress exports with immediate termination of all spawned work (hashing, encryption, PAR2, copy, upload)
 - **Integrity Verification** — background checks surface corruption by re-hashing files against stored SHA-256 digests
@@ -39,20 +39,20 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 
 ## Technology Stack
 
-| Layer           | Framework                                              |
-| --------------- | ------------------------------------------------------ |
-| UI              | SwiftUI (NavigationSplitView, @Observable)             |
-| Data            | SwiftData                                              |
-| Photos Import   | PhotoKit (Photos, PhotosUI)                            |
-| Cloud Sync      | iCloud Drive via NSFileCoordinator                     |
-| Cloud Storage   | URLSession + Backblaze B2 REST API                     |
-| Image Pipeline  | Core Image, ImageIO                                    |
-| Hashing         | CryptoKit (SHA-256, SHA-1)                             |
-| Encryption      | CryptoKit (AES-256-GCM), CommonCrypto (PBKDF2)         |
-| In-App Purchase | StoreKit 2                                             |
-| Redundancy      | Custom GF(2^8) Reed-Solomon (Vandermonde matrix)       |
-| GPU Compute     | Metal (compute shaders for PAR2 generation)            |
-| Concurrency     | Swift Concurrency (async/await, TaskGroup, actors)     |
+| Layer           | Framework                                                     |
+| --------------- | ------------------------------------------------------------- |
+| UI              | SwiftUI (NavigationSplitView, @Observable)                    |
+| Data            | SwiftData                                                     |
+| Photos Import   | PhotoKit (Photos, PhotosUI)                                   |
+| Cloud Sync      | iCloud Drive via NSFileCoordinator                            |
+| Cloud Storage   | URLSession + Backblaze B2 REST API                            |
+| Image Pipeline  | Core Image, ImageIO                                           |
+| Hashing         | CryptoKit (SHA-256, SHA-1)                                    |
+| Encryption      | CryptoKit (AES-256-GCM), CommonCrypto (PBKDF2)                |
+| In-App Purchase | StoreKit 2                                                    |
+| Redundancy      | Standard PAR2 2.0 Reed-Solomon (GF(2^16) Vandermonde matrix)  |
+| GPU Compute     | Metal (compute shaders for PAR2 generation)                   |
+| Concurrency     | Swift Concurrency (async/await, TaskGroup, actors)            |
 
 ## Architecture
 
@@ -124,7 +124,7 @@ LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool
 
 ## Testing
 
-111 unit tests across 23 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
+114 unit tests across 23 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
 
 ```bash
 swift test                                    # Run all unit tests
@@ -140,7 +140,7 @@ xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultUITests -destinati
 | CatalogServiceMergeTests | 5 | Disjoint merge, SHA union, new albums, timestamps, deduplication |
 | CatalogRemovalTests | 3 | Album removal, empty container pruning, single image removal |
 | HasherServiceTests | 4 | Fixture hash verification, empty file, size tracking, consistency |
-| RedundancyServiceTests | 8 | PAR2 generate/verify, corrupt-and-repair round-trip, edge cases |
+| RedundancyServiceTests | 11 | PAR2 2.0 generate/verify, corrupt-and-repair round-trip, split file format, par2cmdline interop (verify + repair), edge cases |
 | PerceptualHashTests | 7 | Hamming distance, symmetry, thresholds, invalid input |
 | IntegrityServiceTests | 4 | Hash match/mismatch, missing files, batch size |
 | SwiftDataModelTests | 5 | Relationships, defaults, Codable support types |

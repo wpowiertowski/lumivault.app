@@ -257,7 +257,7 @@ actor ReconciliationService {
         }
 
         // Catalog metadata files managed by CatalogBackupService — not image data
-        let catalogMetadataFiles: Set<String> = ["catalog.json", "catalog.json.sha256", "catalog.json.par2"]
+        let catalogMetadataFiles: Set<String> = ["catalog.json", "catalog.json.sha256"]
 
         // Check: B2 files not referenced by any snapshot
         for b2File in b2Files {

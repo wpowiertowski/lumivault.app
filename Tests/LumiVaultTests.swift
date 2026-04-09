@@ -342,11 +342,30 @@ struct RedundancyServiceTests {
         let par2URL = try await service.generatePAR2(for: fileURL, outputDirectory: dir)
         let par2Data = try Data(contentsOf: par2URL)
 
-        let magic = String(data: par2Data[0..<4], encoding: .ascii)
-        #expect(magic == "PV2R")
+        // PAR2 2.0 magic: "PAR2\0PKT"
+        let magic = Array(par2Data[0..<8])
+        #expect(magic == [0x50, 0x41, 0x52, 0x32, 0x00, 0x50, 0x4B, 0x54])
+    }
 
-        let storedSize = par2Data[4..<12].withUnsafeBytes { $0.loadUnaligned(as: UInt64.self) }
-        #expect(storedSize == UInt64(spec.size))
+    @Test func par2SplitFileFormat() async throws {
+        let service = RedundancyService()
+        let spec = TestFixtures.files[4] // city.heic, 3072 bytes
+        let root = try TestFixtures.materializeVolume(label: "par2-split")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let dir = root.appendingPathComponent(spec.albumPath)
+        let fileURL = dir.appendingPathComponent(spec.name)
+        let par2URL = try await service.generatePAR2(for: fileURL, outputDirectory: dir)
+
+        // Index file should exist
+        #expect(FileManager.default.fileExists(atPath: par2URL.path))
+        #expect(par2URL.lastPathComponent == "\(spec.name).par2")
+
+        // At least one vol file should exist
+        let companions = RedundancyService.companionFiles(forIndex: par2URL.lastPathComponent, in: dir)
+        #expect(companions.count >= 2) // index + at least one vol
+        let volFiles = companions.filter { $0.lastPathComponent.contains(".vol") }
+        #expect(!volFiles.isEmpty)
     }
 
     @Test func par2VerifyFailsOnSizeMismatch() async throws {
@@ -454,10 +473,11 @@ struct RedundancyServiceTests {
         try corrupted.write(to: fileURL)
 
         let repairedData = try await service.repair(par2URL: par2URL, corruptedFileURL: fileURL)
-        #expect(repairedData != nil)
+        #expect(repairedData != nil, "PAR2 repair returned nil for partial last block")
+        guard let repairedData else { return }
 
         let repairedURL = dir.appendingPathComponent("repaired.bin")
-        try repairedData!.write(to: repairedURL)
+        try repairedData.write(to: repairedURL)
         let repairedHash = try await hasher.sha256(of: repairedURL)
 
         #expect(repairedHash == spec.sha256)
@@ -478,14 +498,95 @@ struct RedundancyServiceTests {
         let isValid = try await service.verify(par2URL: par2URL, originalFileURL: fileURL)
         #expect(isValid)
 
-        let par2Data = try Data(contentsOf: par2URL)
-        let storedBlockSize = par2Data[12..<16].withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
-        let blockCount = par2Data[16..<20].withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
-        let recoveryCount = par2Data[20..<24].withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
-        #expect(storedBlockSize == 4096)
-        #expect(blockCount == 3) // ceil(10240/4096) = 2.5 → 3
-        #expect(recoveryCount >= 2)
+        // Verify vol file contains recovery slices
+        let companions = RedundancyService.companionFiles(forIndex: par2URL.lastPathComponent, in: dir)
+        let volFiles = companions.filter { $0.lastPathComponent.contains(".vol") }
+        #expect(!volFiles.isEmpty)
+        // Vol file should be larger than index (it contains recovery data)
+        let indexSize = try Data(contentsOf: par2URL).count
+        let volSize = try Data(contentsOf: volFiles[0]).count
+        #expect(volSize > indexSize)
     }
+
+    @Test func par2cmdlineInteroperabilityVerify() async throws {
+        // Skip if par2cmdline is not installed
+        let par2Path = "/opt/homebrew/bin/par2"
+        guard FileManager.default.fileExists(atPath: par2Path) else { return }
+
+        let service = RedundancyService()
+        let spec = TestFixtures.files[3] // forest.heic, 8192 bytes
+        let root = try TestFixtures.materializeVolume(label: "par2-interop")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let dir = root.appendingPathComponent(spec.albumPath)
+        let fileURL = dir.appendingPathComponent(spec.name)
+
+        let par2URL = try await service.generatePAR2(for: fileURL, outputDirectory: dir)
+
+        // Run par2cmdline verify
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: par2Path)
+        process.arguments = ["verify", par2URL.path]
+        process.currentDirectoryURL = dir
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        process.waitUntilExit()
+
+        #expect(process.terminationStatus == 0, "par2cmdline verify failed")
+    }
+
+    @Test func par2cmdlineInteroperabilityRepair() async throws {
+        // Skip if par2cmdline is not installed
+        let par2Path = "/opt/homebrew/bin/par2"
+        guard FileManager.default.fileExists(atPath: par2Path) else { return }
+
+        let service = RedundancyService()
+
+        // Use random-ish data with distinct blocks (repeating patterns confuse par2cmdline's
+        // block scanner when blocks have identical checksums)
+        let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        var originalBytes = [UInt8](repeating: 0, count: 16384)  // 4 blocks × 4096
+        for i in 0..<originalBytes.count {
+            let blockSeed = i / 4096
+            let val = (i &* 97 &+ blockSeed &* 13 &+ 37) & 0xFF
+            originalBytes[i] = UInt8(val)
+        }
+        let originalData = Data(originalBytes)
+        let dir = tmpDir
+        let fileURL = dir.appendingPathComponent("testfile.bin")
+        try originalData.write(to: fileURL)
+
+        let par2URL = try await service.generatePAR2(for: fileURL, outputDirectory: dir)
+
+        // Corrupt the file
+        var corrupted = originalData
+        for i in 100..<200 { corrupted[i] = 0xFF }
+        try corrupted.write(to: fileURL)
+
+        // Run par2cmdline repair
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: par2Path)
+        process.arguments = ["repair", par2URL.path]
+        process.currentDirectoryURL = dir
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+        try process.run()
+        process.waitUntilExit()
+
+        #expect(process.terminationStatus == 0, "par2cmdline repair failed")
+
+        // Verify repaired file matches original
+        let repairedData = try Data(contentsOf: fileURL)
+        #expect(repairedData == originalData)
+    }
+
 }
 
 // MARK: - PerceptualHash Tests
@@ -2090,9 +2191,10 @@ struct EncryptPAR2IntegrationTests {
         // Step 6: Repair using PAR2
         let repairedData = try await redundancy.repair(par2URL: par2URL, corruptedFileURL: encryptedURL)
         #expect(repairedData != nil, "PAR2 should repair the encrypted file")
+        guard let repairedData else { return }
 
         // Write repaired data back
-        try repairedData!.write(to: encryptedURL)
+        try repairedData.write(to: encryptedURL)
 
         // Step 7: Decrypt the repaired file
         let decryptedURL = tmpDir.appendingPathComponent("decrypted.bin")

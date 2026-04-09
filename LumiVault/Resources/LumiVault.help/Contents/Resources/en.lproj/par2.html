@@ -54,11 +54,15 @@
     <p>LumiVault generates 10% redundancy for each file &mdash; enough to recover from typical storage corruption while keeping parity files compact.</p>
 
     <h2>PAR2 Files</h2>
-    <p>For each archived image, LumiVault generates a single parity file:</p>
+    <p>For each archived image, LumiVault generates standard PAR2 2.0 split files:</p>
     <ul>
-        <li><code>photo.jpg.par2</code> &mdash; contains both verification checksums and recovery data.</li>
+        <li><code>photo.jpg.par2</code> &mdash; index file with verification checksums (no recovery data).</li>
+        <li><code>photo.jpg.vol0+N.par2</code> &mdash; volume file containing N recovery blocks.</li>
     </ul>
     <p>These files are stored alongside the originals on external volumes and uploaded to B2 if enabled.</p>
+
+    <h2>Compatibility</h2>
+    <p>LumiVault uses the standard PAR2 2.0 format, fully compatible with <code>par2cmdline</code> and other PAR2 tools. You can verify and repair files outside of LumiVault using any standard PAR2 utility.</p>
 
     <h2>GPU Acceleration</h2>
     <p>LumiVault uses Metal GPU acceleration for PAR2 generation when available, significantly speeding up parity computation on Apple Silicon Macs.</p>

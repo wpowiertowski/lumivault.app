@@ -420,13 +420,16 @@ class ExportCoordinator {
                         item.record.storageLocations.append(location)
                     }
 
-                    // Copy PAR2 if exists
+                    // Copy PAR2 companion files (index + vol)
                     if !item.record.par2Filename.isEmpty {
-                        let par2Source = staging.appendingPathComponent(item.record.par2Filename)
-                        let par2Dest = destBase.appendingPathComponent(item.record.par2Filename)
-                        if FileManager.default.fileExists(atPath: par2Source.path),
-                           !FileManager.default.fileExists(atPath: par2Dest.path) {
-                            try FileManager.default.copyItem(at: par2Source, to: par2Dest)
+                        let companions = RedundancyService.companionFiles(
+                            forIndex: item.record.par2Filename, in: staging
+                        )
+                        for companion in companions {
+                            let dest = destBase.appendingPathComponent(companion.lastPathComponent)
+                            if !FileManager.default.fileExists(atPath: dest.path) {
+                                try FileManager.default.copyItem(at: companion, to: dest)
+                            }
                         }
                     }
 
@@ -484,20 +487,23 @@ class ExportCoordinator {
                         progress.filesUploaded += 1
                     }
 
-                    // Also upload PAR2 if not already in B2
+                    // Also upload PAR2 companion files (index + vol) if not already in B2
                     if !item.record.par2Filename.isEmpty {
-                        let par2URL = staging.appendingPathComponent(item.record.par2Filename)
-                        if FileManager.default.fileExists(atPath: par2URL.path) {
-                            let par2Remote = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)/\(item.record.par2Filename)"
-                            let par2Exists = try await b2Service.fileExists(
-                                fileName: par2Remote,
+                        let companions = RedundancyService.companionFiles(
+                            forIndex: item.record.par2Filename, in: staging
+                        )
+                        let remoteBase = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)"
+                        for companion in companions {
+                            let remoteName = "\(remoteBase)/\(companion.lastPathComponent)"
+                            let exists = try await b2Service.fileExists(
+                                fileName: remoteName,
                                 bucketId: credentials.bucketId,
                                 credentials: credentials
                             )
-                            if !par2Exists {
+                            if !exists {
                                 _ = try await b2Service.uploadImage(
-                                    fileURL: par2URL,
-                                    remotePath: par2Remote,
+                                    fileURL: companion,
+                                    remotePath: remoteName,
                                     sha256: "",
                                     credentials: credentials
                                 )
