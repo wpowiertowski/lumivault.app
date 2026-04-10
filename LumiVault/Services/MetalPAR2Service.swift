@@ -5,9 +5,9 @@ import Metal
 /// Uses GF(2^16) arithmetic with log/antilog tables for PAR2-standard Reed-Solomon coding.
 /// Falls back to nil initialization if Metal is unavailable.
 final class MetalPAR2Service: @unchecked Sendable {
-    private nonisolated(unsafe) let device: MTLDevice
-    private nonisolated(unsafe) let pipeline: MTLComputePipelineState
-    private nonisolated(unsafe) let commandQueue: MTLCommandQueue
+    private let device: MTLDevice
+    private let pipeline: MTLComputePipelineState
+    private let commandQueue: MTLCommandQueue
     private nonisolated(unsafe) let logTableBuffer: MTLBuffer
     private nonisolated(unsafe) let antilogTableBuffer: MTLBuffer
 

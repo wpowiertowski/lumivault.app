@@ -5,7 +5,7 @@ import os
 // MARK: - CRC32 (IEEE/zlib compatible)
 
 nonisolated enum CRC32 {
-    nonisolated(unsafe) private static let table: [UInt32] = {
+    private static let table: [UInt32] = {
         (0..<256).map { i -> UInt32 in
             var crc = UInt32(i)
             for _ in 0..<8 {
@@ -237,7 +237,7 @@ nonisolated private struct PAR2PacketReader {
 
 actor RedundancyService {
     private static let redundancyPercentage: Double = 0.10
-    nonisolated(unsafe) private static let metalService: MetalPAR2Service? = MetalPAR2Service()
+    private static let metalService: MetalPAR2Service? = MetalPAR2Service()
 
     /// Generate standard PAR2 2.0 files for the given file.
     /// Returns the URL of the index file (.par2). A companion volume file
@@ -629,7 +629,7 @@ actor RedundancyService {
         cancelFlag: OSAllocatedUnfairLock<Bool>?
     ) throws -> Data {
         let wordsPerBlock = blockSize / 2
-        let recoveryBuffer = UnsafeMutableBufferPointer<UInt16>.allocate(capacity: recoveryBlockCount * wordsPerBlock)
+        nonisolated(unsafe) let recoveryBuffer = UnsafeMutableBufferPointer<UInt16>.allocate(capacity: recoveryBlockCount * wordsPerBlock)
         defer { recoveryBuffer.deallocate() }
         recoveryBuffer.initialize(repeating: 0)
 
@@ -642,7 +642,7 @@ actor RedundancyService {
         let antilogTable = GF16.antilogTableBytes
 
         data.withUnsafeBytes { rawData in
-            let dataBytes = rawData.bindMemory(to: UInt8.self)
+            nonisolated(unsafe) let dataBytes = rawData.bindMemory(to: UInt8.self)
 
             let queue = OperationQueue()
             queue.maxConcurrentOperationCount = maxConcurrency

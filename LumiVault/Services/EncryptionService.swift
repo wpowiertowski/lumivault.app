@@ -34,7 +34,7 @@ actor EncryptionService {
         var derivedBytes = [UInt8](repeating: 0, count: 32)
         let passphraseData = Array(passphrase.utf8)
 
-        salt.withUnsafeBytes { saltBuffer in
+        _ = salt.withUnsafeBytes { saltBuffer in
             CCKeyDerivationPBKDF(
                 CCPBKDFAlgorithm(kCCPBKDF2),
                 passphraseData, passphraseData.count,
@@ -112,7 +112,6 @@ actor EncryptionService {
     func decrypt(ciphertext: Data, nonce: Data, associatedData: Data? = nil) throws -> Data {
         guard let key = cachedKey else { throw EncryptionError.noKey }
 
-        let gcmNonce = try AES.GCM.Nonce(data: nonce)
         // Reconstruct combined: nonce + ciphertext + tag
         let combined = nonce + ciphertext
         let sealedBox = try AES.GCM.SealedBox(combined: combined)

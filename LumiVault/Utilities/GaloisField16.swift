@@ -3,15 +3,15 @@ import Foundation
 /// GF(2^16) arithmetic for PAR2 2.0 compatible Reed-Solomon coding.
 /// Primitive polynomial: x^16 + x^12 + x^3 + x + 1 (0x1100B).
 /// Uses log/antilog tables for O(1) multiplication.
-enum GF16 {
-    nonisolated static let fieldSize = 65536
-    nonisolated static let maxExponent: UInt32 = 65535
+nonisolated enum GF16 {
+    static let fieldSize = 65536
+    static let maxExponent: UInt32 = 65535
 
     // MARK: - Tables
 
     /// Combined log and antilog tables, computed once.
     /// antilog[i] = 2^i in GF(2^16), log[x] = i such that 2^i = x.
-    nonisolated(unsafe) private static let tables: (log: [UInt16], antilog: [UInt16]) = {
+    private static let tables: (log: [UInt16], antilog: [UInt16]) = {
         var log = [UInt16](repeating: 0, count: 65536)
         var antilog = [UInt16](repeating: 0, count: 65536)
         var val: UInt32 = 1
@@ -31,14 +31,14 @@ enum GF16 {
     // MARK: - Arithmetic
 
     /// Multiply two GF(2^16) elements.
-    nonisolated static func mul(_ a: UInt16, _ b: UInt16) -> UInt16 {
+    static func mul(_ a: UInt16, _ b: UInt16) -> UInt16 {
         guard a != 0, b != 0 else { return 0 }
         let sum = UInt32(tables.log[Int(a)]) + UInt32(tables.log[Int(b)])
         return tables.antilog[Int(sum >= 65535 ? sum - 65535 : sum)]
     }
 
     /// Compute base^exp in GF(2^16) using log/antilog.
-    nonisolated static func pow(_ base: UInt16, _ exp: UInt32) -> UInt16 {
+    static func pow(_ base: UInt16, _ exp: UInt32) -> UInt16 {
         guard base != 0 else { return 0 }
         if exp == 0 { return 1 }
         let logBase = UInt64(tables.log[Int(base)])
@@ -47,7 +47,7 @@ enum GF16 {
     }
 
     /// Multiplicative inverse: a^(-1) in GF(2^16).
-    nonisolated static func inv(_ a: UInt16) -> UInt16 {
+    static func inv(_ a: UInt16) -> UInt16 {
         guard a != 0 else { return 0 }
         let logA = UInt32(tables.log[Int(a)])
         // a^(-1) = 2^(65535 - logA). Handle logA == 0 (a == 1) → inv = 1.
@@ -60,7 +60,7 @@ enum GF16 {
     /// Compute the Vandermonde base values for PAR2 source blocks.
     /// PAR2 uses antilog[logbase] where logbase iterates over values coprime to 65535.
     /// 65535 = 3 × 5 × 17 × 257, so coprime means not divisible by 3, 5, 17, or 257.
-    nonisolated static func sourceBlockBases(count: Int) -> [UInt16] {
+    static func sourceBlockBases(count: Int) -> [UInt16] {
         var bases = [UInt16]()
         bases.reserveCapacity(count)
         var logbase = 0
@@ -88,8 +88,8 @@ enum GF16 {
     // MARK: - Table Access for Metal
 
     /// Raw log table for GPU upload (65536 × UInt16 = 128 KB).
-    nonisolated static var logTableBytes: [UInt16] { tables.log }
+    static var logTableBytes: [UInt16] { tables.log }
 
     /// Raw antilog table for GPU upload (65536 × UInt16 = 128 KB).
-    nonisolated static var antilogTableBytes: [UInt16] { tables.antilog }
+    static var antilogTableBytes: [UInt16] { tables.antilog }
 }

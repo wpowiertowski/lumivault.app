@@ -385,7 +385,7 @@ class ExportCoordinator {
                 progress.par2FileFraction = 0
 
                 let fileForPAR2 = fileURLsForStorage[item.record.sha256] ?? item.fileURL
-                if let par2URL = try? await redundancyService.generatePAR2(
+                if let par2URL = try? redundancyService.generatePAR2(
                     for: fileForPAR2,
                     outputDirectory: staging,
                     onProgress: { fraction in

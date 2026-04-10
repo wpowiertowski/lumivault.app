@@ -316,28 +316,22 @@ struct PhotosExportSheet: View {
         isExporting = true
 
         let ctx = modelContext
-        let prog = progress
-        let sett = settings
-        let catSvc = catalogService
-        let encSvc = encryptionService
-        let sync = syncCoordinator
-
         exportTask = Task { @MainActor in
-            let coordinator = PipelinedExportCoordinator(catalogService: catSvc, encryptionService: encSvc)
+            let coordinator = PipelinedExportCoordinator(catalogService: catalogService, encryptionService: encryptionService)
             do {
                 try await coordinator.export(
                     photosAlbumId: albumId,
-                    settings: sett,
+                    settings: settings,
                     modelContext: ctx,
-                    progress: prog
+                    progress: progress
                 )
-                await sync.pushAfterLocalChange()
+                await syncCoordinator.pushAfterLocalChange()
             } catch is CancellationError {
-                prog.phase = .failed
-                prog.errors.append("Export cancelled")
+                progress.phase = .failed
+                progress.errors.append("Export cancelled")
             } catch {
-                prog.errors.append("Export failed: \(error.localizedDescription)")
-                prog.phase = .failed
+                progress.errors.append("Export failed: \(error.localizedDescription)")
+                progress.phase = .failed
             }
             isExporting = false
             step = .complete

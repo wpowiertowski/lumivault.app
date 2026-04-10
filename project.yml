@@ -12,6 +12,7 @@ settings:
   base:
     SWIFT_VERSION: "6.2"
     SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: true
     SWIFT_DEFAULT_ISOLATION: MainActor
     PRODUCT_NAME: LumiVault
     MARKETING_VERSION: "1.0.0"
