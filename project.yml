@@ -18,6 +18,27 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     GENERATE_INFOPLIST_FILE: true
 
+schemes:
+  LumiVault:
+    build:
+      targets:
+        LumiVault: all
+        LumiVaultTests: [test]
+        LumiVaultUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - LumiVaultTests
+        - LumiVaultUITests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
 targets:
   LumiVault:
     type: application

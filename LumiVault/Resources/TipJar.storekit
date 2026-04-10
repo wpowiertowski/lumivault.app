@@ -50,7 +50,7 @@
       "type" : "Consumable"
     },
     {
-      "displayPrice" : "13.99",
+      "displayPrice" : "14.99",
       "familyShareable" : false,
       "internalID" : "tip_generous",
       "localizations" : [
