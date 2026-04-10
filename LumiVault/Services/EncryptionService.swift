@@ -165,6 +165,23 @@ actor EncryptionService {
         return try decrypt(ciphertext: ciphertext, nonce: nonce, associatedData: associatedData)
     }
 
+    /// Verify GCM tag integrity without actor hop. Returns true if the ciphertext
+    /// authenticates successfully (tag + AAD match), proving the file is intact.
+    nonisolated static func verifyGCMIntegrity(
+        at url: URL, nonce: Data, sha256: String, key: SymmetricKey
+    ) throws -> Bool {
+        let ciphertext = try Data(contentsOf: url)
+        let associatedData = Data(sha256.utf8)
+        let combined = nonce + ciphertext
+        let sealedBox = try AES.GCM.SealedBox(combined: combined)
+        do {
+            _ = try AES.GCM.open(sealedBox, using: key, authenticating: associatedData)
+            return true
+        } catch CryptoKitError.authenticationFailure {
+            return false
+        }
+    }
+
     // MARK: - Errors
 
     enum EncryptionError: Error, LocalizedError {

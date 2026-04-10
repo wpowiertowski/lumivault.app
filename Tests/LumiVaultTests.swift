@@ -689,6 +689,7 @@ struct IntegrityServiceTests {
         #expect(results.count == 3)
         for result in results {
             #expect(result.passed == true)
+            #expect(result.method == .sha256)
         }
     }
 
@@ -710,6 +711,7 @@ struct IntegrityServiceTests {
         #expect(results.count == 1)
         #expect(results[0].passed == false)
         #expect(results[0].actualHash == spec.sha256)
+        #expect(results[0].method == .sha256)
     }
 
     @Test func verifyFailsWhenFileNotResolved() async throws {
@@ -742,6 +744,167 @@ struct IntegrityServiceTests {
         )
 
         #expect(results.count == 3)
+    }
+
+    // MARK: - GCM Tag Integrity Verification
+
+    private static let testPassphrase = "lumivault-integrity-test"
+    private static let testSalt = Data(repeating: 0x42, count: 32)
+
+    @Test func verifyEncryptedFilePassesWithGCMTag() async throws {
+        let integrity = IntegrityService()
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumivault-gcm-integrity-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // Create a plaintext file and compute its SHA-256
+        let plaintext = Data((0..<1024).map { UInt8(($0 * 37 + 13) % 256) })
+        let plaintextURL = tmpDir.appendingPathComponent("original.bin")
+        try plaintext.write(to: plaintextURL)
+
+        let hasher = HasherService()
+        let sha256 = try await hasher.sha256(of: plaintextURL)
+
+        // Encrypt the file
+        let encryptionService = EncryptionService()
+        let (key, keyId) = encryptionService.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+        let encryptedURL = tmpDir.appendingPathComponent("encrypted.bin")
+        let (nonce, _) = try EncryptionService.encryptFileWithKey(
+            at: plaintextURL, to: encryptedURL, sha256: sha256, key: key
+        )
+
+        // Create an encrypted ImageRecord
+        let image = ImageRecord(
+            sha256: sha256, filename: "original.bin", sizeBytes: Int64(plaintext.count),
+            isEncrypted: true, encryptionKeyId: keyId, encryptionNonce: nonce
+        )
+
+        let results = await integrity.verify(
+            images: [image],
+            sourceResolver: { _ in encryptedURL },
+            encryptionKey: key
+        )
+
+        #expect(results.count == 1)
+        #expect(results[0].passed == true)
+        #expect(results[0].method == .gcmTag)
+    }
+
+    @Test func verifyEncryptedFileFailsWhenCorrupted() async throws {
+        let integrity = IntegrityService()
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumivault-gcm-corrupt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let plaintext = Data((0..<1024).map { UInt8(($0 * 37 + 13) % 256) })
+        let plaintextURL = tmpDir.appendingPathComponent("original.bin")
+        try plaintext.write(to: plaintextURL)
+
+        let hasher = HasherService()
+        let sha256 = try await hasher.sha256(of: plaintextURL)
+
+        let encryptionService = EncryptionService()
+        let (key, keyId) = encryptionService.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+        let encryptedURL = tmpDir.appendingPathComponent("encrypted.bin")
+        let (nonce, _) = try EncryptionService.encryptFileWithKey(
+            at: plaintextURL, to: encryptedURL, sha256: sha256, key: key
+        )
+
+        // Corrupt the encrypted file
+        var corrupted = try Data(contentsOf: encryptedURL)
+        let mid = corrupted.count / 2
+        corrupted[mid] ^= 0xFF
+        try corrupted.write(to: encryptedURL)
+
+        let image = ImageRecord(
+            sha256: sha256, filename: "original.bin", sizeBytes: Int64(plaintext.count),
+            isEncrypted: true, encryptionKeyId: keyId, encryptionNonce: nonce
+        )
+
+        let results = await integrity.verify(
+            images: [image],
+            sourceResolver: { _ in encryptedURL },
+            encryptionKey: key
+        )
+
+        #expect(results.count == 1)
+        #expect(results[0].passed == false)
+        #expect(results[0].method == .gcmTag)
+    }
+
+    @Test func verifyEncryptedFileSkippedWithoutKey() async throws {
+        let integrity = IntegrityService()
+
+        let image = ImageRecord(
+            sha256: "abc123", filename: "encrypted.bin", sizeBytes: 1024,
+            isEncrypted: true, encryptionKeyId: "somekey", encryptionNonce: Data(repeating: 0, count: 12)
+        )
+
+        // No encryptionKey provided — should skip
+        let results = await integrity.verify(
+            images: [image],
+            sourceResolver: { _ in URL(fileURLWithPath: "/tmp/nonexistent") }
+        )
+
+        #expect(results.count == 1)
+        #expect(results[0].passed == false)
+        #expect(results[0].method == .skipped)
+    }
+
+    @Test func verifyMixedEncryptedAndPlaintext() async throws {
+        let integrity = IntegrityService()
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumivault-gcm-mixed-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // Create plaintext file
+        let spec = Self.fixtureSpecs[0]
+        let primes = [(37, 13), (53, 7), (97, 3)]
+        let plainData = Data((0..<spec.size).map { UInt8(($0 * primes[0].0 + primes[0].1) % 256) })
+        let plaintextURL = tmpDir.appendingPathComponent(spec.name)
+        try plainData.write(to: plaintextURL)
+
+        let plaintextImage = ImageRecord(sha256: spec.sha256, filename: spec.name, sizeBytes: Int64(spec.size))
+
+        // Create encrypted file
+        let encPlaintext = Data((0..<512).map { UInt8(($0 * 53 + 7) % 256) })
+        let encPlaintextURL = tmpDir.appendingPathComponent("enc-source.bin")
+        try encPlaintext.write(to: encPlaintextURL)
+
+        let hasher = HasherService()
+        let encSha256 = try await hasher.sha256(of: encPlaintextURL)
+
+        let encryptionService = EncryptionService()
+        let (key, keyId) = encryptionService.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+        let encryptedURL = tmpDir.appendingPathComponent("encrypted.bin")
+        let (nonce, _) = try EncryptionService.encryptFileWithKey(
+            at: encPlaintextURL, to: encryptedURL, sha256: encSha256, key: key
+        )
+
+        let encryptedImage = ImageRecord(
+            sha256: encSha256, filename: "encrypted.bin", sizeBytes: Int64(encPlaintext.count),
+            isEncrypted: true, encryptionKeyId: keyId, encryptionNonce: nonce
+        )
+
+        let urlMap: [String: URL] = [
+            spec.sha256: plaintextURL,
+            encSha256: encryptedURL,
+        ]
+
+        let results = await integrity.verify(
+            images: [plaintextImage, encryptedImage],
+            sourceResolver: { urlMap[$0.sha256] },
+            encryptionKey: key
+        )
+
+        #expect(results.count == 2)
+        #expect(results[0].passed == true)
+        #expect(results[0].method == .sha256)
+        #expect(results[1].passed == true)
+        #expect(results[1].method == .gcmTag)
     }
 }
 
@@ -1609,6 +1772,87 @@ struct EncryptionServiceTests {
         let (ciphertext, nonce) = try await service.encrypt(data: plaintext, associatedData: Data(sha256.utf8))
         let recovered = try await service.decryptData(ciphertext, nonce: Data(nonce), sha256: sha256)
         #expect(recovered == plaintext)
+    }
+
+    @Test func verifyGCMIntegrityPassesForValidFile() async throws {
+        let service = EncryptionService()
+        let (key, _) = service.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-gcm-verify-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let plaintext = Data("GCM integrity check test".utf8)
+        let sha256 = SHA256.hash(data: plaintext).map { String(format: "%02x", $0) }.joined()
+        let sourceURL = tmpDir.appendingPathComponent("source.bin")
+        let encryptedURL = tmpDir.appendingPathComponent("encrypted.bin")
+        try plaintext.write(to: sourceURL)
+
+        let (nonce, _) = try EncryptionService.encryptFileWithKey(
+            at: sourceURL, to: encryptedURL, sha256: sha256, key: key
+        )
+
+        let passed = try EncryptionService.verifyGCMIntegrity(
+            at: encryptedURL, nonce: nonce, sha256: sha256, key: key
+        )
+        #expect(passed == true)
+    }
+
+    @Test func verifyGCMIntegrityFailsForCorruptedFile() async throws {
+        let service = EncryptionService()
+        let (key, _) = service.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-gcm-corrupt-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let plaintext = Data("GCM corruption detection test".utf8)
+        let sha256 = SHA256.hash(data: plaintext).map { String(format: "%02x", $0) }.joined()
+        let sourceURL = tmpDir.appendingPathComponent("source.bin")
+        let encryptedURL = tmpDir.appendingPathComponent("encrypted.bin")
+        try plaintext.write(to: sourceURL)
+
+        let (nonce, _) = try EncryptionService.encryptFileWithKey(
+            at: sourceURL, to: encryptedURL, sha256: sha256, key: key
+        )
+
+        // Corrupt a byte in the ciphertext
+        var corrupted = try Data(contentsOf: encryptedURL)
+        corrupted[corrupted.count / 2] ^= 0xFF
+        try corrupted.write(to: encryptedURL)
+
+        let passed = try EncryptionService.verifyGCMIntegrity(
+            at: encryptedURL, nonce: nonce, sha256: sha256, key: key
+        )
+        #expect(passed == false)
+    }
+
+    @Test func verifyGCMIntegrityFailsForWrongKey() async throws {
+        let service = EncryptionService()
+        let (key, _) = service.deriveKey(passphrase: Self.testPassphrase, salt: Self.testSalt)
+        let (wrongKey, _) = service.deriveKey(passphrase: Self.altPassphrase, salt: Self.testSalt)
+
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-gcm-wrongkey-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        let plaintext = Data("GCM wrong key test".utf8)
+        let sha256 = SHA256.hash(data: plaintext).map { String(format: "%02x", $0) }.joined()
+        let sourceURL = tmpDir.appendingPathComponent("source.bin")
+        let encryptedURL = tmpDir.appendingPathComponent("encrypted.bin")
+        try plaintext.write(to: sourceURL)
+
+        let (nonce, _) = try EncryptionService.encryptFileWithKey(
+            at: sourceURL, to: encryptedURL, sha256: sha256, key: key
+        )
+
+        let passed = try EncryptionService.verifyGCMIntegrity(
+            at: encryptedURL, nonce: nonce, sha256: sha256, key: wrongKey
+        )
+        #expect(passed == false)
     }
 }
 
