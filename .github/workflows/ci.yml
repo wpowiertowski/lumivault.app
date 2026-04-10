@@ -1,10 +1,25 @@
-name: Build
+name: CI
 
 on:
   pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - '**/*.md'
   push:
     branches:
       - main
+    paths-ignore:
+      - '**/*.md'
+
+# Cancel in-progress runs for the same PR/branch — prevents queuing
+# multiple expensive macOS builds when commits are pushed rapidly.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   build:
