@@ -4,9 +4,13 @@ on:
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - '**/*.md'
   push:
     branches:
       - main
+    paths-ignore:
+      - '**/*.md'
 
 # Cancel in-progress runs for the same PR/branch — prevents queuing
 # multiple expensive macOS builds when commits are pushed rapidly.
