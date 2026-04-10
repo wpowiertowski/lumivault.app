@@ -7,7 +7,7 @@
 
 # LumiVault
 
-Your photos, preserved forever. Native macOS archiving with iCloud sync, deduplication, and built-in error correction.
+Your photos, preserved forever. Native macOS archiving with Apple Photos integration, Reed-Solomon error correction, and iCloud sync.
 
 ---
 
@@ -20,22 +20,18 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 ## Features
 
 - **Apple Photos Import** — browse, search, and sort albums from your Photos library; exports the current edited state (crops, filters, adjustments) via PhotoKit and archives in one step
+- **Reed-Solomon Error Correction** — standard PAR2 2.0 format with GF(2^16) Vandermonde-matrix Reed-Solomon coding, fully compatible with par2cmdline and other PAR2 tools; GPU-accelerated via Metal compute shaders (CPU fallback), adaptive block sizing for guaranteed 10% recovery, split file output (.par2 index + .vol0+N.par2 recovery volumes)
+- **Integrity Verification** — background checks surface corruption by re-hashing files against stored SHA-256 digests
 - **Backblaze B2 Cloud Upload** — upload photos and PAR2 recovery data to B2 cloud storage via the REST API with SHA-1 verification; existence checks prevent duplicate uploads
+- **Multi-Volume Mirroring** — mirror albums to multiple external drives with security-scoped bookmarks for persistent access; sync existing catalog to newly added volumes with dedup-by-hash
+- **Per-File Encryption** — optional AES-256-GCM encryption with PBKDF2 key derivation (600K iterations); pipeline order Hash(raw) → Encrypt → PAR2(ciphertext) → Store enables key-free PAR2 repair and raw-data dedup
+- **Deduplication** — exact (SHA-256) and near-duplicate (perceptual hash dHash) detection across all connected volumes; duplicate images are reused across albums without re-processing
+- **Storage Reconciliation** — scan all volumes and B2 for discrepancies (dangling references, orphan files, missing entries) with per-item resolution actions via the Integrity settings tab
 - **iCloud Catalog Sync** — catalog.json syncs across devices via iCloud Drive with conflict-free merge (union by SHA-256, newest timestamp wins)
 - **Catalog Backup & Restore** — catalog.json is automatically distributed to all external volumes and B2 after every mutation; restore from any backup source (volume, B2, or local file) on fresh run or via Settings
-- **Thumbnail Generation** — HEIC/RAW/CR2/CR3/NEF/ARW/DNG support with a multi-resolution cache (256px grid, 64px list) keyed by content hash
-- **Deduplication** — exact (SHA-256) and near-duplicate (perceptual hash dHash) detection across all connected volumes; duplicate images are reused across albums without re-processing
-- **Multi-Volume Mirroring** �� mirror albums to multiple external drives with security-scoped bookmarks for persistent access; sync existing catalog to newly added volumes with dedup-by-hash
-- **Storage Reconciliation** — scan all volumes and B2 for discrepancies (dangling references, orphan files, missing entries) with per-item resolution actions via the Integrity settings tab
-- **Album & Image Deletion** — remove albums or individual photos from the catalog, all external volumes, and B2 in one operation with progress tracking; B2 files are resolved by name for reliable deletion
-- **Reed-Solomon Error Correction** — standard PAR2 2.0 format with GF(2^16) Vandermonde-matrix Reed-Solomon coding, fully compatible with par2cmdline and other PAR2 tools; GPU-accelerated via Metal compute shaders (CPU fallback), adaptive block sizing for guaranteed 10% recovery, split file output (.par2 index + .vol0+N.par2 recovery volumes)
-- **Image Format Conversion** — optional JPEG conversion with configurable quality and max dimension during export; originals in Photos are never modified
-- **Export Cancellation** — cancel in-progress exports with immediate termination of all spawned work (hashing, encryption, PAR2, copy, upload)
-- **Integrity Verification** — background checks surface corruption by re-hashing files against stored SHA-256 digests
 - **Drag & Drop Import** — native file import via `UniformTypeIdentifiers` with image-type filtering
-- **Per-File Encryption** — optional AES-256-GCM encryption with PBKDF2 key derivation (600K iterations); pipeline order Hash(raw) → Encrypt → PAR2(ciphertext) → Store enables key-free PAR2 repair and raw-data dedup
-- **Tip Jar** — StoreKit 2 in-app purchases to support development (4 consumable tip tiers)
-- **Settings** — configure external volumes, iCloud sync, Backblaze B2 credentials, encryption passphrase, export defaults (format, quality, dimensions, PAR2, near-duplicates), storage integrity scanning, and catalog restore
+- **Image Format Conversion** — optional JPEG conversion with configurable quality and max dimension during export; originals in Photos are never modified
+- **Thumbnail Generation** — HEIC/RAW/CR2/CR3/NEF/ARW/DNG support with a multi-resolution cache (256px grid, 64px list) keyed by content hash
 
 ## Technology Stack
 
