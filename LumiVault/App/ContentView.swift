@@ -98,6 +98,171 @@ struct ContentView: View {
 
 private struct WelcomeView: View {
     var sidebarVisible: Bool
+    @AppStorage("hasSeenWelcome") private var hasSeenWelcome = false
+
+    var body: some View {
+        if hasSeenWelcome {
+            ImportPromptView(sidebarVisible: sidebarVisible)
+        } else {
+            FirstLaunchView(hasSeenWelcome: $hasSeenWelcome)
+        }
+    }
+}
+
+// MARK: - First Launch View
+
+private struct FirstLaunchView: View {
+    @Binding var hasSeenWelcome: Bool
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                Spacer(minLength: 40)
+
+                // Header
+                VStack(spacing: 12) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 48))
+                        .foregroundStyle(Constants.Design.accentColor)
+
+                    Text("LUMIVAULT")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .tracking(2)
+                        .foregroundStyle(Constants.Design.accentColor)
+
+                    Text("Your photos, preserved forever.")
+                        .font(Constants.Design.monoHeadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.bottom, 28)
+
+                // Overview
+                VStack(alignment: .leading, spacing: 20) {
+                    welcomeSection(
+                        icon: "archivebox",
+                        title: "What LumiVault Does",
+                        body: "LumiVault archives albums from your Photos library onto external drives and Backblaze B2 cloud storage. Every file is deduplicated via SHA-256 and protected with PAR2 error correction so your photos survive bit rot and storage failures."
+                    )
+
+                    welcomeSection(
+                        icon: "gearshape",
+                        title: "Recommended Setup",
+                        body: "Before importing, open Settings (\u{2318},) and:"
+                    ) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            setupStep(
+                                number: "1",
+                                text: "Add at least one external volume in **Volumes** \u{2014} this is where your archived photos will be stored."
+                            )
+                            setupStep(
+                                number: "2",
+                                text: "Configure **Backblaze B2** credentials for off-site cloud backup. B2 gives you a second copy in case your drive is lost or damaged."
+                            )
+                        }
+                    }
+
+                    welcomeSection(
+                        icon: "doc.zipper",
+                        title: "Files You'll See",
+                        body: "On your volumes, each photo is stored alongside PAR2 parity files:"
+                    ) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            fileRow(name: "IMG_1234.jpg", desc: "Your archived photo")
+                            fileRow(name: "IMG_1234.jpg.par2", desc: "Index with verification checksums")
+                            fileRow(name: "IMG_1234.jpg.vol0+N.par2", desc: "Recovery blocks for repairing corruption")
+                        }
+                        .padding(12)
+                        .background(.quaternary.opacity(0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                        Text("These PAR2 files are normal \u{2014} do not delete them. They allow LumiVault (or any standard PAR2 tool) to repair your photos if bits are ever corrupted on disk.")
+                            .font(Constants.Design.monoCaption)
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 4)
+                    }
+
+                    welcomeSection(
+                        icon: "rectangle.3.group",
+                        title: "Layout",
+                        body: "The app uses a three-column layout: albums on the left, photo grid in the center, and a detail inspector on the right showing metadata, hashes, and storage locations."
+                    )
+                }
+                .frame(maxWidth: 460)
+
+                // Get Started button
+                Button {
+                    hasSeenWelcome = true
+                } label: {
+                    Text("Get Started")
+                        .font(Constants.Design.monoHeadline)
+                        .frame(maxWidth: 200)
+                }
+                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
+                .tint(Constants.Design.accentColor)
+                .padding(.top, 32)
+                .padding(.bottom, 40)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func welcomeSection(
+        icon: String,
+        title: String,
+        body: String,
+        @ViewBuilder extra: () -> some View = { EmptyView() }
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: icon)
+                .font(Constants.Design.monoSubheadline)
+                .fontWeight(.semibold)
+
+            Text(.init(body))
+                .font(Constants.Design.monoCaption)
+                .foregroundStyle(.secondary)
+                .lineSpacing(3)
+
+            extra()
+        }
+    }
+
+    private func setupStep(number: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(number)
+                .font(Constants.Design.monoCaption)
+                .fontWeight(.bold)
+                .foregroundStyle(Constants.Design.accentColor)
+                .frame(width: 16)
+
+            Text(.init(text))
+                .font(Constants.Design.monoCaption)
+                .foregroundStyle(.secondary)
+                .lineSpacing(3)
+        }
+    }
+
+    private func fileRow(name: String, desc: String) -> some View {
+        HStack(spacing: 8) {
+            Text(name)
+                .font(Constants.Design.monoCaption2)
+                .fontWeight(.medium)
+                .foregroundStyle(.primary)
+                .frame(minWidth: 200, alignment: .leading)
+
+            Text(desc)
+                .font(Constants.Design.monoCaption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+}
+
+// MARK: - Import Prompt View
+
+private struct ImportPromptView: View {
+    var sidebarVisible: Bool
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @AppStorage("b2Enabled") private var b2Enabled = false
     @State private var isRestoring = false
@@ -106,7 +271,6 @@ private struct WelcomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Line pointing up toward the import button
             if sidebarVisible {
                 HStack(spacing: 0) {
                     VStack(alignment: .leading, spacing: 4) {
