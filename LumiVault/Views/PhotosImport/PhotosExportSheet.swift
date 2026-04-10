@@ -315,7 +315,7 @@ struct PhotosExportSheet: View {
         step = .exporting
         isExporting = true
 
-        let ctx = modelContext
+        nonisolated(unsafe) let ctx = modelContext
         exportTask = Task { @MainActor in
             let coordinator = PipelinedExportCoordinator(catalogService: catalogService, encryptionService: encryptionService)
             do {
