@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
    LastUpgradeVersion = "2600"
-   version = "1.3">
+   version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
-      buildImplicitDependencies = "YES">
+      buildImplicitDependencies = "YES"
+      runPostActionsOnFailure = "NO">
       <BuildActionEntries>
          <BuildActionEntry
             buildForTesting = "YES"
@@ -29,7 +30,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "DE648D0D491593329C7742F9"
-               BuildableName = "LumiVault.xctest"
+               BuildableName = "LumiVaultTests.xctest"
                BlueprintName = "LumiVaultTests"
                ReferencedContainer = "container:LumiVault.xcodeproj">
             </BuildableReference>
@@ -43,7 +44,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "CAD37B1258D10629A2C0E1F8"
-               BuildableName = "LumiVault.xctest"
+               BuildableName = "LumiVaultUITests.xctest"
                BlueprintName = "LumiVaultUITests"
                ReferencedContainer = "container:LumiVault.xcodeproj">
             </BuildableReference>
@@ -54,7 +55,8 @@
       buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
-      shouldUseLaunchSchemeArgsEnv = "YES">
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      onlyGenerateCoverageForSpecifiedTargets = "NO">
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
@@ -71,22 +73,25 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "DE648D0D491593329C7742F9"
-               BuildableName = "LumiVault.xctest"
+               BuildableName = "LumiVaultTests.xctest"
                BlueprintName = "LumiVaultTests"
                ReferencedContainer = "container:LumiVault.xcodeproj">
             </BuildableReference>
          </TestableReference>
          <TestableReference
-            skipped = "NO">
+            skipped = "NO"
+            parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "CAD37B1258D10629A2C0E1F8"
-               BuildableName = "LumiVault.xctest"
+               BuildableName = "LumiVaultUITests.xctest"
                BlueprintName = "LumiVaultUITests"
                ReferencedContainer = "container:LumiVault.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
@@ -108,6 +113,8 @@
             ReferencedContainer = "container:LumiVault.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
@@ -125,6 +132,8 @@
             ReferencedContainer = "container:LumiVault.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">
