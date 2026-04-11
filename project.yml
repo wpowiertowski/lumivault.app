@@ -80,6 +80,7 @@ targets:
       - path: Tests
     settings:
       base:
+        PRODUCT_NAME: LumiVaultTests
         PRODUCT_MODULE_NAME: LumiVaultTests
     dependencies:
       - target: LumiVault
@@ -90,6 +91,7 @@ targets:
       - path: UITests
     settings:
       base:
+        PRODUCT_NAME: LumiVaultUITests
         PRODUCT_MODULE_NAME: LumiVaultUITests
     dependencies:
       - target: LumiVault

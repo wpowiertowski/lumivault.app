@@ -790,6 +790,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.lumivault.LumiVaultUITests;
 				PRODUCT_MODULE_NAME = LumiVaultUITests;
+				PRODUCT_NAME = LumiVaultUITests;
 				SDKROOT = macosx;
 				TEST_TARGET_NAME = LumiVault;
 			};
@@ -807,6 +808,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.lumivault.LumiVaultTests;
 				PRODUCT_MODULE_NAME = LumiVaultTests;
+				PRODUCT_NAME = LumiVaultTests;
 				SDKROOT = macosx;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LumiVault.app/Contents/MacOS/LumiVault";
 			};
@@ -824,6 +826,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.lumivault.LumiVaultTests;
 				PRODUCT_MODULE_NAME = LumiVaultTests;
+				PRODUCT_NAME = LumiVaultTests;
 				SDKROOT = macosx;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LumiVault.app/Contents/MacOS/LumiVault";
 			};
@@ -841,6 +844,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.lumivault.LumiVaultUITests;
 				PRODUCT_MODULE_NAME = LumiVaultUITests;
+				PRODUCT_NAME = LumiVaultUITests;
 				SDKROOT = macosx;
 				TEST_TARGET_NAME = LumiVault;
 			};
