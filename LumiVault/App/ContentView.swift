@@ -32,6 +32,7 @@ struct ContentView: View {
                 EmptyStateView(message: "Select a photo to view details")
             }
         }
+        .frame(minWidth: 820, minHeight: 500)
         .navigationSplitViewStyle(.prominentDetail)
         .toolbar {
             ToolbarItem(placement: .navigation) {
