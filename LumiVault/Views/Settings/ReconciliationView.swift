@@ -10,6 +10,9 @@ struct ReconciliationView: View {
     @State private var report: ReconciliationReport?
     @State private var isScanning = false
     @State private var verifyHashes = false
+    @State private var showingB2SyncSheet = false
+    @State private var showingVolumeSyncSheet = false
+    @State private var selectedVolume: VolumeRecord?
 
     private let reconciliationService = ReconciliationService()
 
@@ -22,6 +25,30 @@ struct ReconciliationView: View {
             } else {
                 idleView
             }
+
+            Divider()
+
+            // Sync actions
+            HStack(spacing: 12) {
+                if b2Enabled && hasB2Credentials {
+                    Button("Sync Volumes to B2...") { showingB2SyncSheet = true }
+                        .accessibilityIdentifier("integrity.syncToB2")
+                }
+                if !volumes.isEmpty {
+                    Menu("Sync to Volume...") {
+                        ForEach(volumes, id: \.persistentModelID) { volume in
+                            Button(volume.label) {
+                                selectedVolume = volume
+                                showingVolumeSyncSheet = true
+                            }
+                        }
+                    }
+                    .accessibilityIdentifier("integrity.syncToVolume")
+                }
+                Spacer()
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 6)
 
             Divider()
 
@@ -47,6 +74,26 @@ struct ReconciliationView: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
         }
+        .sheet(isPresented: $showingB2SyncSheet) {
+            if let credentials = loadB2Credentials() {
+                B2SyncSheet(credentials: credentials)
+            }
+        }
+        .sheet(isPresented: $showingVolumeSyncSheet) {
+            if let volume = selectedVolume {
+                VolumeSyncSheet(volume: volume)
+            }
+        }
+    }
+
+    private var hasB2Credentials: Bool {
+        UserDefaults.standard.data(forKey: B2Credentials.defaultsKey) != nil
+    }
+
+    private func loadB2Credentials() -> B2Credentials? {
+        guard let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
+              let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) else { return nil }
+        return creds
     }
 
     // MARK: - Idle
