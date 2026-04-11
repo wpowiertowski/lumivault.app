@@ -14,3 +14,4 @@ clean:
 	rm -rf LumiVault.xcodeproj
 	rm -rf ~/Library/Developer/Xcode/DerivedData/LumiVault-*
 	swift package clean
+	defaults delete app.lumivault hasSeenWelcome 2>/dev/null || true

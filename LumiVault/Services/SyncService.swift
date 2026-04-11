@@ -176,6 +176,7 @@ actor SyncService {
 final class MetadataQueryHolder {
     static let shared = MetadataQueryHolder()
     private var query: NSMetadataQuery?
+    private var debounceTask: Task<Void, Never>?
 
     func start(onChange: @escaping @Sendable () -> Void) {
         stop()
@@ -188,8 +189,15 @@ final class MetadataQueryHolder {
             forName: .NSMetadataQueryDidUpdate,
             object: query,
             queue: .main
-        ) { _ in
-            onChange()
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.debounceTask?.cancel()
+                self?.debounceTask = Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    guard !Task.isCancelled else { return }
+                    onChange()
+                }
+            }
         }
 
         query.start()
@@ -197,6 +205,8 @@ final class MetadataQueryHolder {
     }
 
     func stop() {
+        debounceTask?.cancel()
+        debounceTask = nil
         query?.stop()
         if let q = query {
             NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidUpdate, object: q)
