@@ -18,6 +18,10 @@ struct ReconciliationView: View {
 
     private let reconciliationService = ReconciliationService()
 
+    private var volumeLabelMap: [String: String] {
+        Dictionary(uniqueKeysWithValues: volumes.map { ($0.volumeID, $0.label) })
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let report {
@@ -178,7 +182,7 @@ struct ReconciliationView: View {
                     ForEach(groupedDiscrepancies(report.discrepancies), id: \.title) { group in
                         Section(group.title) {
                             ForEach(group.items) { item in
-                                DiscrepancyRow(discrepancy: item, repairResult: repairResultFor(item))
+                                DiscrepancyRow(discrepancy: item, repairResult: repairResultFor(item), volumeLabels: volumeLabelMap)
                             }
                         }
                     }
@@ -316,6 +320,11 @@ struct ReconciliationView: View {
 struct DiscrepancyRow: View {
     let discrepancy: Discrepancy
     var repairResult: RepairResult? = nil
+    var volumeLabels: [String: String] = [:]
+
+    private func volumeName(_ vid: String) -> String {
+        volumeLabels[vid] ?? vid
+    }
 
     var body: some View {
         HStack {
@@ -371,18 +380,18 @@ struct DiscrepancyRow: View {
 
     private var description: String {
         switch discrepancy.kind {
-        case .danglingLocation(let vid): "Expected on volume \(vid) but not found"
-        case .orphanOnVolume(let vid, let path): "Found on \(vid) at \(path), not in catalog"
+        case .danglingLocation(let vid): "Expected on \(volumeName(vid)) but not found"
+        case .orphanOnVolume(let vid, let path): "Found on \(volumeName(vid)) at \(path), not in catalog"
         case .danglingB2FileId: "B2 file ID recorded but file not found in bucket"
         case .orphanInB2(_, let name): "In B2 as \(name), not tracked in catalog"
-        case .missingFromVolume(let vid): "Not mirrored to volume \(vid)"
-        case .hashMismatch(let vid, let expected, let actual): "Hash mismatch on \(vid): expected \(String(expected.prefix(8)))… got \(String(actual.prefix(8)))…"
+        case .missingFromVolume(let vid): "Not mirrored to \(volumeName(vid))"
+        case .hashMismatch(let vid, let expected, let actual): "Hash mismatch on \(volumeName(vid)): expected \(String(expected.prefix(8)))… got \(String(actual.prefix(8)))…"
         }
     }
 
     private func repairDescription(_ result: RepairResult) -> String {
         switch result.outcome {
-        case .copiedFromVolume(let vid): "Repaired — copied from \(vid)"
+        case .copiedFromVolume(let vid): "Repaired — copied from \(volumeName(vid))"
         case .repairedViaPAR2: "Repaired — PAR2 recovery"
         case .failed(let reason): "Repair failed — \(reason)"
         }

@@ -11,6 +11,7 @@ actor ReconciliationService {
         volumes: [VolumeSnapshot],
         b2Credentials: B2Credentials?,
         verifyHashes: Bool = false,
+        scanOrphans: Bool = true,
         progress: ReconciliationProgress
     ) async -> ReconciliationReport {
         var discrepancies: [Discrepancy] = []
@@ -18,7 +19,7 @@ actor ReconciliationService {
 
         // Phase 1: Scan volumes (existence check)
         await MainActor.run { progress.phase = .scanningVolumes }
-        let volumeResults = await scanVolumes(snapshots: snapshots, volumes: volumes, progress: progress)
+        let volumeResults = await scanVolumes(snapshots: snapshots, volumes: volumes, scanOrphans: scanOrphans, progress: progress)
         discrepancies.append(contentsOf: volumeResults)
 
         // Phase 2: Verify file hashes on volumes (optional, slow)
@@ -63,6 +64,7 @@ actor ReconciliationService {
     private func scanVolumes(
         snapshots: [ImageSnapshot],
         volumes: [VolumeSnapshot],
+        scanOrphans: Bool,
         progress: ReconciliationProgress
     ) async -> [Discrepancy] {
         var discrepancies: [Discrepancy] = []
@@ -103,14 +105,17 @@ actor ReconciliationService {
         }
 
         // Detect orphans: files on volumes not tracked in any snapshot
-        for volume in volumes {
-            let orphans = findOrphansOnVolume(mountURL: volume.mountURL, knownPaths: knownPaths[volume.volumeID] ?? [])
-            for path in orphans {
-                discrepancies.append(Discrepancy(
-                    sha256: "",
-                    filename: URL(fileURLWithPath: path).lastPathComponent,
-                    kind: .orphanOnVolume(volumeID: volume.volumeID, path: path)
-                ))
+        // Skip when verifying a subset of images (e.g. single image or album)
+        if scanOrphans {
+            for volume in volumes {
+                let orphans = findOrphansOnVolume(mountURL: volume.mountURL, knownPaths: knownPaths[volume.volumeID] ?? [])
+                for path in orphans {
+                    discrepancies.append(Discrepancy(
+                        sha256: "",
+                        filename: URL(fileURLWithPath: path).lastPathComponent,
+                        kind: .orphanOnVolume(volumeID: volume.volumeID, path: path)
+                    ))
+                }
             }
         }
 

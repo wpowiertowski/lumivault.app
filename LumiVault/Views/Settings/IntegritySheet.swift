@@ -15,6 +15,10 @@ struct IntegritySheet: View {
 
     private let reconciliationService = ReconciliationService()
 
+    private var volumeLabelMap: [String: String] {
+        Dictionary(uniqueKeysWithValues: volumes.map { ($0.volumeID, $0.label) })
+    }
+
     var body: some View {
         VStack(spacing: 16) {
             // Header
@@ -54,7 +58,8 @@ struct IntegritySheet: View {
             if let report {
                 IntegrityDetailsSheet(
                     discrepancies: report.discrepancies,
-                    repairResults: repairResults
+                    repairResults: repairResults,
+                    volumeLabels: volumeLabelMap
                 )
             }
         }
@@ -157,6 +162,7 @@ struct IntegritySheet: View {
             volumes: volumeSnapshots,
             b2Credentials: nil,
             verifyHashes: true,
+            scanOrphans: false,
             progress: progress
         )
 
@@ -189,6 +195,7 @@ struct IntegritySheet: View {
 private struct IntegrityDetailsSheet: View {
     let discrepancies: [Discrepancy]
     let repairResults: [RepairResult]
+    let volumeLabels: [String: String]
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -207,7 +214,8 @@ private struct IntegrityDetailsSheet: View {
                 ForEach(discrepancies) { discrepancy in
                     DiscrepancyRow(
                         discrepancy: discrepancy,
-                        repairResult: repairResults.first { $0.sha256 == discrepancy.sha256 }
+                        repairResult: repairResults.first { $0.sha256 == discrepancy.sha256 },
+                        volumeLabels: volumeLabels
                     )
                 }
             }

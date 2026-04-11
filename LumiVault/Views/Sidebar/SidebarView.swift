@@ -109,6 +109,9 @@ struct SidebarView: View {
                 IntegritySheet(title: album.name, images: album.images)
             }
         }
+        .onChange(of: showingIntegritySheet) {
+            if !showingIntegritySheet { albumToVerify = nil }
+        }
     }
 
     private func deleteAlbum() {

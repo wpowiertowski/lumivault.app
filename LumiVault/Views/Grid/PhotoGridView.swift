@@ -70,6 +70,9 @@ struct PhotoGridView: View {
                 IntegritySheet(title: image.filename, images: [image])
             }
         }
+        .onChange(of: showingIntegritySheet) {
+            if !showingIntegritySheet { imageToVerify = nil }
+        }
     }
 
     private func deleteImage() {
