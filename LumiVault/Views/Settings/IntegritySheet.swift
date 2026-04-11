@@ -11,6 +11,7 @@ struct IntegritySheet: View {
     @State private var progress = ReconciliationProgress()
     @State private var repairResults: [RepairResult] = []
     @State private var report: ReconciliationReport?
+    @State private var showingDetails = false
 
     private let reconciliationService = ReconciliationService()
 
@@ -49,6 +50,14 @@ struct IntegritySheet: View {
             .padding(.bottom)
         }
         .frame(width: 400, height: 340)
+        .sheet(isPresented: $showingDetails) {
+            if let report {
+                IntegrityDetailsSheet(
+                    discrepancies: report.discrepancies,
+                    repairResults: repairResults
+                )
+            }
+        }
         .task { await runVerification() }
     }
 
@@ -89,9 +98,18 @@ struct IntegritySheet: View {
                 }
                 .frame(maxWidth: .infinity)
             } else if !repairResults.isEmpty {
-                List {
-                    ForEach(repairResults, id: \.sha256) { result in
-                        RepairResultRow(result: result)
+                VStack(spacing: 0) {
+                    List {
+                        ForEach(repairResults, id: \.sha256) { result in
+                            RepairResultRow(result: result)
+                        }
+                    }
+                    if let report, !report.discrepancies.isEmpty {
+                        Button("Show Details") {
+                            showingDetails = true
+                        }
+                        .font(Constants.Design.monoCaption)
+                        .padding(.top, 8)
                     }
                 }
             } else if let report {
@@ -104,6 +122,10 @@ struct IntegritySheet: View {
                     Text("\(report.discrepancies.count) issues found")
                         .font(Constants.Design.monoHeadline)
                         .foregroundStyle(.secondary)
+                    Button("Show Details") {
+                        showingDetails = true
+                    }
+                    .font(Constants.Design.monoCaption)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity)
@@ -159,6 +181,48 @@ struct IntegritySheet: View {
 
     private enum IntegrityPhase {
         case scanning, complete
+    }
+}
+
+// MARK: - Details Sheet
+
+private struct IntegrityDetailsSheet: View {
+    let discrepancies: [Discrepancy]
+    let repairResults: [RepairResult]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Image(systemName: "list.bullet.rectangle")
+                    .foregroundStyle(Constants.Design.accentColor)
+                Text("\(discrepancies.count) Issues")
+                    .font(Constants.Design.monoHeadline)
+            }
+            .padding(.top)
+
+            Divider()
+
+            List {
+                ForEach(discrepancies) { discrepancy in
+                    DiscrepancyRow(
+                        discrepancy: discrepancy,
+                        repairResult: repairResults.first { $0.sha256 == discrepancy.sha256 }
+                    )
+                }
+            }
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal)
+            .padding(.bottom)
+        }
+        .frame(width: 500, height: 400)
     }
 }
 

@@ -313,7 +313,7 @@ struct ReconciliationView: View {
 
 // MARK: - Subviews
 
-private struct DiscrepancyRow: View {
+struct DiscrepancyRow: View {
     let discrepancy: Discrepancy
     var repairResult: RepairResult? = nil
 
