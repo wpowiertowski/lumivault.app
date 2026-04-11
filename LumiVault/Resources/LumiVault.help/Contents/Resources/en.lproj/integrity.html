@@ -40,30 +40,38 @@
 
     <p>LumiVault provides tools to verify that your archived photos remain intact and that all storage locations are in sync.</p>
 
-    <h2>Integrity Verification</h2>
-    <p>Open <strong>Settings &gt; Integrity</strong> and click <strong>Verify All</strong> to scan your archive:</p>
+    <h2>Full Catalog Scan</h2>
+    <p>Open <strong>Settings &gt; Integrity</strong> to scan your entire archive:</p>
     <ol>
-        <li>LumiVault reads each file from connected volumes.</li>
-        <li>Computes a fresh SHA-256 hash.</li>
-        <li>Compares it against the hash stored in the catalog.</li>
-        <li>Reports any mismatches, indicating potential corruption.</li>
+        <li>LumiVault checks each file's declared storage location on connected volumes.</li>
+        <li>Detects missing files, orphaned files, and B2 discrepancies.</li>
+        <li>With <strong>Verify file hashes</strong> enabled, computes a fresh SHA-256 hash for every file and compares it against the catalog to detect corruption.</li>
     </ol>
 
     <h2>Reconciliation</h2>
-    <p>Click <strong>Reconcile</strong> to compare the catalog against actual storage:</p>
+    <p>The scan detects several types of discrepancies:</p>
     <ul>
         <li><strong>Missing files</strong> &mdash; files listed in the catalog but not found on a volume.</li>
         <li><strong>Extra files</strong> &mdash; files on a volume that aren't in the catalog.</li>
         <li><strong>B2 discrepancies</strong> &mdash; files missing from or extra in B2 cloud storage.</li>
+        <li><strong>Hash mismatches</strong> &mdash; files that exist but have different content than expected (corruption).</li>
     </ul>
 
-    <h2>Repairing Corruption</h2>
-    <p>If a file fails integrity verification:</p>
+    <h2>Auto-Repair</h2>
+    <p>Enable <strong>Auto-repair</strong> in the Integrity tab to automatically fix corrupted files during a scan. LumiVault uses a two-step repair strategy:</p>
     <ol>
-        <li>Check if a healthy copy exists on another volume.</li>
-        <li>If PAR2 parity data is available, use it to repair the corrupted file.</li>
-        <li>Re-download from B2 if the cloud copy is intact.</li>
+        <li><strong>Copy from healthy volume</strong> &mdash; if the same file exists uncorrupted on another connected volume, the healthy copy replaces the corrupted one.</li>
+        <li><strong>PAR2 recovery</strong> &mdash; if no healthy copy is available, LumiVault uses PAR2 parity data to reconstruct the corrupted blocks via Reed-Solomon error correction.</li>
     </ol>
+    <p>Repair results are shown inline &mdash; green checkmark for repaired files, red X for unrecoverable ones.</p>
+
+    <h2>Per-Album &amp; Per-Image Verification</h2>
+    <p>You can verify and repair individual albums or images without running a full catalog scan:</p>
+    <ul>
+        <li><strong>Album</strong> &mdash; right-click an album in the sidebar and choose <strong>Verify &amp; Repair</strong>.</li>
+        <li><strong>Image</strong> &mdash; right-click a photo in the grid and choose <strong>Verify &amp; Repair</strong>.</li>
+    </ul>
+    <p>Both open a sheet that automatically verifies file hashes on all connected volumes and repairs any corruption found, using the same copy-from-volume / PAR2 strategy as the full scan.</p>
 
     <div class="note">
         <strong>Tip:</strong> Run integrity verification periodically (e.g., monthly) to catch corruption early, while PAR2 repair is still possible.

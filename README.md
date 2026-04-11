@@ -21,12 +21,12 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 
 - **Apple Photos Import** — browse, search, and sort albums from your Photos library; exports the current edited state (crops, filters, adjustments) via PhotoKit and archives in one step
 - **Reed-Solomon Error Correction** — standard PAR2 2.0 format with GF(2^16) Vandermonde-matrix Reed-Solomon coding, fully compatible with par2cmdline and other PAR2 tools; GPU-accelerated via Metal compute shaders (CPU fallback), adaptive block sizing for guaranteed 10% recovery, split file output (.par2 index + .vol0+N.par2 recovery volumes)
-- **Integrity Verification** — background checks surface corruption by re-hashing files against stored SHA-256 digests
+- **Integrity Verification & Auto-Repair** — re-hash files against stored SHA-256 digests to detect corruption; auto-repair by copying from a healthy volume or using PAR2 Reed-Solomon recovery; verify and repair individual albums or images via right-click context menus
 - **Backblaze B2 Cloud Upload** — upload photos and PAR2 recovery data to B2 cloud storage via the REST API with SHA-1 verification; existence checks prevent duplicate uploads
 - **Multi-Volume Mirroring** — mirror albums to multiple external drives with security-scoped bookmarks for persistent access; sync existing catalog to newly added volumes with dedup-by-hash
 - **Per-File Encryption** — optional AES-256-GCM encryption with PBKDF2 key derivation (600K iterations); pipeline order Hash(raw) → Encrypt → PAR2(ciphertext) → Store enables key-free PAR2 repair and raw-data dedup
 - **Deduplication** — exact (SHA-256) and near-duplicate (perceptual hash dHash) detection across all connected volumes; duplicate images are reused across albums without re-processing
-- **Storage Reconciliation** — scan all volumes and B2 for discrepancies (dangling references, orphan files, missing entries) with per-item resolution actions via the Integrity settings tab
+- **Storage Reconciliation** — scan all volumes and B2 for discrepancies (dangling references, orphan files, missing entries, hash mismatches) with per-item resolution actions and automatic corruption repair via the Integrity settings tab
 - **iCloud Catalog Sync** — catalog.json syncs across devices via iCloud Drive with conflict-free merge (union by SHA-256, newest timestamp wins)
 - **Catalog Backup & Restore** — catalog.json is automatically distributed to all external volumes and B2 after every mutation; restore from any backup source (volume, B2, or local file) on fresh run or via Settings
 - **Drag & Drop Import** — native file import via `UniformTypeIdentifiers` with image-type filtering
@@ -101,8 +101,8 @@ LumiVault/
 │   ├── MetalPAR2Service  GPU-accelerated PAR2 via Metal compute shaders
 │   └── Persistence/      SwiftData container factory
 ├── Views/
-│   ├── Sidebar/          Year-grouped album list, volume status, album deletion
-│   ├── Grid/             LazyVGrid thumbnail browser with image deletion
+│   ├── Sidebar/          Year-grouped album list, volume status, context menus (verify, delete)
+│   ├── Grid/             LazyVGrid thumbnail browser with context menus (verify, delete)
 │   ├── Detail/           Full-resolution preview + metadata inspector
 │   ├── Import/           Drag-and-drop file import with progress
 │   ├── PhotosImport/     Photos library album picker + export wizard
@@ -120,7 +120,7 @@ LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool
 
 ## Testing
 
-114 unit tests across 23 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
+125 unit tests across 23 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
 
 ```bash
 swift test                                    # Run all unit tests

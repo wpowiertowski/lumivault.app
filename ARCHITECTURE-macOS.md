@@ -400,10 +400,11 @@ catalog images to the new drive. `VolumeService.syncToVolume()` handles the sync
 dedup-by-hash: if a file already exists at the destination with the correct SHA-256, it
 adds a `StorageLocation` without copying. PAR2 companions are copied alongside images.
 
-### 5.6 Storage Reconciliation
+### 5.6 Storage Reconciliation & Auto-Repair
 
 **Mechanism**: `ReconciliationService` (actor) scans all mounted volumes and B2 to detect
-discrepancies between the database and actual file state.
+discrepancies between the database and actual file state, and optionally repairs corrupted
+files automatically.
 
 **Discrepancy types**:
 
@@ -414,19 +415,43 @@ discrepancies between the database and actual file state.
 | `danglingB2FileId` | DB says file is in B2, but B2 listing disagrees |
 | `orphanInB2` | File in B2 not referenced by any DB record |
 | `missingFromVolume` | File on other volumes but absent from this one |
+| `hashMismatch` | File exists but SHA-256 differs from expected (corruption) |
 
 **Volume scan**: For each image's `storageLocations`, checks `FileManager.fileExists`.
 Then enumerates the volume's `year/month/day/album` directory structure to find orphans
 not tracked in the database. PAR2 files are excluded from orphan detection.
 
+**Hash verification**: Optional phase that re-computes SHA-256 for every file on every
+volume and compares against the catalog hash, detecting silent corruption (bit rot).
+
 **B2 scan**: Calls `b2_list_file_names` (paginated) and cross-references against the
 database's `b2FileId` values. Pure function `diffB2` is extracted for testability.
 
-**Resolution**: Each discrepancy can be resolved individually (copy from another volume,
-download from B2, remove dangling reference, upload to B2, or ignore).
+**Auto-repair**: When enabled, the reconciliation service automatically repairs corrupted
+files (`hashMismatch` discrepancies) using a two-step strategy:
 
-**UI**: Settings > Integrity tab with scan button, progress indicator, and grouped
-discrepancy list with per-item resolve actions.
+```text
+1. Copy from healthy volume — for each hash mismatch, check all other volumes for a
+   copy with the correct SHA-256. If found, atomically replace the corrupted file.
+2. PAR2 repair — if no healthy copy exists on any volume, locate the PAR2 index file
+   (.par2) alongside the corrupted file and call RedundancyService.repair() to
+   reconstruct corrupted blocks via GF(2^16) Reed-Solomon error correction.
+3. If both strategies fail, the file is reported as unrecoverable.
+```
+
+Repair results are tracked via `RepairResult` (outcome: `.copiedFromVolume`,
+`.repairedViaPAR2`, or `.failed`).
+
+**Resolution**: Each discrepancy can also be resolved individually (copy from another
+volume, download from B2, remove dangling reference, upload to B2, or ignore).
+
+**Per-album and per-image verification**: `IntegritySheet` provides a scoped verify +
+repair flow accessible via right-click context menus on albums (sidebar) and images
+(photo grid). It runs hash verification and auto-repair on just the selected scope.
+
+**UI**: Settings > Integrity tab with scan button, "Verify file hashes" and "Auto-repair"
+toggles, progress indicator, and grouped discrepancy list with repair outcome indicators.
+Context menus on albums and images offer "Verify & Repair" for targeted checks.
 
 ### 5.7 Album & Image Deletion
 
@@ -453,9 +478,9 @@ backends in a single operation with progress tracking.
      Or modelContext.delete(image) for single image
 ```
 
-**UI**: Context menus on sidebar albums ("Delete Album") and grid photos ("Delete Photo")
-with confirmation alerts showing affected item counts. Progress sheet displays phase,
-item count, and any errors encountered.
+**UI**: Context menus on sidebar albums and grid photos include "Verify & Repair" and
+"Delete Album" / "Delete Photo" actions. Deletion shows confirmation alerts with affected
+item counts and a progress sheet displaying phase, item count, and any errors encountered.
 
 Unmounted volumes are silently skipped — the files remain on disk but the `StorageLocation`
 references are removed from the database. A subsequent reconciliation scan will surface
@@ -558,11 +583,11 @@ LumiVault/
 │
 ├── Views/
 │   ├── Sidebar/
-│   │   ├── SidebarView.swift            // Year-grouped album list + album deletion
+│   │   ├── SidebarView.swift            // Year-grouped album list + context menus (verify, delete)
 │   │   ├── AlbumDeletionSheet.swift     // Deletion progress sheet
 │   │   └── VolumeListView.swift         // Connected volumes status
 │   ├── Grid/
-│   │   ├── PhotoGridView.swift          // LazyVGrid with image deletion
+│   │   ├── PhotoGridView.swift          // LazyVGrid with context menus (verify, delete)
 │   │   └── PhotoGridItem.swift          // Single thumbnail cell
 │   ├── Detail/
 │   │   ├── PhotoDetailView.swift        // Full-resolution preview
@@ -578,7 +603,9 @@ LumiVault/
 │       ├── GeneralSettingsView.swift     // Catalog path, redundancy %, restore
 │       ├── VolumesSettingsView.swift     // Manage disks + post-add sync
 │       ├── VolumeSyncSheet.swift         // Sync existing catalog to new volume
-│       ├── ReconciliationView.swift      // Integrity scan + discrepancy resolution
+│       ├── ReconciliationView.swift      // Integrity scan + auto-repair + discrepancy resolution
+│       ├── IntegritySheet.swift          // Per-album / per-image verify & repair sheet
+│       ├── B2SyncSheet.swift             // Sync volumes to B2
 │       ├── CloudSettingsView.swift       // iCloud sync toggle + status
 │       ├── B2SettingsView.swift          // Backblaze B2 credentials + test
 │       ├── EncryptionSettingsView.swift  // Passphrase management, key status
