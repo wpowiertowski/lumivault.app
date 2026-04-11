@@ -3,27 +3,89 @@ import SwiftData
 
 struct VolumeListView: View {
     @Query private var volumes: [VolumeRecord]
+    @Query private var images: [ImageRecord]
+    @AppStorage("b2Enabled") private var b2Enabled = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("External Volumes")
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Storage")
                 .font(Constants.Design.monoHeadline)
                 .padding(.horizontal)
                 .padding(.top, 12)
+                .padding(.bottom, 8)
 
-            if volumes.isEmpty {
+            if volumes.isEmpty && !b2Enabled {
                 ContentUnavailableView {
-                    Label("No Volumes", systemImage: "externaldrive")
+                    Label("No Storage", systemImage: "externaldrive")
                 } description: {
-                    Text("Connect an external drive and add it in Settings.")
+                    Text("Add a volume or configure B2 in Settings.")
                         .font(Constants.Design.monoCaption)
                 }
             } else {
-                List(volumes, id: \.persistentModelID) { volume in
-                    VolumeRow(volume: volume)
+                List {
+                    if !volumes.isEmpty {
+                        Section("Volumes") {
+                            ForEach(volumes, id: \.persistentModelID) { volume in
+                                VolumeRow(volume: volume)
+                            }
+                        }
+                    }
+
+                    if b2Enabled {
+                        Section("Backblaze B2") {
+                            B2StatsRow(images: images)
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+private struct B2StatsRow: View {
+    let images: [ImageRecord]
+
+    private var uploaded: [ImageRecord] {
+        images.filter { $0.b2FileId != nil }
+    }
+
+    private var pending: [ImageRecord] {
+        images.filter { $0.b2FileId == nil }
+    }
+
+    var body: some View {
+        let uploadedCount = uploaded.count
+        let uploadedBytes = uploaded.reduce(into: Int64(0)) { $0 += $1.sizeBytes }
+        let pendingCount = pending.count
+        let pendingBytes = pending.reduce(into: Int64(0)) { $0 += $1.sizeBytes }
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Image(systemName: "cloud.fill")
+                    .font(.title3)
+                    .foregroundStyle(.blue)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(uploadedCount) of \(images.count) photos uploaded")
+                        .font(Constants.Design.monoBody)
+                    Text(ByteCountFormatter.string(fromByteCount: uploadedBytes, countStyle: .file))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if pendingCount > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.up.circle")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.orange)
+                    Text("\(pendingCount) pending (\(ByteCountFormatter.string(fromByteCount: pendingBytes, countStyle: .file)))")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.orange)
+                }
+                .padding(.leading, 34)
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 

@@ -88,11 +88,6 @@ struct SidebarView: View {
             }
         }
         .navigationTitle("Library")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                VolumeStatusButton()
-            }
-        }
         .alert("Delete Album", isPresented: $showingDeleteConfirmation) {
             Button("Delete", role: .destructive) { deleteAlbum() }
             Button("Cancel", role: .cancel) { albumToDelete = nil }
@@ -212,19 +207,3 @@ private struct AlbumRow: View {
     }
 }
 
-private struct VolumeStatusButton: View {
-    @State private var showingVolumes = false
-
-    var body: some View {
-        Button {
-            showingVolumes.toggle()
-        } label: {
-            Label("Volumes", systemImage: "externaldrive")
-        }
-        .accessibilityIdentifier("sidebar.volumeStatus")
-        .popover(isPresented: $showingVolumes) {
-            VolumeListView()
-                .frame(width: 280, height: 300)
-        }
-    }
-}

@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var showingNearDuplicates = false
     @State private var showingIntegrityAlert = false
     @State private var showingRepairNotice = false
+    @State private var showingVolumes = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -50,6 +51,18 @@ struct ContentView: View {
                     Label("Near-Duplicates", systemImage: "square.on.square.badge.person.crop")
                 }
                 .accessibilityIdentifier("toolbar.nearDuplicates")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingVolumes.toggle()
+                } label: {
+                    Label("Volumes", systemImage: "externaldrive")
+                }
+                .accessibilityIdentifier("sidebar.volumeStatus")
+                .popover(isPresented: $showingVolumes, arrowEdge: .bottom) {
+                    VolumeListView()
+                        .frame(width: 280, height: 300)
+                }
             }
         }
         .sheet(isPresented: $showingPhotosImport) {
