@@ -22,6 +22,7 @@
 		2AB3DBBB033427F0060FC5E2 /* LumiVaultTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F69A5682C9063F979E533C /* LumiVaultTests.swift */; };
 		2F0B68DAB1D1FCF1046D6908 /* EncryptionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4CACCF602F3A573BC7627EE /* EncryptionSettingsView.swift */; };
 		3552D40BADA5995C1ABE16EC /* PhotosExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33162A89A61E4A8699C5A4D5 /* PhotosExportSheet.swift */; };
+		377E661A689793390F13D75A /* B2SyncSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0559D966DBB4F64CE222568C /* B2SyncSheet.swift */; };
 		3822A367C5727C93EDA2CF9C /* B2Service.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1068629E8FF6AF2C6063CC06 /* B2Service.swift */; };
 		3CF3C07E9C178EB6E6961593 /* Catalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90BF32093AC2357CD61747D /* Catalog.swift */; };
 		3F1CC37E542EA4CF0C617E64 /* LumiVault.help in Resources */ = {isa = PBXBuildFile; fileRef = E1B876E2BEAD4C3EBF5E1688 /* LumiVault.help */; };
@@ -97,6 +98,7 @@
 		0099C37B5592C7B2AACD467B /* VolumeListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeListView.swift; sourceTree = "<group>"; };
 		012BE699987DA66C89CDC8BD /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		013C39B57D0BACCC51619D46 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		0559D966DBB4F64CE222568C /* B2SyncSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = B2SyncSheet.swift; sourceTree = "<group>"; };
 		06D0EEE7A6946D0748E5A6C4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		0735E1FC71B26F46934B015B /* B2Credentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = B2Credentials.swift; sourceTree = "<group>"; };
 		08151D3FAC4937C0EE5104CC /* SupportSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupportSettingsView.swift; sourceTree = "<group>"; };
@@ -365,6 +367,7 @@
 			isa = PBXGroup;
 			children = (
 				E68790766AAC0D4983E632CB /* B2SettingsView.swift */,
+				0559D966DBB4F64CE222568C /* B2SyncSheet.swift */,
 				22F376C53109DC45304A767E /* CloudSettingsView.swift */,
 				A4CACCF602F3A573BC7627EE /* EncryptionSettingsView.swift */,
 				A86BC5472A92669D5E04BFC1 /* ExportDefaultsSettingsView.swift */,
@@ -508,6 +511,7 @@
 				03E6665EF681AB03B992359C /* B2Credentials.swift in Sources */,
 				3822A367C5727C93EDA2CF9C /* B2Service.swift in Sources */,
 				FC2F73AE4F5F0C4F9FEBBF6A /* B2SettingsView.swift in Sources */,
+				377E661A689793390F13D75A /* B2SyncSheet.swift in Sources */,
 				214B28761EC48A0769B8DF25 /* BookmarkResolver.swift in Sources */,
 				3CF3C07E9C178EB6E6961593 /* Catalog.swift in Sources */,
 				29603BDE743EC9A5EF23D668 /* CatalogBackupService.swift in Sources */,
