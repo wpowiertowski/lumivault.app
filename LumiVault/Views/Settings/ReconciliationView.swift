@@ -8,8 +8,10 @@ struct ReconciliationView: View {
 
     @State private var progress = ReconciliationProgress()
     @State private var report: ReconciliationReport?
+    @State private var repairResults: [RepairResult] = []
     @State private var isScanning = false
     @State private var verifyHashes = false
+    @State private var repairCorrupted = false
     @State private var showingB2SyncSheet = false
     @State private var showingVolumeSyncSheet = false
     @State private var selectedVolume: VolumeRecord?
@@ -55,16 +57,25 @@ struct ReconciliationView: View {
             // Bottom bar
             HStack {
                 if let report {
-                    Text("\(report.discrepancies.count) issues found")
+                    Text(statusText(report))
                         .font(Constants.Design.monoCaption)
                         .foregroundStyle(.secondary)
                 } else {
                     Toggle("Verify file hashes", isOn: $verifyHashes)
                         .font(Constants.Design.monoCaption)
                         .toggleStyle(.checkbox)
-                        .disabled(isScanning)
+                        .disabled(isScanning || repairCorrupted)
                         .help("Compute SHA-256 of every file on volumes to detect corruption. Slower but thorough.")
                         .accessibilityIdentifier("integrity.verifyHashes")
+                    Toggle("Auto-repair", isOn: $repairCorrupted)
+                        .font(Constants.Design.monoCaption)
+                        .toggleStyle(.checkbox)
+                        .disabled(isScanning)
+                        .help("Automatically repair corrupted files by copying from a healthy volume or using PAR2 recovery data.")
+                        .accessibilityIdentifier("integrity.repairCorrupted")
+                        .onChange(of: repairCorrupted) { _, newValue in
+                            if newValue { verifyHashes = true }
+                        }
                 }
                 Spacer()
                 Button(isScanning ? "Scanning..." : "Scan") { startScan() }
@@ -139,7 +150,7 @@ struct ReconciliationView: View {
 
     private func resultsList(_ report: ReconciliationReport) -> some View {
         Group {
-            if report.discrepancies.isEmpty {
+            if report.discrepancies.isEmpty && repairResults.isEmpty {
                 VStack(spacing: 12) {
                     Spacer()
                     Image(systemName: "checkmark.circle")
@@ -157,10 +168,17 @@ struct ReconciliationView: View {
                 .frame(maxWidth: .infinity)
             } else {
                 List {
+                    if !repairResults.isEmpty {
+                        Section("Repairs") {
+                            ForEach(repairResults, id: \.sha256) { result in
+                                RepairResultRow(result: result)
+                            }
+                        }
+                    }
                     ForEach(groupedDiscrepancies(report.discrepancies), id: \.title) { group in
                         Section(group.title) {
                             ForEach(group.items) { item in
-                                DiscrepancyRow(discrepancy: item)
+                                DiscrepancyRow(discrepancy: item, repairResult: repairResultFor(item))
                             }
                         }
                     }
@@ -169,17 +187,41 @@ struct ReconciliationView: View {
         }
     }
 
+    private func statusText(_ report: ReconciliationReport) -> String {
+        if repairResults.isEmpty {
+            return "\(report.discrepancies.count) issues found"
+        }
+        let repaired = repairResults.filter {
+            switch $0.outcome {
+            case .copiedFromVolume, .repairedViaPAR2: true
+            case .failed: false
+            }
+        }.count
+        let failed = repairResults.count - repaired
+        var parts = ["\(report.discrepancies.count) issues found"]
+        if repaired > 0 { parts.append("\(repaired) repaired") }
+        if failed > 0 { parts.append("\(failed) unrecoverable") }
+        return parts.joined(separator: ", ")
+    }
+
+    private func repairResultFor(_ discrepancy: Discrepancy) -> RepairResult? {
+        guard case .hashMismatch(let vid, _, _) = discrepancy.kind else { return nil }
+        return repairResults.first { $0.sha256 == discrepancy.sha256 && $0.volumeID == vid }
+    }
+
     // MARK: - Actions
 
     private func startScan() {
         isScanning = true
         report = nil
+        repairResults = []
         progress = ReconciliationProgress()
 
         let snapshots = images.map { image in
             ImageSnapshot(
                 sha256: image.sha256,
                 filename: image.filename,
+                par2Filename: image.par2Filename,
                 b2FileId: image.b2FileId,
                 storageLocations: image.storageLocations,
                 albumPath: image.album.map { "\($0.year)/\($0.month)/\($0.day)/\($0.name)" } ?? ""
@@ -200,6 +242,7 @@ struct ReconciliationView: View {
 
         let progress = self.progress
         let verifyHashes = self.verifyHashes
+        let shouldRepair = self.repairCorrupted
 
         Task { @MainActor in
             let result = await reconciliationService.reconcile(
@@ -209,6 +252,17 @@ struct ReconciliationView: View {
                 verifyHashes: verifyHashes,
                 progress: progress
             )
+
+            // Repair corrupted files if enabled
+            if shouldRepair {
+                let repairs = await reconciliationService.repairCorruptedFiles(
+                    discrepancies: result.discrepancies,
+                    snapshots: snapshots,
+                    volumes: volumeSnapshots,
+                    progress: progress
+                )
+                self.repairResults = repairs
+            }
 
             // Stop accessing security-scoped resources
             for vs in volumeSnapshots {
@@ -261,6 +315,7 @@ struct ReconciliationView: View {
 
 private struct DiscrepancyRow: View {
     let discrepancy: Discrepancy
+    var repairResult: RepairResult? = nil
 
     var body: some View {
         HStack {
@@ -274,25 +329,43 @@ private struct DiscrepancyRow: View {
                     .font(Constants.Design.monoCaption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if let repair = repairResult {
+                    Text(repairDescription(repair))
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(repairColor(repair))
+                        .lineLimit(1)
+                }
             }
         }
     }
 
     private var iconName: String {
+        if let repair = repairResult {
+            switch repair.outcome {
+            case .copiedFromVolume, .repairedViaPAR2: return "checkmark.shield"
+            case .failed: return "xmark.shield"
+            }
+        }
         switch discrepancy.kind {
-        case .danglingLocation, .danglingB2FileId: "exclamationmark.triangle"
-        case .orphanOnVolume, .orphanInB2: "questionmark.circle"
-        case .missingFromVolume: "arrow.right.circle"
-        case .hashMismatch: "xmark.shield"
+        case .danglingLocation, .danglingB2FileId: return "exclamationmark.triangle"
+        case .orphanOnVolume, .orphanInB2: return "questionmark.circle"
+        case .missingFromVolume: return "arrow.right.circle"
+        case .hashMismatch: return "xmark.shield"
         }
     }
 
     private var iconColor: Color {
+        if let repair = repairResult {
+            switch repair.outcome {
+            case .copiedFromVolume, .repairedViaPAR2: return .green
+            case .failed: return .red
+            }
+        }
         switch discrepancy.kind {
-        case .danglingLocation, .danglingB2FileId: .orange
-        case .orphanOnVolume, .orphanInB2: .yellow
-        case .missingFromVolume: .blue
-        case .hashMismatch: .red
+        case .danglingLocation, .danglingB2FileId: return .orange
+        case .orphanOnVolume, .orphanInB2: return .yellow
+        case .missingFromVolume: return .blue
+        case .hashMismatch: return .red
         }
     }
 
@@ -304,6 +377,63 @@ private struct DiscrepancyRow: View {
         case .orphanInB2(_, let name): "In B2 as \(name), not tracked in catalog"
         case .missingFromVolume(let vid): "Not mirrored to volume \(vid)"
         case .hashMismatch(let vid, let expected, let actual): "Hash mismatch on \(vid): expected \(String(expected.prefix(8)))… got \(String(actual.prefix(8)))…"
+        }
+    }
+
+    private func repairDescription(_ result: RepairResult) -> String {
+        switch result.outcome {
+        case .copiedFromVolume(let vid): "Repaired — copied from \(vid)"
+        case .repairedViaPAR2: "Repaired — PAR2 recovery"
+        case .failed(let reason): "Repair failed — \(reason)"
+        }
+    }
+
+    private func repairColor(_ result: RepairResult) -> Color {
+        switch result.outcome {
+        case .copiedFromVolume, .repairedViaPAR2: .green
+        case .failed: .red
+        }
+    }
+}
+
+struct RepairResultRow: View {
+    let result: RepairResult
+
+    var body: some View {
+        HStack {
+            Image(systemName: iconName)
+                .foregroundStyle(iconColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(result.filename)
+                    .font(Constants.Design.monoBody)
+                    .lineLimit(1)
+                Text(description)
+                    .font(Constants.Design.monoCaption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var iconName: String {
+        switch result.outcome {
+        case .copiedFromVolume, .repairedViaPAR2: "checkmark.shield"
+        case .failed: "xmark.shield"
+        }
+    }
+
+    private var iconColor: Color {
+        switch result.outcome {
+        case .copiedFromVolume, .repairedViaPAR2: .green
+        case .failed: .red
+        }
+    }
+
+    private var description: String {
+        switch result.outcome {
+        case .copiedFromVolume(let vid): "Repaired — copied from \(vid)"
+        case .repairedViaPAR2: "Repaired — PAR2 recovery"
+        case .failed(let reason): "Repair failed — \(reason)"
         }
     }
 }

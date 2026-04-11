@@ -10,6 +10,8 @@ struct PhotoGridView: View {
     @State private var showingDeleteConfirmation = false
     @State private var showingDeletionProgress = false
     @State private var deletionProgress = DeletionProgress()
+    @State private var imageToVerify: ImageRecord?
+    @State private var showingIntegritySheet = false
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @Environment(\.thumbnailService) private var thumbnailService
 
@@ -26,6 +28,13 @@ struct PhotoGridView: View {
                             selectedImage = image
                         }
                         .contextMenu {
+                            Button {
+                                imageToVerify = image
+                                showingIntegritySheet = true
+                            } label: {
+                                Label("Verify & Repair", systemImage: "checkmark.shield")
+                            }
+                            Divider()
                             Button(role: .destructive) {
                                 imageToDelete = image
                                 showingDeleteConfirmation = true
@@ -55,6 +64,11 @@ struct PhotoGridView: View {
         }
         .sheet(isPresented: $showingDeletionProgress) {
             AlbumDeletionSheet(progress: deletionProgress)
+        }
+        .sheet(isPresented: $showingIntegritySheet) {
+            if let image = imageToVerify {
+                IntegritySheet(title: image.filename, images: [image])
+            }
         }
     }
 

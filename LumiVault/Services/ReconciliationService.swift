@@ -277,6 +277,130 @@ actor ReconciliationService {
         return discrepancies
     }
 
+    // MARK: - Repair
+
+    func repairCorruptedFiles(
+        discrepancies: [Discrepancy],
+        snapshots: [ImageSnapshot],
+        volumes: [VolumeSnapshot],
+        progress: ReconciliationProgress
+    ) async -> [RepairResult] {
+        let hashMismatches = discrepancies.filter {
+            if case .hashMismatch = $0.kind { return true }
+            return false
+        }
+
+        guard !hashMismatches.isEmpty else { return [] }
+
+        await MainActor.run {
+            progress.phase = .repairing
+            progress.totalItems = hashMismatches.count
+            progress.processedItems = 0
+        }
+
+        let snapshotsByHash = Dictionary(snapshots.map { ($0.sha256, $0) }, uniquingKeysWith: { first, _ in first })
+        let volumeMap = Dictionary(uniqueKeysWithValues: volumes.map { ($0.volumeID, $0) })
+        let redundancy = RedundancyService()
+        var results: [RepairResult] = []
+
+        for (index, discrepancy) in hashMismatches.enumerated() {
+            guard case .hashMismatch(let corruptedVolumeID, let expectedHash, _) = discrepancy.kind,
+                  let corruptedVolume = volumeMap[corruptedVolumeID],
+                  let snapshot = snapshotsByHash[discrepancy.sha256] else {
+                results.append(RepairResult(
+                    sha256: discrepancy.sha256,
+                    filename: discrepancy.filename,
+                    volumeID: "",
+                    outcome: .failed("Missing snapshot or volume data")
+                ))
+                await MainActor.run { progress.processedItems = index + 1 }
+                continue
+            }
+
+            // Find the corrupted file's relative path on the volume
+            let corruptedLocation = snapshot.storageLocations.first { $0.volumeID == corruptedVolumeID }
+            guard let relativePath = corruptedLocation?.relativePath else {
+                results.append(RepairResult(
+                    sha256: discrepancy.sha256,
+                    filename: discrepancy.filename,
+                    volumeID: corruptedVolumeID,
+                    outcome: .failed("No storage location found for volume")
+                ))
+                await MainActor.run { progress.processedItems = index + 1 }
+                continue
+            }
+
+            let corruptedURL = corruptedVolume.mountURL.appendingPathComponent(relativePath)
+
+            // Strategy 1: Copy from a healthy volume
+            var repaired = false
+            for location in snapshot.storageLocations where location.volumeID != corruptedVolumeID {
+                guard let sourceVolume = volumeMap[location.volumeID] else { continue }
+                let sourceURL = sourceVolume.mountURL.appendingPathComponent(location.relativePath)
+                guard FileManager.default.fileExists(atPath: sourceURL.path) else { continue }
+
+                // Verify the source is actually healthy
+                guard let sourceHash = try? await hasher.sha256(of: sourceURL),
+                      sourceHash == expectedHash else { continue }
+
+                // Replace corrupted file with healthy copy
+                do {
+                    let data = try Data(contentsOf: sourceURL)
+                    try data.write(to: corruptedURL, options: .atomic)
+                    results.append(RepairResult(
+                        sha256: discrepancy.sha256,
+                        filename: discrepancy.filename,
+                        volumeID: corruptedVolumeID,
+                        outcome: .copiedFromVolume(location.volumeID)
+                    ))
+                    repaired = true
+                    break
+                } catch {
+                    continue
+                }
+            }
+
+            // Strategy 2: PAR2 repair
+            if !repaired && !snapshot.par2Filename.isEmpty {
+                let par2URL = corruptedURL.deletingLastPathComponent()
+                    .appendingPathComponent(snapshot.par2Filename)
+
+                if FileManager.default.fileExists(atPath: par2URL.path) {
+                    do {
+                        if let repairedData = try redundancy.repair(
+                            par2URL: par2URL,
+                            corruptedFileURL: corruptedURL
+                        ) {
+                            try repairedData.write(to: corruptedURL, options: .atomic)
+                            results.append(RepairResult(
+                                sha256: discrepancy.sha256,
+                                filename: discrepancy.filename,
+                                volumeID: corruptedVolumeID,
+                                outcome: .repairedViaPAR2
+                            ))
+                            repaired = true
+                        }
+                    } catch {
+                        // PAR2 repair failed — fall through to unrecoverable
+                    }
+                }
+            }
+
+            if !repaired {
+                results.append(RepairResult(
+                    sha256: discrepancy.sha256,
+                    filename: discrepancy.filename,
+                    volumeID: corruptedVolumeID,
+                    outcome: .failed("No healthy copy available and PAR2 repair failed")
+                ))
+            }
+
+            await MainActor.run { progress.processedItems = index + 1 }
+        }
+
+        return results
+    }
+
     // MARK: - Resolution
 
     func resolve(

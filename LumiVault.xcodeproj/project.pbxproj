@@ -66,6 +66,7 @@
 		D614E72A43BEE42BDCD6896F /* GaloisField16.swift in Sources */ = {isa = PBXBuildFile; fileRef = A705C358860AAE79B6C774A6 /* GaloisField16.swift */; };
 		D667D68E0E1F064E5955284C /* RedundancyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0933DB339B93FFE9258AEA7 /* RedundancyService.swift */; };
 		E5AD622448575773B6865BB8 /* EncryptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2227CE0EBFDA45BA03F75D10 /* EncryptionService.swift */; };
+		E7503627D9380F2FA62D1C7C /* IntegritySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78323BB35DE5C1DE3D74C325 /* IntegritySheet.swift */; };
 		E9CC0D815365176B7AC4CA64 /* LumiVaultUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C8416D7A7C9047F26714AD /* LumiVaultUITests.swift */; };
 		EDE76EA25C3EC99DAF2962EE /* LumiVaultApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 679368003A8DA83CBA994560 /* LumiVaultApp.swift */; };
 		EFB4150EB614969D580F2E58 /* EXIFData.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6826A2A2F1B0541A700F497 /* EXIFData.swift */; };
@@ -133,6 +134,7 @@
 		681F3FAA2F788B687AAC19BA /* TipJar.storekit */ = {isa = PBXFileReference; path = TipJar.storekit; sourceTree = "<group>"; };
 		6BF68050F56A53C9131FD1E5 /* LumiVault.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumiVault.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		73A3CD8DA3E2CB3AA1064AFC /* ExportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportCoordinator.swift; sourceTree = "<group>"; };
+		78323BB35DE5C1DE3D74C325 /* IntegritySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegritySheet.swift; sourceTree = "<group>"; };
 		795EC7A08A0ABF43F828C239 /* AlbumDeletionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumDeletionSheet.swift; sourceTree = "<group>"; };
 		7FD4E291C18518482ADDCA6A /* AsyncSemaphore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncSemaphore.swift; sourceTree = "<group>"; };
 		925548DA4217B1BEAFD6E660 /* PipelinedExportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelinedExportCoordinator.swift; sourceTree = "<group>"; };
@@ -372,6 +374,7 @@
 				A4CACCF602F3A573BC7627EE /* EncryptionSettingsView.swift */,
 				A86BC5472A92669D5E04BFC1 /* ExportDefaultsSettingsView.swift */,
 				12F4EAD4EE81E22BA1863819 /* GeneralSettingsView.swift */,
+				78323BB35DE5C1DE3D74C325 /* IntegritySheet.swift */,
 				4D306B41680CB9765C3B46CC /* ReconciliationView.swift */,
 				259FAF0AE3CB8F5152CD2AC6 /* SettingsView.swift */,
 				08151D3FAC4937C0EE5104CC /* SupportSettingsView.swift */,
@@ -537,6 +540,7 @@
 				863485B86E9A23410301996B /* ImportProgressView.swift in Sources */,
 				8E278B72DB5073512F515562 /* ImportSheet.swift in Sources */,
 				A3686A95F9248D888E85A241 /* IntegrityService.swift in Sources */,
+				E7503627D9380F2FA62D1C7C /* IntegritySheet.swift in Sources */,
 				EDE76EA25C3EC99DAF2962EE /* LumiVaultApp.swift in Sources */,
 				B10D8A06390125F91AC69B08 /* MetadataInspector.swift in Sources */,
 				49EECE51F6F24EDA028977C2 /* MetalPAR2Service.swift in Sources */,

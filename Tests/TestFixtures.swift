@@ -151,6 +151,7 @@ enum TestFixtures {
             return ImageSnapshot(
                 sha256: spec.sha256,
                 filename: spec.name,
+                par2Filename: "",
                 b2FileId: nil,
                 storageLocations: locations,
                 albumPath: spec.albumPath

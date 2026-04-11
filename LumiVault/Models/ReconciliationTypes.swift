@@ -5,6 +5,7 @@ import Foundation
 struct ImageSnapshot: Sendable {
     let sha256: String
     let filename: String
+    let par2Filename: String
     let b2FileId: String?
     let storageLocations: [StorageLocation]
     let albumPath: String // "year/month/day/albumName"
@@ -64,6 +65,7 @@ enum ReconciliationPhase: String, Sendable {
     case scanningVolumes = "Scanning volumes"
     case verifyingHashes = "Verifying file integrity"
     case scanningB2 = "Scanning B2"
+    case repairing = "Repairing corrupted files"
     case resolving = "Resolving"
     case complete = "Complete"
 }
@@ -82,6 +84,22 @@ final class ReconciliationProgress: @unchecked Sendable {
 }
 
 // MARK: - Resolution
+
+// MARK: - Repair
+
+struct RepairResult: Sendable {
+    let sha256: String
+    let filename: String
+    let volumeID: String
+
+    enum Outcome: Sendable {
+        case copiedFromVolume(String)
+        case repairedViaPAR2
+        case failed(String)
+    }
+
+    let outcome: Outcome
+}
 
 enum ResolutionStrategy: Sendable {
     case copyFromVolume(sourceVolumeID: String, sourceURL: URL)

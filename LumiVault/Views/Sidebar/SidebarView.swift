@@ -11,6 +11,8 @@ struct SidebarView: View {
     @State private var showingDeleteConfirmation = false
     @State private var showingDeletionProgress = false
     @State private var deletionProgress = DeletionProgress()
+    @State private var albumToVerify: AlbumRecord?
+    @State private var showingIntegritySheet = false
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @Environment(\.thumbnailService) private var thumbnailService
 
@@ -63,6 +65,13 @@ struct SidebarView: View {
                                 }
                                 .accessibilityIdentifier("sidebar.album.\(album.name)")
                                 .contextMenu {
+                                    Button {
+                                        albumToVerify = album
+                                        showingIntegritySheet = true
+                                    } label: {
+                                        Label("Verify & Repair", systemImage: "checkmark.shield")
+                                    }
+                                    Divider()
                                     Button(role: .destructive) {
                                         albumToDelete = album
                                         showingDeleteConfirmation = true
@@ -94,6 +103,11 @@ struct SidebarView: View {
         }
         .sheet(isPresented: $showingDeletionProgress) {
             AlbumDeletionSheet(progress: deletionProgress)
+        }
+        .sheet(isPresented: $showingIntegritySheet) {
+            if let album = albumToVerify {
+                IntegritySheet(title: album.name, images: album.images)
+            }
         }
     }
 

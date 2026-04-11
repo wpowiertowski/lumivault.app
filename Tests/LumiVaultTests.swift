@@ -984,7 +984,7 @@ struct ReconciliationDiffTests {
     @Test func diffB2AllMatched() {
         let specs = Array(TestFixtures.files.prefix(3))
         let snapshots = specs.enumerated().map { i, spec in
-            ImageSnapshot(sha256: spec.sha256, filename: spec.name, b2FileId: "b2-\(i)", storageLocations: [], albumPath: spec.albumPath)
+            ImageSnapshot(sha256: spec.sha256, filename: spec.name, par2Filename: "", b2FileId: "b2-\(i)", storageLocations: [], albumPath: spec.albumPath)
         }
         let b2Files = specs.enumerated().map { i, spec in
             B2FileListing(fileId: "b2-\(i)", fileName: "\(spec.albumPath)/\(spec.name)", contentLength: Int64(spec.size))
@@ -997,7 +997,7 @@ struct ReconciliationDiffTests {
     @Test func diffB2DetectsDanglingB2FileId() {
         let spec = TestFixtures.files[0]
         let snapshots = [
-            ImageSnapshot(sha256: spec.sha256, filename: spec.name, b2FileId: "b2-gone", storageLocations: [], albumPath: spec.albumPath),
+            ImageSnapshot(sha256: spec.sha256, filename: spec.name, par2Filename: "", b2FileId: "b2-gone", storageLocations: [], albumPath: spec.albumPath),
         ]
         let b2Files: [B2FileListing] = []
 
@@ -1038,9 +1038,9 @@ struct ReconciliationDiffTests {
     @Test func diffB2MixedScenario() {
         let specs = Array(TestFixtures.files.prefix(3))
         let snapshots = [
-            ImageSnapshot(sha256: specs[0].sha256, filename: specs[0].name, b2FileId: "b2-ok", storageLocations: [], albumPath: specs[0].albumPath),
-            ImageSnapshot(sha256: specs[1].sha256, filename: specs[1].name, b2FileId: "b2-missing", storageLocations: [], albumPath: specs[1].albumPath),
-            ImageSnapshot(sha256: specs[2].sha256, filename: specs[2].name, b2FileId: nil, storageLocations: [], albumPath: specs[2].albumPath),
+            ImageSnapshot(sha256: specs[0].sha256, filename: specs[0].name, par2Filename: "", b2FileId: "b2-ok", storageLocations: [], albumPath: specs[0].albumPath),
+            ImageSnapshot(sha256: specs[1].sha256, filename: specs[1].name, par2Filename: "", b2FileId: "b2-missing", storageLocations: [], albumPath: specs[1].albumPath),
+            ImageSnapshot(sha256: specs[2].sha256, filename: specs[2].name, par2Filename: "", b2FileId: nil, storageLocations: [], albumPath: specs[2].albumPath),
         ]
         let b2Files = [
             B2FileListing(fileId: "b2-ok", fileName: "\(specs[0].albumPath)/\(specs[0].name)", contentLength: Int64(specs[0].size)),
@@ -1077,6 +1077,7 @@ struct VolumeScanTests {
             ImageSnapshot(
                 sha256: spec.sha256,
                 filename: spec.name,
+                par2Filename: "",
                 b2FileId: nil,
                 storageLocations: [StorageLocation(volumeID: "vol-1", relativePath: "\(spec.albumPath)/\(spec.name)")],
                 albumPath: spec.albumPath
@@ -1139,6 +1140,7 @@ struct VolumeScanTests {
             ImageSnapshot(
                 sha256: spec.sha256,
                 filename: spec.name,
+                par2Filename: "",
                 b2FileId: nil,
                 storageLocations: [StorageLocation(volumeID: "vol-2", relativePath: "\(spec.albumPath)/\(spec.name)")],
                 albumPath: spec.albumPath
