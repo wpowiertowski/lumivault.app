@@ -59,6 +59,10 @@ actor B2Service {
     ) async throws -> B2FileResponse {
         guard let upload = uploadURL else { throw B2Error.noUploadURL }
 
+        // Clear immediately — URL is single-use regardless of outcome.
+        // On failure, reusing a stale URL would cause all subsequent uploads to fail.
+        uploadURL = nil
+
         let url = URL(string: upload.uploadUrl)!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -71,9 +75,6 @@ actor B2Service {
 
         let (data, response) = try await session.data(for: request)
         try Self.checkResponse(response, data: data)
-
-        // Upload URL is single-use per upload, refresh for next file
-        uploadURL = nil
 
         return try await MainActor.run {
             try JSONDecoder().decode(B2FileResponse.self, from: data)
@@ -196,7 +197,7 @@ actor B2Service {
 
         guard let auth = authorization else { throw B2Error.notAuthorized }
 
-        let encodedName = fileName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? fileName
+        let encodedName = fileName.addingPercentEncoding(withAllowedCharacters: Self.b2AllowedCharacters) ?? fileName
         let url = URL(string: "\(auth.downloadURL)/file/\(credentials.bucketName)/\(encodedName)")!
         var request = URLRequest(url: url)
         request.setValue(auth.authorizationToken, forHTTPHeaderField: "Authorization")
@@ -250,7 +251,7 @@ actor B2Service {
 
         let fileData = try Data(contentsOf: fileURL)
         let sha1 = sha1Hash(of: fileData)
-        let encodedPath = remotePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? remotePath
+        let encodedPath = remotePath.addingPercentEncoding(withAllowedCharacters: Self.b2AllowedCharacters) ?? remotePath
 
         let result = try await uploadFile(
             fileData: fileData,
@@ -262,6 +263,15 @@ actor B2Service {
     }
 
     // MARK: - Helpers
+
+    /// B2-specific percent encoding for file names in headers and URLs.
+    /// Only these characters are left unencoded: A-Z a-z 0-9 - . _ ~ / !
+    nonisolated static let b2AllowedCharacters: CharacterSet = {
+        var cs = CharacterSet()
+        cs.insert(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+        cs.insert(charactersIn: "-._~/!")
+        return cs
+    }()
 
     nonisolated func sha1Hash(of data: Data) -> String {
         let digest = Insecure.SHA1.hash(data: data)

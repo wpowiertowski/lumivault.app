@@ -12,6 +12,7 @@ struct VolumeSyncSheet: View {
     @State private var totalImages = 0
     @State private var processedImages = 0
     @State private var copiedCount = 0
+    @State private var downloadedCount = 0
     @State private var deduplicatedCount = 0
     @State private var skippedCount = 0
     @State private var errors: [String] = []
@@ -89,6 +90,9 @@ struct VolumeSyncSheet: View {
                 .foregroundStyle(.secondary)
             HStack(spacing: 20) {
                 SyncStat(label: "Copied", value: copiedCount)
+                if downloadedCount > 0 {
+                    SyncStat(label: "From B2", value: downloadedCount)
+                }
                 SyncStat(label: "Deduped", value: deduplicatedCount)
                 SyncStat(label: "Skipped", value: skippedCount)
             }
@@ -106,6 +110,9 @@ struct VolumeSyncSheet: View {
                 .font(Constants.Design.monoHeadline)
             HStack(spacing: 20) {
                 SyncStat(label: "Copied", value: copiedCount)
+                if downloadedCount > 0 {
+                    SyncStat(label: "From B2", value: downloadedCount)
+                }
                 SyncStat(label: "Deduped", value: deduplicatedCount)
                 SyncStat(label: "Skipped", value: skippedCount)
             }
@@ -130,6 +137,7 @@ struct VolumeSyncSheet: View {
         totalImages = images.count
         processedImages = 0
         copiedCount = 0
+        downloadedCount = 0
         deduplicatedCount = 0
         skippedCount = 0
         errors = []
@@ -147,6 +155,15 @@ struct VolumeSyncSheet: View {
                 sourceVolumes.append((v, url))
             }
         }
+
+        // Load B2 credentials for fallback downloads
+        let b2Credentials: B2Credentials? = {
+            guard UserDefaults.standard.bool(forKey: "b2Enabled"),
+                  let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
+                  let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) else { return nil }
+            return creds
+        }()
+        let b2Service = b2Credentials != nil ? B2Service() : nil
 
         let volumeID = volume.volumeID
         let imagesToSync = Array(images)
@@ -196,7 +213,7 @@ struct VolumeSyncSheet: View {
                     continue
                 }
 
-                // Find a source for the file
+                // Find a source for the file on another volume
                 var sourceURL: URL?
                 for loc in image.storageLocations {
                     if let (_, volURL) = sourceVolumes.first(where: { $0.0.volumeID == loc.volumeID }) {
@@ -208,30 +225,35 @@ struct VolumeSyncSheet: View {
                     }
                 }
 
-                guard let source = sourceURL else {
-                    skippedCount += 1
-                    processedImages += 1
-                    continue
-                }
-
-                do {
-                    try FileManager.default.createDirectory(at: destBase, withIntermediateDirectories: true)
-                    try FileManager.default.copyItem(at: source, to: destFile)
-                    image.storageLocations.append(location)
-
-                    // Copy PAR2 if exists
-                    if !image.par2Filename.isEmpty {
-                        let par2Source = source.deletingLastPathComponent().appendingPathComponent(image.par2Filename)
-                        let par2Dest = destBase.appendingPathComponent(image.par2Filename)
-                        if FileManager.default.fileExists(atPath: par2Source.path),
-                           !FileManager.default.fileExists(atPath: par2Dest.path) {
-                            try FileManager.default.copyItem(at: par2Source, to: par2Dest)
-                        }
+                if let source = sourceURL {
+                    // Copy from another volume
+                    do {
+                        try FileManager.default.createDirectory(at: destBase, withIntermediateDirectories: true)
+                        try FileManager.default.copyItem(at: source, to: destFile)
+                        image.storageLocations.append(location)
+                        copyPAR2(for: image, from: source.deletingLastPathComponent(), to: destBase)
+                        copiedCount += 1
+                    } catch {
+                        errors.append("Copy failed: \(image.filename) — \(error.localizedDescription)")
                     }
-
-                    copiedCount += 1
-                } catch {
-                    errors.append("Copy failed: \(image.filename) — \(error.localizedDescription)")
+                } else if let b2 = b2Service, let creds = b2Credentials, image.b2FileId != nil {
+                    // Download from B2 as fallback
+                    let remotePath = "\(album.year)/\(album.month)/\(album.day)/\(album.name)/\(image.filename)"
+                    do {
+                        let data = try await b2.downloadFile(
+                            fileName: remotePath,
+                            bucketId: creds.bucketId,
+                            credentials: creds
+                        )
+                        try FileManager.default.createDirectory(at: destBase, withIntermediateDirectories: true)
+                        try data.write(to: destFile, options: .atomic)
+                        image.storageLocations.append(location)
+                        downloadedCount += 1
+                    } catch {
+                        errors.append("B2 download failed: \(image.filename) — \(error.localizedDescription)")
+                    }
+                } else {
+                    skippedCount += 1
                 }
 
                 processedImages += 1
@@ -240,6 +262,16 @@ struct VolumeSyncSheet: View {
             volume.lastSyncedAt = .now
             try? modelContext.save()
             phase = .complete
+        }
+    }
+
+    private func copyPAR2(for image: ImageRecord, from sourceDir: URL, to destDir: URL) {
+        guard !image.par2Filename.isEmpty else { return }
+        let par2Source = sourceDir.appendingPathComponent(image.par2Filename)
+        let par2Dest = destDir.appendingPathComponent(image.par2Filename)
+        if FileManager.default.fileExists(atPath: par2Source.path),
+           !FileManager.default.fileExists(atPath: par2Dest.path) {
+            try? FileManager.default.copyItem(at: par2Source, to: par2Dest)
         }
     }
 
