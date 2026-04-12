@@ -50,7 +50,7 @@ struct PhotoGridView: View {
         .navigationTitle(album.name)
         .navigationSubtitle("\(album.images.count) photos")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(placement: .navigation) {
                 ImportButton(album: album)
             }
         }

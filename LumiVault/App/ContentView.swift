@@ -52,7 +52,7 @@ struct ContentView: View {
                 }
                 .accessibilityIdentifier("toolbar.nearDuplicates")
             }
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(placement: .navigation) {
                 Button {
                     showingVolumes.toggle()
                 } label: {

@@ -49,7 +49,7 @@ struct PhotoDetailView: View {
             }
         }
         .toolbar {
-            ToolbarItem {
+            ToolbarItem(placement: .navigation) {
                 Button {
                     withAnimation { showingInspector.toggle() }
                 } label: {
