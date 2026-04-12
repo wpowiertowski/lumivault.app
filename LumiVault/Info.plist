@@ -6,6 +6,8 @@
     <string>LumiVault.help</string>
     <key>CFBundleHelpBookName</key>
     <string>LumiVault Help</string>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.photography</string>
     <key>NSPhotoLibraryUsageDescription</key>

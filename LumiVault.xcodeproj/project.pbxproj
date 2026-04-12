@@ -52,6 +52,7 @@
 		8E278B72DB5073512F515562 /* ImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 937E65EE6EF8CEA2B9443D20 /* ImportSheet.swift */; };
 		901ED8814C1AF339CD3CAC25 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6E2C8CD562F32019EB774DA /* ContentView.swift */; };
 		92A8BF69B17C32CBBA801C36 /* AlbumDeletionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 795EC7A08A0ABF43F828C239 /* AlbumDeletionSheet.swift */; };
+		93AB452DC206E0A2C5C02909 /* AlbumExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2BF78C573AEB3723FAA6B52 /* AlbumExportSheet.swift */; };
 		A3686A95F9248D888E85A241 /* IntegrityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32581D0BD97222E337F12E24 /* IntegrityService.swift */; };
 		A970C3219EAE0476D86F2706 /* ExportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73A3CD8DA3E2CB3AA1064AFC /* ExportCoordinator.swift */; };
 		AB0DD7ACC613A9C5169FA268 /* PerceptualHash.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F99517836AFD89561B41EE /* PerceptualHash.swift */; };
@@ -153,6 +154,7 @@
 		B389A2EDF5A08E2BE8AF007A /* AlbumRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumRecord.swift; sourceTree = "<group>"; };
 		B98A6688AC0797C85950E76D /* ReconciliationTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconciliationTypes.swift; sourceTree = "<group>"; };
 		C07AF15364718C2056F0DE5F /* ImportProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportProgressView.swift; sourceTree = "<group>"; };
+		C2BF78C573AEB3723FAA6B52 /* AlbumExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumExportSheet.swift; sourceTree = "<group>"; };
 		C4C3BA5B6E3D68DA9A56B7BE /* VolumeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeService.swift; sourceTree = "<group>"; };
 		CA85E7129726352A8ABA7D14 /* PhotosAlbumPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosAlbumPicker.swift; sourceTree = "<group>"; };
 		D1C282CA4BBA78763E15C190 /* ThumbnailService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailService.swift; sourceTree = "<group>"; };
@@ -241,6 +243,7 @@
 			isa = PBXGroup;
 			children = (
 				795EC7A08A0ABF43F828C239 /* AlbumDeletionSheet.swift */,
+				C2BF78C573AEB3723FAA6B52 /* AlbumExportSheet.swift */,
 				013C39B57D0BACCC51619D46 /* SidebarView.swift */,
 				0099C37B5592C7B2AACD467B /* VolumeListView.swift */,
 			);
@@ -508,6 +511,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				92A8BF69B17C32CBBA801C36 /* AlbumDeletionSheet.swift in Sources */,
+				93AB452DC206E0A2C5C02909 /* AlbumExportSheet.swift in Sources */,
 				7623A3D396C608719188049B /* AlbumRecord.swift in Sources */,
 				C3CF5E268A47CFFAD589C4DD /* AsyncChannel.swift in Sources */,
 				CDFE6E5E0536944B2630D0C1 /* AsyncSemaphore.swift in Sources */,

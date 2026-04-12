@@ -13,6 +13,9 @@ struct SidebarView: View {
     @State private var deletionProgress = DeletionProgress()
     @State private var albumToVerify: AlbumRecord?
     @State private var showingIntegritySheet = false
+    @State private var albumToExport: AlbumRecord?
+    @State private var exportDestination: URL?
+    @State private var showingExportSheet = false
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @Environment(\.thumbnailService) private var thumbnailService
 
@@ -66,6 +69,11 @@ struct SidebarView: View {
                                 .accessibilityIdentifier("sidebar.album.\(album.name)")
                                 .contextMenu {
                                     Button {
+                                        exportAlbum(album)
+                                    } label: {
+                                        Label("Export Album…", systemImage: "square.and.arrow.up")
+                                    }
+                                    Button {
                                         albumToVerify = album
                                         showingIntegritySheet = true
                                     } label: {
@@ -107,6 +115,30 @@ struct SidebarView: View {
         .onChange(of: showingIntegritySheet) {
             if !showingIntegritySheet { albumToVerify = nil }
         }
+        .sheet(isPresented: $showingExportSheet) {
+            if let album = albumToExport, let dest = exportDestination {
+                AlbumExportSheet(album: album, destinationURL: dest)
+            }
+        }
+        .onChange(of: showingExportSheet) {
+            if !showingExportSheet {
+                albumToExport = nil
+                exportDestination = nil
+            }
+        }
+    }
+
+    private func exportAlbum(_ album: AlbumRecord) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.message = "Choose a destination for \"\(album.name)\""
+        panel.prompt = "Export"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        albumToExport = album
+        exportDestination = url
+        showingExportSheet = true
     }
 
     private func deleteAlbum() {
