@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 struct SidebarView: View {
     @Binding var selectedAlbum: AlbumRecord?
@@ -16,6 +17,7 @@ struct SidebarView: View {
     @State private var albumToExport: AlbumRecord?
     @State private var exportDestination: URL?
     @State private var showingExportSheet = false
+    @State private var showingExportPicker = false
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @Environment(\.thumbnailService) private var thumbnailService
 
@@ -126,19 +128,19 @@ struct SidebarView: View {
                 exportDestination = nil
             }
         }
+        .fileImporter(
+            isPresented: $showingExportPicker,
+            allowedContentTypes: [.folder]
+        ) { result in
+            guard case .success(let url) = result else { return }
+            exportDestination = url
+            showingExportSheet = true
+        }
     }
 
     private func exportAlbum(_ album: AlbumRecord) {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.message = "Choose a destination for \"\(album.name)\""
-        panel.prompt = "Export"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
         albumToExport = album
-        exportDestination = url
-        showingExportSheet = true
+        showingExportPicker = true
     }
 
     private func deleteAlbum() {

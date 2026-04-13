@@ -1,5 +1,4 @@
 import Foundation
-import AppKit
 import ImageIO
 import CoreImage
 import SwiftUI
@@ -24,7 +23,7 @@ extension EnvironmentValues {
 
 actor ThumbnailService {
     private let cacheRoot: URL
-    private let memoryCache = NSCache<NSString, NSImage>()
+    private let memoryCache = NSCache<NSString, PlatformImage>()
 
     init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
@@ -34,7 +33,7 @@ actor ThumbnailService {
 
     // MARK: - Public API
 
-    func thumbnail(for sha256: String, size: ThumbnailSize) -> NSImage? {
+    func thumbnail(for sha256: String, size: ThumbnailSize) -> PlatformImage? {
         let key = NSString(string: "\(size.rawValue)/\(sha256)")
 
         if let cached = memoryCache.object(forKey: key) {
@@ -42,9 +41,14 @@ actor ThumbnailService {
         }
 
         let fileURL = cacheURL(for: sha256, size: size)
-        guard let image = NSImage(contentsOf: fileURL) else { return nil }
+        guard let image = PlatformImage(contentsOf: fileURL) else { return nil }
 
-        memoryCache.setObject(image, forKey: key, cost: image.tiffRepresentation?.count ?? 0)
+        #if os(macOS)
+        let imageCost = image.tiffRepresentation?.count ?? 0
+        #else
+        let imageCost = image.jpegData(compressionQuality: 1.0)?.count ?? 0
+        #endif
+        memoryCache.setObject(image, forKey: key, cost: imageCost)
         return image
     }
 

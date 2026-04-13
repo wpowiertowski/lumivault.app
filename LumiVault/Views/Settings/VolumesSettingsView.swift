@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 struct VolumesSettingsView: View {
     @Query private var volumes: [VolumeRecord]
@@ -9,6 +10,7 @@ struct VolumesSettingsView: View {
     @State private var newlyAddedVolume: VolumeRecord?
     @State private var volumeToRemove: VolumeRecord?
     @State private var showingRemoveConfirmation = false
+    @State private var showingVolumePicker = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -72,7 +74,7 @@ struct VolumesSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Add Volume...") { addVolume() }
+                Button("Add Volume...") { showingVolumePicker = true }
                     .accessibilityIdentifier("volumes.add")
             }
             .padding(.horizontal)
@@ -95,32 +97,35 @@ struct VolumesSettingsView: View {
                 VolumeSyncSheet(volume: volume)
             }
         }
+        .fileImporter(isPresented: $showingVolumePicker, allowedContentTypes: [.folder]) { result in
+            guard case .success(let url) = result else { return }
+            addVolume(at: url)
+        }
     }
 
-    private func addVolume() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.message = "Select an external volume for photo storage"
+    private func addVolume(at url: URL) {
+        #if os(macOS)
+        let bookmarkOptions: URL.BookmarkCreationOptions = .withSecurityScope
+        #else
+        let bookmarkOptions: URL.BookmarkCreationOptions = .minimalBookmark
+        #endif
 
-        if panel.runModal() == .OK, let url = panel.url {
-            guard let bookmark = try? url.bookmarkData(
-                options: .withSecurityScope,
-                includingResourceValuesForKeys: nil,
-                relativeTo: nil
-            ) else { return }
+        guard let bookmark = try? url.bookmarkData(
+            options: bookmarkOptions,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) else { return }
 
-            let volume = VolumeRecord(
-                label: url.lastPathComponent,
-                mountPoint: url.path,
-                bookmarkData: bookmark
-            )
-            modelContext.insert(volume)
-            try? modelContext.save()
+        let volume = VolumeRecord(
+            label: url.lastPathComponent,
+            mountPoint: url.path,
+            bookmarkData: bookmark
+        )
+        modelContext.insert(volume)
+        try? modelContext.save()
 
-            newlyAddedVolume = volume
-            showingSyncAlert = true
-        }
+        newlyAddedVolume = volume
+        showingSyncAlert = true
     }
 
     private func removeVolume() {

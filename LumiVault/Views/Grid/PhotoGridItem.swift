@@ -4,12 +4,12 @@ struct PhotoGridItem: View {
     let image: ImageRecord
     let isSelected: Bool
     @Environment(\.thumbnailService) private var thumbnailService
-    @State private var thumbnail: NSImage?
+    @State private var thumbnail: PlatformImage?
 
     var body: some View {
         ZStack {
             if let thumbnail {
-                Image(nsImage: thumbnail)
+                Image(platformImage: thumbnail)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(minWidth: 100, minHeight: 100)

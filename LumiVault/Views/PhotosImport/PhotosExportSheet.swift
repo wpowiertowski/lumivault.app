@@ -120,7 +120,7 @@ struct PhotosExportSheet: View {
             Text("Connect an external volume or configure Backblaze B2 in Settings before importing.")
         } actions: {
             Button("Open Settings...") {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                PlatformHelpers.openSettingsWindow()
             }
             .buttonStyle(.borderedProminent)
         }
@@ -434,12 +434,12 @@ private struct ExportStat: View {
 private struct NearDupeThumbnail: View {
     let sha256: String
     @Environment(\.thumbnailService) private var thumbnailService
-    @State private var thumbnail: NSImage?
+    @State private var thumbnail: PlatformImage?
 
     var body: some View {
         Group {
             if let thumbnail {
-                Image(nsImage: thumbnail)
+                Image(platformImage: thumbnail)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {

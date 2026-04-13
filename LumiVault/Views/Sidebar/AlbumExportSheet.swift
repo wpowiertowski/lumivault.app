@@ -98,10 +98,12 @@ struct AlbumExportSheet: View {
             }
 
             HStack(spacing: 12) {
+                #if os(macOS)
                 Button("Show in Finder") {
-                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: destinationURL.path)
+                    PlatformHelpers.revealInFinder(path: destinationURL.path)
                     dismiss()
                 }
+                #endif
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
             }

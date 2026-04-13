@@ -18,7 +18,7 @@ actor SyncService {
         } else {
             #if DEBUG
             // Fall back to local directory when iCloud is unavailable (e.g. no provisioning profile)
-            let fallbackPath = NSString(string: Constants.Paths.debugSyncFallback).expandingTildeInPath
+            let fallbackPath = PlatformHelpers.expandTilde(Constants.Paths.debugSyncFallback)
             self.syncURL = URL(fileURLWithPath: fallbackPath)
             self.usesICloud = false
             #else
@@ -128,7 +128,7 @@ actor SyncService {
 
         // Also save merged catalog locally
         let catalogPath = await MainActor.run {
-            NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
+            PlatformHelpers.expandTilde(UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog)
         }
         try await catalogService.save(to: URL(fileURLWithPath: catalogPath))
     }

@@ -6,63 +6,82 @@ struct PhotoDetailView: View {
     let image: ImageRecord
     @Query private var volumes: [VolumeRecord]
     @Environment(\.encryptionService) private var encryptionService
-    @State private var fullImage: NSImage?
+    @State private var fullImage: PlatformImage?
     @State private var exifData: EXIFData?
     @State private var loadFailed = false
     @State private var showingInspector = true
 
     var body: some View {
-        HSplitView {
-            // Full-resolution preview
-            ZStack {
-                if let fullImage {
-                    Image(nsImage: fullImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if loadFailed {
-                    VStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.largeTitle)
-                            .foregroundStyle(.secondary)
-                        Text("Unable to load preview")
-                            .font(Constants.Design.monoBody)
-                            .foregroundStyle(.secondary)
-                        Button("Retry") {
-                            loadFailed = false
-                            Task { await loadFullImage() }
-                        }
-                        .font(Constants.Design.monoCaption)
+        detailContent
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        withAnimation { showingInspector.toggle() }
+                    } label: {
+                        Label("Inspector", systemImage: "sidebar.right")
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ProgressView("Loading...")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .background(.black.opacity(0.05))
+            .task(id: image.sha256) {
+                fullImage = nil
+                exifData = nil
+                loadFailed = false
+                await loadFullImage()
+            }
+    }
 
-            // Metadata inspector
+    @ViewBuilder
+    private var previewPane: some View {
+        ZStack {
+            if let fullImage {
+                Image(platformImage: fullImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if loadFailed {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text("Unable to load preview")
+                        .font(Constants.Design.monoBody)
+                        .foregroundStyle(.secondary)
+                    Button("Retry") {
+                        loadFailed = false
+                        Task { await loadFullImage() }
+                    }
+                    .font(Constants.Design.monoCaption)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ProgressView("Loading...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(.black.opacity(0.05))
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
+        #if os(macOS)
+        HSplitView {
+            previewPane
+
             if showingInspector {
                 MetadataInspector(image: image, exif: exifData)
                     .frame(minWidth: 260, idealWidth: 280, maxWidth: 320)
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    withAnimation { showingInspector.toggle() }
-                } label: {
-                    Label("Inspector", systemImage: "sidebar.right")
-                }
+        #else
+        HStack(spacing: 0) {
+            previewPane
+
+            if showingInspector {
+                MetadataInspector(image: image, exif: exifData)
+                    .frame(width: 280)
             }
         }
-        .task(id: image.sha256) {
-            fullImage = nil
-            exifData = nil
-            loadFailed = false
-            await loadFullImage()
-        }
+        #endif
     }
 
     private func loadFullImage() async {
@@ -84,13 +103,13 @@ struct PhotoDetailView: View {
                     continue
                 }
                 exifData = EXIFData.extract(from: plaintext)
-                if let loaded = NSImage(data: plaintext) {
+                if let loaded = PlatformImage(data: plaintext) {
                     fullImage = loaded
                     return
                 }
             } else {
                 exifData = EXIFData.extract(from: fileURL)
-                if let loaded = NSImage(contentsOf: fileURL) {
+                if let loaded = PlatformImage(contentsOf: fileURL) {
                     fullImage = loaded
                     return
                 }

@@ -185,13 +185,13 @@ private struct NearDuplicateGroupRow: View {
 private struct NearDuplicateMemberCard: View {
     let member: NearDuplicateGroup.Member
     @Environment(\.thumbnailService) private var thumbnailService
-    @State private var thumbnail: NSImage?
+    @State private var thumbnail: PlatformImage?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             ZStack {
                 if let thumbnail {
-                    Image(nsImage: thumbnail)
+                    Image(platformImage: thumbnail)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                 } else {

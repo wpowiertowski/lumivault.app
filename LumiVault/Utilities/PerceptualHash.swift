@@ -1,6 +1,5 @@
 import Foundation
 import CoreImage
-import AppKit
 
 enum PerceptualHash {
     /// Compute a 64-bit difference hash (dHash) for the image at the given URL.

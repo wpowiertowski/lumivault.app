@@ -1,5 +1,6 @@
 import SwiftUI
 
+#if os(macOS)
 struct ImportFromPhotosCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .importExport) {
@@ -12,6 +13,7 @@ struct ImportFromPhotosCommands: Commands {
         }
     }
 }
+#endif
 
 extension Notification.Name {
     static let showPhotosImport = Notification.Name("showPhotosImport")

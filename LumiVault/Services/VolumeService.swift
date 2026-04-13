@@ -1,9 +1,9 @@
 import Foundation
 import SwiftData
-import AppKit
 
 actor VolumeService {
 
+    #if os(macOS)
     func discoverMountedVolumes() -> [URL] {
         let keys: [URLResourceKey] = [.volumeNameKey, .volumeIsRemovableKey]
         guard let volumes = FileManager.default.mountedVolumeURLs(
@@ -17,10 +17,16 @@ actor VolumeService {
             return isRemovable
         }
     }
+    #endif
 
     func createBookmark(for url: URL) throws -> Data {
-        try url.bookmarkData(
-            options: .withSecurityScope,
+        #if os(macOS)
+        let options: URL.BookmarkCreationOptions = .withSecurityScope
+        #else
+        let options: URL.BookmarkCreationOptions = .minimalBookmark
+        #endif
+        return try url.bookmarkData(
+            options: options,
             includingResourceValuesForKeys: nil,
             relativeTo: nil
         )
@@ -28,9 +34,14 @@ actor VolumeService {
 
     func resolveBookmark(_ data: Data) throws -> URL {
         var isStale = false
+        #if os(macOS)
+        let options: URL.BookmarkResolutionOptions = .withSecurityScope
+        #else
+        let options: URL.BookmarkResolutionOptions = .withoutUI
+        #endif
         let url = try URL(
             resolvingBookmarkData: data,
-            options: .withSecurityScope,
+            options: options,
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         )

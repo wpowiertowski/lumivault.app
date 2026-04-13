@@ -44,6 +44,8 @@ struct SettingsView: View {
                 }
                 .accessibilityIdentifier("settings.tab.support")
         }
+        #if os(macOS)
         .frame(width: 540, height: 550)
+        #endif
     }
 }

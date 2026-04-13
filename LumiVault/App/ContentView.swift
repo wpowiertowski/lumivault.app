@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Query private var albums: [AlbumRecord]
@@ -12,6 +13,11 @@ struct ContentView: View {
     @State private var showingIntegrityAlert = false
     @State private var showingRepairNotice = false
     @State private var showingVolumes = false
+    @State private var showingRestoreFilePicker = false
+    @State private var showingRestoreVolumePicker = false
+    #if os(iOS)
+    @State private var showingSettings = false
+    #endif
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -33,7 +39,9 @@ struct ContentView: View {
                 EmptyStateView(message: "Select a photo to view details")
             }
         }
+        #if os(macOS)
         .frame(minWidth: 820, minHeight: 500)
+        #endif
         .navigationSplitViewStyle(.prominentDetail)
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -64,14 +72,39 @@ struct ContentView: View {
                         .frame(width: 280, height: 300)
                 }
             }
+            #if os(iOS)
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    showingSettings = true
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .accessibilityIdentifier("toolbar.settings")
+            }
+            #endif
         }
         .sheet(isPresented: $showingPhotosImport) {
             PhotosExportSheet()
         }
         .sheet(isPresented: $showingNearDuplicates) {
             NearDuplicatesView()
+                #if os(macOS)
                 .frame(width: 700, height: 500)
+                #endif
         }
+        #if os(iOS)
+        .sheet(isPresented: $showingSettings) {
+            NavigationStack {
+                SettingsView()
+                    .navigationTitle("Settings")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showingSettings = false }
+                        }
+                    }
+            }
+        }
+        #endif
         .onReceive(NotificationCenter.default.publisher(for: .showPhotosImport)) { _ in
             showingPhotosImport = true
         }
@@ -282,6 +315,8 @@ private struct ImportPromptView: View {
     @State private var isRestoring = false
     @State private var restoreError: String?
     @State private var restoreSuccess = false
+    @State private var showingRestoreFilePicker = false
+    @State private var showingRestoreVolumePicker = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -333,9 +368,9 @@ private struct ImportPromptView: View {
                     .foregroundStyle(.secondary)
 
                 HStack(spacing: 12) {
-                    Button("From File...") { restoreFromFile() }
+                    Button("From File...") { showingRestoreFilePicker = true }
                         .accessibilityIdentifier("welcome.restoreFile")
-                    Button("From Volume...") { restoreFromVolume() }
+                    Button("From Volume...") { showingRestoreVolumePicker = true }
                         .accessibilityIdentifier("welcome.restoreVolume")
                     if b2Enabled {
                         Button("From B2") { restoreFromB2() }
@@ -366,26 +401,12 @@ private struct ImportPromptView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func restoreFromFile() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.allowedContentTypes = [.json]
-        panel.message = "Select a catalog.json backup"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        performRestore(.file(url))
-    }
-
-    private func restoreFromVolume() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.message = "Select a volume containing catalog.json"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        performRestore(.volume(url))
+        .fileImporter(isPresented: $showingRestoreFilePicker, allowedContentTypes: [.json]) { result in
+            if case .success(let url) = result { performRestore(.file(url)) }
+        }
+        .fileImporter(isPresented: $showingRestoreVolumePicker, allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result { performRestore(.volume(url)) }
+        }
     }
 
     private func restoreFromB2() {

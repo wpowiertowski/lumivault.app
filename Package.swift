@@ -6,7 +6,8 @@ let package = Package(
     name: "LumiVault",
     defaultLocalization: "en",
     platforms: [
-        .macOS(.v26)
+        .macOS(.v26),
+        .iOS(.v26)
     ],
     targets: [
         .executableTarget(
@@ -15,7 +16,8 @@ let package = Package(
             exclude: [
                 "Info.plist",
                 "LumiVault.entitlements",
-                "LumiVault.Debug.entitlements"
+                "LumiVault.Debug.entitlements",
+                "LumiVault.iOS.entitlements"
             ],
             resources: [
                 .process("Resources/Assets.xcassets"),

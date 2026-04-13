@@ -11,6 +11,7 @@ struct ImportSheet: View {
     @State private var isProcessing = false
     @State private var progress: ImportProgress?
     @State private var isDragTargeted = false
+    @State private var showingFilePicker = false
 
     private var hasB2: Bool {
         UserDefaults.standard.data(forKey: B2Credentials.defaultsKey)
@@ -42,7 +43,7 @@ struct ImportSheet: View {
                     Text("Connect an external volume or configure Backblaze B2 in Settings before importing.")
                 } actions: {
                     Button("Open Settings...") {
-                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                        PlatformHelpers.openSettingsWindow()
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -60,7 +61,7 @@ struct ImportSheet: View {
                 Spacer()
 
                 if hasStorage {
-                    Button("Choose Files...") { chooseFiles() }
+                    Button("Choose Files...") { showingFilePicker = true }
                         .accessibilityIdentifier("import.chooseFiles")
 
                     Button("Import \(selectedURLs.count) Photos") { startImport() }
@@ -72,6 +73,14 @@ struct ImportSheet: View {
         }
         .padding(24)
         .frame(width: 480, height: 360)
+        .fileImporter(
+            isPresented: $showingFilePicker,
+            allowedContentTypes: [.image, .rawImage],
+            allowsMultipleSelection: true
+        ) { result in
+            guard case .success(let urls) = result else { return }
+            selectedURLs = urls
+        }
     }
 
     private var dropZone: some View {
@@ -102,17 +111,6 @@ struct ImportSheet: View {
             } isTargeted: { targeted in
                 isDragTargeted = targeted
             }
-    }
-
-    private func chooseFiles() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = true
-        panel.allowedContentTypes = [.image, .rawImage]
-
-        if panel.runModal() == .OK {
-            selectedURLs = panel.urls
-        }
     }
 
     private func startImport() {

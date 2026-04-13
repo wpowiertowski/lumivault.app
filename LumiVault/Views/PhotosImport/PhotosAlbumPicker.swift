@@ -134,8 +134,8 @@ struct PhotosAlbumPicker: View {
         } description: {
             Text("Open System Settings > Privacy & Security > Photos to grant LumiVault access.")
         } actions: {
-            Button("Open System Settings") {
-                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Photos")!)
+            Button("Open Settings") {
+                PlatformHelpers.openPhotosPrivacySettings()
             }
         }
     }

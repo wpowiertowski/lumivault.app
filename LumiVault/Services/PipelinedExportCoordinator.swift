@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
-import AppKit
 import CoreImage
+import ImageIO
 import os
 
 /// Wrapper to pass MainActor-isolated values into @MainActor Task closures
@@ -653,7 +653,7 @@ class PipelinedExportCoordinator: @unchecked Sendable {
         // Save
         do {
             try modelContext.save()
-            let catalogPath = NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
+            let catalogPath = PlatformHelpers.expandTilde(UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog)
             try await catalogService.save(to: URL(fileURLWithPath: catalogPath))
         } catch {
             progress.errors.append("Catalog save failed: \(error.localizedDescription)")
@@ -671,11 +671,11 @@ class PipelinedExportCoordinator: @unchecked Sendable {
         maxDimension: MaxDimension,
         staging: URL
     ) -> ExportedAsset {
-        guard let image = NSImage(contentsOf: asset.fileURL),
-              let srcRep = image.representations.first else { return asset }
+        guard let source = CGImageSourceCreateWithURL(asset.fileURL as CFURL, nil),
+              let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return asset }
 
-        let pixelWidth = CGFloat(srcRep.pixelsWide)
-        let pixelHeight = CGFloat(srcRep.pixelsHigh)
+        let pixelWidth = CGFloat(cgImage.width)
+        let pixelHeight = CGFloat(cgImage.height)
 
         var targetWidth = pixelWidth
         var targetHeight = pixelHeight
@@ -693,77 +693,56 @@ class PipelinedExportCoordinator: @unchecked Sendable {
 
         guard needsResize || needsConversion else { return asset }
 
-        guard let bitmapRep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: Int(targetWidth),
-            pixelsHigh: Int(targetHeight),
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ) else { return asset }
-
-        bitmapRep.size = NSSize(width: targetWidth, height: targetHeight)
-
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmapRep)
-        image.draw(in: NSRect(x: 0, y: 0, width: targetWidth, height: targetHeight),
-                   from: NSRect(x: 0, y: 0, width: image.size.width, height: image.size.height),
-                   operation: .copy, fraction: 1.0)
-        NSGraphicsContext.restoreGraphicsState()
-
-        let outputData: Data?
-        let outputFilename: String
-        let stem = (asset.originalFilename as NSString).deletingPathExtension
-
-        switch format {
-        case .jpeg:
-            outputData = bitmapRep.representation(
-                using: .jpeg,
-                properties: [.compressionFactor: quality]
-            )
-            outputFilename = stem + ".jpg"
-        case .heif:
-            if let ciImage = CIImage(bitmapImageRep: bitmapRep) {
-                let context = CIContext()
-                let colorSpace = ciImage.colorSpace ?? CGColorSpaceCreateDeviceRGB()
-                let tempURL = staging.appendingPathComponent("heif-\(UUID().uuidString).heic")
-                let options: [CIImageRepresentationOption: Any] = [
-                    CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): quality
-                ]
-                try? context.writeHEIFRepresentation(of: ciImage,
-                                                     to: tempURL,
-                                                     format: .RGBA8,
-                                                     colorSpace: colorSpace,
-                                                     options: options)
-                outputData = try? Data(contentsOf: tempURL)
-                try? FileManager.default.removeItem(at: tempURL)
-            } else {
-                outputData = nil
-            }
-            outputFilename = stem + ".heic"
-        case .original:
-            outputData = bitmapRep.representation(using: .png, properties: [:])
-            outputFilename = asset.originalFilename
+        var ciImage = CIImage(cgImage: cgImage)
+        if needsResize {
+            let scaleX = targetWidth / pixelWidth
+            let scaleY = targetHeight / pixelHeight
+            ciImage = ciImage.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
         }
 
-        guard let data = outputData else { return asset }
+        let context = CIContext()
+        let colorSpace = ciImage.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+        let stem = (asset.originalFilename as NSString).deletingPathExtension
 
         let convertedDir = staging.appendingPathComponent("converted", isDirectory: true)
         try? FileManager.default.createDirectory(at: convertedDir, withIntermediateDirectories: true)
-        let outputURL = convertedDir.appendingPathComponent(outputFilename)
-        do {
-            try data.write(to: outputURL, options: .atomic)
-            return ExportedAsset(
-                fileURL: outputURL,
-                originalFilename: outputFilename,
-                creationDate: asset.creationDate
-            )
-        } catch {
-            return asset
+
+        let outputFilename: String
+        let outputURL: URL
+
+        switch format {
+        case .jpeg:
+            outputFilename = stem + ".jpg"
+            outputURL = convertedDir.appendingPathComponent(outputFilename)
+            let options: [CIImageRepresentationOption: Any] = [
+                CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): quality
+            ]
+            guard let _ = try? context.writeJPEGRepresentation(of: ciImage, to: outputURL, colorSpace: colorSpace, options: options) else {
+                return asset
+            }
+
+        case .heif:
+            outputFilename = stem + ".heic"
+            outputURL = convertedDir.appendingPathComponent(outputFilename)
+            let options: [CIImageRepresentationOption: Any] = [
+                CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): quality
+            ]
+            guard let _ = try? context.writeHEIFRepresentation(of: ciImage, to: outputURL, format: .RGBA8, colorSpace: colorSpace, options: options) else {
+                return asset
+            }
+
+        case .original:
+            outputFilename = asset.originalFilename
+            outputURL = convertedDir.appendingPathComponent(outputFilename)
+            guard let _ = try? context.writePNGRepresentation(of: ciImage, to: outputURL, format: .RGBA8, colorSpace: colorSpace) else {
+                return asset
+            }
         }
+
+        return ExportedAsset(
+            fileURL: outputURL,
+            originalFilename: outputFilename,
+            creationDate: asset.creationDate
+        )
     }
 }

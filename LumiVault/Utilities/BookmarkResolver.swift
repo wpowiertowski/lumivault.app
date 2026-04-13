@@ -3,8 +3,13 @@ import Foundation
 enum BookmarkResolver {
     /// Create a security-scoped bookmark for the given URL.
     nonisolated static func createBookmark(for url: URL) throws -> Data {
-        try url.bookmarkData(
-            options: .withSecurityScope,
+        #if os(macOS)
+        let options: URL.BookmarkCreationOptions = .withSecurityScope
+        #else
+        let options: URL.BookmarkCreationOptions = .minimalBookmark
+        #endif
+        return try url.bookmarkData(
+            options: options,
             includingResourceValuesForKeys: [.volumeNameKey, .volumeUUIDStringKey],
             relativeTo: nil
         )
@@ -13,9 +18,14 @@ enum BookmarkResolver {
     /// Resolve a security-scoped bookmark, returning the URL and whether it's stale.
     nonisolated static func resolve(_ bookmarkData: Data) throws -> (url: URL, isStale: Bool) {
         var isStale = false
+        #if os(macOS)
+        let resolveOptions: URL.BookmarkResolutionOptions = .withSecurityScope
+        #else
+        let resolveOptions: URL.BookmarkResolutionOptions = .withoutUI
+        #endif
         let url = try URL(
             resolvingBookmarkData: bookmarkData,
-            options: .withSecurityScope,
+            options: resolveOptions,
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         )

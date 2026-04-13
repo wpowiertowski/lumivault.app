@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct GeneralSettingsView: View {
     @Environment(SyncCoordinator.self) private var syncCoordinator
@@ -8,6 +9,9 @@ struct GeneralSettingsView: View {
     @AppStorage("b2Enabled") private var b2Enabled = false
     @State private var isRestoring = false
     @State private var restoreResult: RestoreResult?
+    @State private var showingCatalogBrowser = false
+    @State private var showingRestoreFilePicker = false
+    @State private var showingRestoreVolumePicker = false
 
     var body: some View {
         Form {
@@ -17,7 +21,7 @@ struct GeneralSettingsView: View {
                     .accessibilityIdentifier("general.catalogPath")
 
                 HStack {
-                    Button("Browse...") { chooseCatalogPath() }
+                    Button("Browse...") { showingCatalogBrowser = true }
                         .accessibilityIdentifier("general.browse")
                     Spacer()
                     Button("Detect Existing") { detectExisting() }
@@ -27,9 +31,9 @@ struct GeneralSettingsView: View {
 
             Section("Restore Catalog") {
                 HStack(spacing: 12) {
-                    Button("From File...") { restoreFromFile() }
+                    Button("From File...") { showingRestoreFilePicker = true }
                         .accessibilityIdentifier("general.restoreFile")
-                    Button("From Volume...") { restoreFromVolume() }
+                    Button("From Volume...") { showingRestoreVolumePicker = true }
                         .accessibilityIdentifier("general.restoreVolume")
                     if b2Enabled {
                         Button("From B2") { restoreFromB2() }
@@ -76,40 +80,22 @@ struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
-    }
-
-    private func chooseCatalogPath() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.allowedContentTypes = [.json]
-        if panel.runModal() == .OK, let url = panel.url {
-            catalogPath = url.path
+        .fileImporter(isPresented: $showingCatalogBrowser, allowedContentTypes: [.json]) { result in
+            if case .success(let url) = result { catalogPath = url.path }
+        }
+        .fileImporter(isPresented: $showingRestoreFilePicker, allowedContentTypes: [.json]) { result in
+            if case .success(let url) = result { performRestore(.file(url)) }
+        }
+        .fileImporter(isPresented: $showingRestoreVolumePicker, allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result { performRestore(.volume(url)) }
         }
     }
 
     private func detectExisting() {
-        let defaultPath = NSString("~/.lumivault/catalog.json").expandingTildeInPath
+        let defaultPath = PlatformHelpers.expandTilde("~/.lumivault/catalog.json")
         if FileManager.default.fileExists(atPath: defaultPath) {
             catalogPath = defaultPath
         }
-    }
-
-    private func restoreFromFile() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.allowedContentTypes = [.json]
-        panel.message = "Select a catalog.json backup"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        performRestore(.file(url))
-    }
-
-    private func restoreFromVolume() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.message = "Select a volume containing catalog.json"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        performRestore(.volume(url))
     }
 
     private func restoreFromB2() {
