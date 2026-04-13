@@ -22,7 +22,7 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  build-macos:
     name: Build (macOS)
     runs-on: macos-26
 
@@ -56,16 +56,52 @@ jobs:
 
       - name: Build macOS target
         run: |
+          xcodegen generate
           xcodebuild \
+            -project LumiVault.xcodeproj \
             -scheme LumiVault \
             -destination "generic/platform=macOS" \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             build
 
-  test:
-    name: Unit Tests
+  build-ipados:
+    name: Build (iPadOS)
     runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Cache SwiftPM and SourcePackages
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.swiftpm
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/Developer/Xcode/DerivedData/*/SourcePackages
+          key: ${{ runner.os }}-swiftpm-ipados-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-ipados-
+            ${{ runner.os }}-swiftpm-
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build iPadOS target
+        run: |
+          xcodebuild \
+            -project LumiVault.xcodeproj \
+            -scheme LumiVault-iPadOS \
+            -destination "generic/platform=iOS" \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+  test:
+    name: Unit Tests (macOS)
+    runs-on: macos-26
+    needs: [build-macos]
 
     steps:
       - name: Checkout
