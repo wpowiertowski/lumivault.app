@@ -1,9 +1,11 @@
 import SwiftUI
+import SwiftData
 import MapKit
 
 struct MetadataInspector: View {
     let image: ImageRecord
     var exif: EXIFData?
+    @Query private var volumes: [VolumeRecord]
 
     var body: some View {
         ScrollView {
@@ -80,7 +82,19 @@ struct MetadataInspector: View {
                 // Storage locations
                 InspectorSection(title: "Storage (\(image.storageLocations.count))") {
                     ForEach(image.storageLocations, id: \.volumeID) { location in
-                        InspectorRow(label: location.volumeID, value: location.relativePath)
+                        VStack(alignment: .leading, spacing: 1) {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(isVolumeConnected(location.volumeID) ? .green : .secondary)
+                                    .frame(width: 8, height: 8)
+                                Text(volumeLabel(for: location.volumeID))
+                                    .font(Constants.Design.monoCaption)
+                            }
+                            Text(location.relativePath)
+                                .font(Constants.Design.monoCaption)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(2)
+                        }
                     }
                 }
 
@@ -183,6 +197,20 @@ struct MetadataInspector: View {
         case .generated: "Generated"
         case .failed: "Failed"
         }
+    }
+
+    private func isVolumeConnected(_ volumeID: String) -> Bool {
+        guard let volume = volumes.first(where: { $0.volumeID == volumeID }) else {
+            return false
+        }
+        return (try? BookmarkResolver.resolveAndAccess(volume.bookmarkData)).map {
+            $0.stopAccessingSecurityScopedResource()
+            return true
+        } ?? false
+    }
+
+    private func volumeLabel(for volumeID: String) -> String {
+        volumes.first(where: { $0.volumeID == volumeID })?.label ?? volumeID
     }
 
     private func hasExifContent(_ exif: EXIFData) -> Bool {

@@ -6,17 +6,47 @@ struct ImportSheet: View {
     let album: AlbumRecord
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Query private var volumes: [VolumeRecord]
     @State private var selectedURLs: [URL] = []
     @State private var isProcessing = false
     @State private var progress: ImportProgress?
     @State private var isDragTargeted = false
+
+    private var hasB2: Bool {
+        UserDefaults.standard.data(forKey: B2Credentials.defaultsKey)
+            .flatMap { try? JSONDecoder().decode(B2Credentials.self, from: $0) } != nil
+    }
+
+    private var hasConnectedVolume: Bool {
+        volumes.contains { volume in
+            (try? BookmarkResolver.resolveAndAccess(volume.bookmarkData)).map {
+                $0.stopAccessingSecurityScopedResource()
+                return true
+            } ?? false
+        }
+    }
+
+    private var hasStorage: Bool {
+        hasB2 || hasConnectedVolume
+    }
 
     var body: some View {
         VStack(spacing: 20) {
             Text("Import Photos")
                 .font(Constants.Design.monoTitle3)
 
-            if let progress {
+            if !hasStorage {
+                ContentUnavailableView {
+                    Label("No Storage Configured", systemImage: "externaldrive.trianglebadge.exclamationmark")
+                } description: {
+                    Text("Connect an external volume or configure Backblaze B2 in Settings before importing.")
+                } actions: {
+                    Button("Open Settings...") {
+                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            } else if let progress {
                 ImportProgressView(progress: progress)
             } else {
                 dropZone
@@ -29,13 +59,15 @@ struct ImportSheet: View {
 
                 Spacer()
 
-                Button("Choose Files...") { chooseFiles() }
-                    .accessibilityIdentifier("import.chooseFiles")
+                if hasStorage {
+                    Button("Choose Files...") { chooseFiles() }
+                        .accessibilityIdentifier("import.chooseFiles")
 
-                Button("Import \(selectedURLs.count) Photos") { startImport() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(selectedURLs.isEmpty || isProcessing)
-                    .accessibilityIdentifier("import.importButton")
+                    Button("Import \(selectedURLs.count) Photos") { startImport() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(selectedURLs.isEmpty || isProcessing)
+                        .accessibilityIdentifier("import.importButton")
+                }
             }
         }
         .padding(24)

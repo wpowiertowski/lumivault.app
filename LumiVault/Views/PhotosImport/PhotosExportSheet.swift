@@ -18,8 +18,27 @@ struct PhotosExportSheet: View {
     @State private var exportTask: Task<Void, Never>?
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @Environment(\.encryptionService) private var encryptionService
+    @Query private var volumes: [VolumeRecord]
 
     private let catalogService = CatalogService()
+
+    private var hasB2: Bool {
+        UserDefaults.standard.data(forKey: B2Credentials.defaultsKey)
+            .flatMap { try? JSONDecoder().decode(B2Credentials.self, from: $0) } != nil
+    }
+
+    private var connectedVolumes: [VolumeRecord] {
+        volumes.filter { volume in
+            (try? BookmarkResolver.resolveAndAccess(volume.bookmarkData)).map {
+                $0.stopAccessingSecurityScopedResource()
+                return true
+            } ?? false
+        }
+    }
+
+    private var hasStorage: Bool {
+        hasB2 || !connectedVolumes.isEmpty
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,15 +50,19 @@ struct PhotosExportSheet: View {
 
             // Content
             Group {
-                switch step {
-                case .pickAlbum:
-                    albumPickerStep
-                case .configure:
-                    configureStep
-                case .exporting:
-                    exportingStep
-                case .complete:
-                    completeStep
+                if !hasStorage && step == .pickAlbum {
+                    storageRequiredView
+                } else {
+                    switch step {
+                    case .pickAlbum:
+                        albumPickerStep
+                    case .configure:
+                        configureStep
+                    case .exporting:
+                        exportingStep
+                    case .complete:
+                        completeStep
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -59,10 +82,12 @@ struct PhotosExportSheet: View {
 
                 switch step {
                 case .pickAlbum:
-                    Button("Next") { goToSettings() }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(selectedAlbumId == nil)
-                        .accessibilityIdentifier("export.next")
+                    if hasStorage {
+                        Button("Next") { goToSettings() }
+                            .keyboardShortcut(.defaultAction)
+                            .disabled(selectedAlbumId == nil)
+                            .accessibilityIdentifier("export.next")
+                    }
 
                 case .configure:
                     Button("Back") { step = .pickAlbum }
@@ -87,6 +112,19 @@ struct PhotosExportSheet: View {
     }
 
     // MARK: - Steps
+
+    private var storageRequiredView: some View {
+        ContentUnavailableView {
+            Label("No Storage Configured", systemImage: "externaldrive.trianglebadge.exclamationmark")
+        } description: {
+            Text("Connect an external volume or configure Backblaze B2 in Settings before importing.")
+        } actions: {
+            Button("Open Settings...") {
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+    }
 
     private var albumPickerStep: some View {
         VStack(alignment: .leading, spacing: 8) {
