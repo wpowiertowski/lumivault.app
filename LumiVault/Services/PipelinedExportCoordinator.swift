@@ -628,7 +628,16 @@ class PipelinedExportCoordinator: @unchecked Sendable {
                 // Stop processing if cancelled — stream may still drain buffered items
                 if Task.isCancelled { continue }
 
-                guard let snap = item.snapshot else { continue }
+                guard let snap = item.snapshot else {
+                    // Item has no snapshot — hash phase failed or was skipped.
+                    // The error should already be in progress.errors from the hash phase,
+                    // but track the drop so the completion screen can reconcile counts.
+                    progress.filesDropped += 1
+                    if item.error == nil {
+                        progress.errors.append("Import failed: \(item.originalFilename) — unable to process file")
+                    }
+                    continue
+                }
 
                 if let encSize = item.encryptedSize {
                     encryptedSizes[snap.sha256] = encSize
@@ -663,6 +672,10 @@ class PipelinedExportCoordinator: @unchecked Sendable {
                     catalogItemCount += 1
                     progress.filesCataloged = catalogItemCount
                     progress.currentFilename = snap.filename
+                } else {
+                    // SwiftData model lookup failed — record was inserted but can't be retrieved
+                    progress.filesDropped += 1
+                    progress.errors.append("Import failed: \(snap.filename) — could not save to library")
                 }
             }
 

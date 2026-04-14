@@ -34,9 +34,9 @@ struct SidebarView: View {
 
     private func sortedAlbums(for year: String) -> [AlbumRecord] {
         (albumsByYear[year] ?? []).sorted {
-            if $0.month != $1.month { return $0.month < $1.month }
-            if $0.day != $1.day { return $0.day < $1.day }
-            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            if $0.month != $1.month { return $0.month > $1.month }
+            if $0.day != $1.day { return $0.day > $1.day }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending
         }
     }
 

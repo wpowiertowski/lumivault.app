@@ -18,7 +18,7 @@
 | High Value | DeletionServiceTests | 4 | File removal from volumes, PAR2 companion cleanup, unmounted volume skip, bulk delete. Real FS operations. |
 | High Value | ReconciliationDiffTests | 5 | B2 diff logic: matched, dangling B2 IDs, orphans, PAR2 skip, mixed scenarios. Pure logic, well-structured. |
 | Medium Value | B2ServiceHelperTests | 7 | SHA-1 known test vectors, HTTP response validation for success (200, 299) and error (401, 500) status codes |
-| Medium Value | ExportProgressTests | 5 | Fraction calculation: empty state, mid-phase progress, complete, PAR2 sub-progress, single active phase. Note: progress model is shared between old ExportCoordinator and new PipelinedExportCoordinator — tests remain valid for both. |
+| Medium Value | ExportProgressTests | 5 | Fraction calculation: empty state, mid-phase progress, complete, PAR2 sub-progress, single active phase. Note: progress model is shared between old ExportCoordinator and new PipelinedExportCoordinator — tests remain valid for both. `filesDropped` counter tracks items silently lost in the pipeline (no snapshot or model lookup failure). |
 | Medium Value | CatalogBackupServiceTests | 5 | Volume backup write + decode, error on bad path, nil mount skip, file restore round-trip, missing catalog error |
 | Medium Value | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture hash verification |
 | Medium Value | DeduplicationServiceTests | 3 | Unique file detection, exact SHA-256 match, returned hash + size verification (using real JPEG fixtures) |
@@ -186,13 +186,13 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 | # | Action | Expected |
 | --- | -------- | ---------- |
 | 2.1 | Menu bar > File > Import from Photos | Photos album picker sheet appears |
-| 2.2 | Verify album list | Albums from Photos.app displayed with photo counts, sorted alphabetically |
+| 2.2 | Verify album list | Albums from Photos.app displayed with image-only counts (videos excluded), sorted alphabetically |
 | 2.3 | Use search field | Filters albums by name in real-time |
 | 2.4 | Change sort order (name/count/date) | Album list re-sorts correctly |
 | 2.5 | Select an album, click "Next" | Export settings screen appears |
 | 2.6 | Configure: PAR2 on, JPEG conversion off, near-dupe detection on | Settings reflected in summary |
 | 2.7 | Click "Export" | Progress bar appears with phase labels (Exporting, Hashing, PAR2, etc.). Pipeline runs phases concurrently — e.g., early images may be hashing while later images still export. |
-| 2.8 | Wait for completion | "Complete" screen shows count of exported, deduplicated, skipped images. All phase counters (Converted, Hashed, PAR2, Copied, Uploaded) reflect final totals. |
+| 2.8 | Wait for completion | "Complete" screen shows images added to album (`filesCataloged`) as primary count, plus duplicates skipped and any files that failed to import (`filesDropped`). Copied/Uploaded counts shown when applicable. Orange warning icon if any files dropped or errors occurred. |
 | 2.9 | Check sidebar | New album appears under correct year/month/day |
 | 2.10 | Click album in sidebar | Photo grid shows all imported thumbnails |
 

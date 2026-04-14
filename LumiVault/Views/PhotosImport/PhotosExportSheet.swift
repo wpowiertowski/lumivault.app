@@ -243,17 +243,24 @@ struct PhotosExportSheet: View {
 
     private var completeStep: some View {
         VStack(spacing: 16) {
-            Image(systemName: progress.errors.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(progress.errors.isEmpty ? .green : .orange)
+            let hasErrors = !progress.errors.isEmpty
+            let hasDropped = progress.filesDropped > 0
 
-            Text(progress.errors.isEmpty ? "Export Complete" : "Export Completed with Errors")
+            Image(systemName: hasErrors || hasDropped ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(hasErrors || hasDropped ? .orange : .green)
+
+            Text(hasErrors || hasDropped ? "Export Completed with Issues" : "Export Complete")
                 .font(Constants.Design.monoTitle3)
 
             VStack(spacing: 4) {
-                Text("\(progress.filesHashed) files processed")
+                Text("\(progress.filesCataloged) images added to album")
                 if progress.filesDeduplicated > 0 {
                     Text("\(progress.filesDeduplicated) duplicates skipped")
+                }
+                if progress.filesDropped > 0 {
+                    Text("\(progress.filesDropped) failed to import")
+                        .foregroundStyle(.red)
                 }
                 if progress.filesCopied > 0 {
                     Text("\(progress.filesCopied) copied to volumes")

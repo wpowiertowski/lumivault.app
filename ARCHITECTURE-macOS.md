@@ -309,7 +309,16 @@ the `.photo` resource (unmodified original), while using the original resource's
 to avoid generic names like `FullSizeRender.jpeg`.
 
 **Album picker** supports search (`.searchable`) and sort (by name, date, or photo count
-with ascending/descending toggle).
+with ascending/descending toggle). Asset counts reflect images only (`mediaType == .image`),
+matching the export filter — videos and other media types are excluded from counts to
+prevent misleading sync status indicators.
+
+**Completion reporting**: The export completion screen shows `filesCataloged` (images
+actually added to the album) as the primary count, plus a breakdown of duplicates
+skipped and any files that failed to import (`filesDropped`). Items that are silently
+dropped in the pipeline (e.g., hash failures producing no snapshot, or SwiftData model
+lookup failures in the catalog sink) are tracked and surfaced as errors rather than
+silently lost.
 
 ### 5.4 Backblaze B2 Cloud Upload
 
@@ -583,8 +592,9 @@ LumiVault/
 │
 ├── Views/
 │   ├── Sidebar/
-│   │   ├── SidebarView.swift            // Year-grouped album list + context menus (verify, delete)
+│   │   ├── SidebarView.swift            // Year-grouped album list (descending) + context menus (verify, delete)
 │   │   ├── AlbumDeletionSheet.swift     // Deletion progress sheet
+│   │   ├── AlbumExportSheet.swift       // Album export to folder
 │   │   └── VolumeListView.swift         // Connected volumes status
 │   ├── Grid/
 │   │   ├── PhotoGridView.swift          // LazyVGrid with context menus (verify, delete)
@@ -599,7 +609,9 @@ LumiVault/
 │   │   ├── PhotosAlbumPicker.swift      // Photos library album browser
 │   │   ├── ExportSettingsView.swift     // Export configuration form
 │   │   └── PhotosExportSheet.swift      // Multi-step export wizard
+│   ├── NearDuplicatesView.swift  // Near-duplicate pairs browser
 │   └── Settings/
+│       ├── SettingsView.swift            // Settings tab container
 │       ├── GeneralSettingsView.swift     // Catalog path, redundancy %, restore
 │       ├── VolumesSettingsView.swift     // Manage disks + post-add sync
 │       ├── VolumeSyncSheet.swift         // Sync existing catalog to new volume
