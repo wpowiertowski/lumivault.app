@@ -4,7 +4,12 @@ import CryptoKit
 actor B2Service {
     private var authorization: B2Authorization?
     private var uploadURL: B2UploadURL?
-    private let session = URLSession.shared
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 120
+        return URLSession(configuration: config)
+    }()
 
     // MARK: - Authorize
 
@@ -88,31 +93,33 @@ actor B2Service {
         bucketId: String,
         credentials: B2Credentials
     ) async throws -> Bool {
-        if authorization == nil {
-            try await authorize(credentials: credentials)
+        try await withRetry(credentials: credentials) {
+            if self.authorization == nil {
+                try await self.authorize(credentials: credentials)
+            }
+
+            guard let auth = self.authorization else { throw B2Error.notAuthorized }
+
+            let url = URL(string: "\(auth.apiURL)/b2api/v2/b2_list_file_names")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue(auth.authorizationToken, forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            let body: [String: Any] = [
+                "bucketId": bucketId,
+                "prefix": fileName,
+                "maxFileCount": 1
+            ]
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+            let (data, response) = try await self.session.data(for: request)
+            try Self.checkResponse(response, data: data)
+
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let files = json?["files"] as? [[String: Any]] ?? []
+            return files.contains { ($0["fileName"] as? String) == fileName }
         }
-
-        guard let auth = authorization else { throw B2Error.notAuthorized }
-
-        let url = URL(string: "\(auth.apiURL)/b2api/v2/b2_list_file_names")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue(auth.authorizationToken, forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body: [String: Any] = [
-            "bucketId": bucketId,
-            "prefix": fileName,
-            "maxFileCount": 1
-        ]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await session.data(for: request)
-        try Self.checkResponse(response, data: data)
-
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let files = json?["files"] as? [[String: Any]] ?? []
-        return files.contains { ($0["fileName"] as? String) == fileName }
     }
 
     // MARK: - List All Files
@@ -241,25 +248,57 @@ actor B2Service {
         sha256: String,
         credentials: B2Credentials
     ) async throws -> String {
-        if authorization == nil {
-            try await authorize(credentials: credentials)
-        }
-
-        if uploadURL == nil {
-            try await getUploadURL(bucketId: credentials.bucketId)
-        }
-
         let fileData = try Data(contentsOf: fileURL)
         let sha1 = sha1Hash(of: fileData)
         let encodedPath = remotePath.addingPercentEncoding(withAllowedCharacters: Self.b2AllowedCharacters) ?? remotePath
 
-        let result = try await uploadFile(
-            fileData: fileData,
-            fileName: encodedPath,
-            sha1: sha1
-        )
+        return try await withRetry(credentials: credentials) {
+            if self.authorization == nil {
+                try await self.authorize(credentials: credentials)
+            }
+            try await self.getUploadURL(bucketId: credentials.bucketId)
 
-        return result.fileId
+            let result = try await self.uploadFile(
+                fileData: fileData,
+                fileName: encodedPath,
+                sha1: sha1
+            )
+            return result.fileId
+        }
+    }
+
+    // MARK: - Retry
+
+    private func withRetry<T>(
+        maxAttempts: Int = 4,
+        credentials: B2Credentials,
+        operation: () async throws -> T
+    ) async throws -> T {
+        var lastError: Error?
+
+        for attempt in 0..<maxAttempts {
+            if attempt > 0 {
+                let delay = UInt64(min(pow(2.0, Double(attempt - 1)), 4)) * 500_000_000
+                try await Task.sleep(nanoseconds: delay)
+            }
+
+            do {
+                return try await operation()
+            } catch let error as B2Error where error.isRetryable {
+                lastError = error
+                if case .httpError(statusCode: 401, _) = error {
+                    authorization = nil
+                }
+                // Re-authorize for next attempt
+                if authorization == nil {
+                    try? await authorize(credentials: credentials)
+                }
+            } catch let error as URLError where error.isTransient {
+                lastError = error
+            }
+        }
+
+        throw lastError!
     }
 
     // MARK: - Helpers
@@ -294,11 +333,24 @@ actor B2Service {
 
     // MARK: - Errors
 
-    enum B2Error: Error, LocalizedError {
+    enum B2Error: Error, LocalizedError, Sendable {
         case notAuthorized
         case noUploadURL
         case invalidResponse
         case httpError(statusCode: Int, message: String?)
+
+        var isRetryable: Bool {
+            switch self {
+            case .httpError(let statusCode, _):
+                // 401: expired token, 408: timeout, 429: rate limit, 5xx: server errors
+                statusCode == 401 || statusCode == 408 || statusCode == 429
+                    || (500...599).contains(statusCode)
+            case .invalidResponse:
+                true
+            default:
+                false
+            }
+        }
 
         var errorDescription: String? {
             switch self {
@@ -324,6 +376,18 @@ actor B2Service {
                     "B2 error \(statusCode)\(message.map { ": \($0)" } ?? ""). Check your B2 settings and try again."
                 }
             }
+        }
+    }
+}
+
+extension URLError {
+    var isTransient: Bool {
+        switch code {
+        case .timedOut, .networkConnectionLost, .notConnectedToInternet,
+             .cannotConnectToHost, .dnsLookupFailed:
+            true
+        default:
+            false
         }
     }
 }
