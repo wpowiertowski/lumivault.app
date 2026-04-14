@@ -7,7 +7,7 @@ import AppKit
 
 // MARK: - Catalog Tests
 
-@Suite
+@Suite(.tags(.catalog))
 @MainActor
 struct CatalogTests {
     @Test func catalogRoundTripFromFixtures() throws {
@@ -144,7 +144,7 @@ struct CatalogTests {
 
 // MARK: - CatalogService Merge Tests
 
-@Suite
+@Suite(.tags(.catalog))
 @MainActor
 struct CatalogServiceMergeTests {
     @Test func mergeDisjointCatalogs() async {
@@ -253,7 +253,7 @@ struct CatalogServiceMergeTests {
 
 // MARK: - HasherService Tests
 
-@Suite @MainActor
+@Suite(.tags(.hashing)) @MainActor
 struct HasherServiceTests {
     @Test func sha256MatchesFixtureHashes() async throws {
         let service = HasherService()
@@ -310,7 +310,7 @@ struct HasherServiceTests {
 
 // MARK: - RedundancyService Tests
 
-@Suite @MainActor
+@Suite(.tags(.par2)) @MainActor
 struct RedundancyServiceTests {
     @Test func generateAndVerifyPAR2ForAllFixtures() async throws {
         let service = RedundancyService()
@@ -591,7 +591,7 @@ struct RedundancyServiceTests {
 
 // MARK: - PerceptualHash Tests
 
-@Suite @MainActor
+@Suite(.tags(.deduplication)) @MainActor
 struct PerceptualHashTests {
     @Test func hammingDistanceIdentical() {
         let hash = Data([0x00, 0xFF, 0xAA, 0x55, 0x12, 0x34, 0x56, 0x78])
@@ -646,7 +646,7 @@ struct PerceptualHashTests {
 
 // MARK: - IntegrityService Tests
 
-@Suite
+@Suite(.tags(.integrity))
 struct IntegrityServiceTests {
     // Fixture constants (inlined to avoid @MainActor requirement from TestFixtures)
     private static let fixtureSpecs: [(sha256: String, name: String, size: Int, albumPath: String)] = [
@@ -910,7 +910,7 @@ struct IntegrityServiceTests {
 
 // MARK: - SwiftData Model Tests
 
-@Suite
+@Suite(.tags(.dataModels))
 @MainActor
 struct SwiftDataModelTests {
     private func makeContainer() throws -> ModelContainer {
@@ -979,7 +979,7 @@ struct SwiftDataModelTests {
 
 // MARK: - Reconciliation B2 Diff Tests
 
-@Suite @MainActor
+@Suite(.tags(.reconciliation)) @MainActor
 struct ReconciliationDiffTests {
     @Test func diffB2AllMatched() {
         let specs = Array(TestFixtures.files.prefix(3))
@@ -1059,7 +1059,7 @@ struct ReconciliationDiffTests {
 
 // MARK: - Volume Scan Tests
 
-@Suite
+@Suite(.tags(.reconciliation))
 @MainActor
 struct VolumeScanTests {
     @Test func scanDetectsDanglingLocation() async {
@@ -1157,7 +1157,7 @@ struct VolumeScanTests {
 
 // MARK: - Volume Sync (Add Second Storage) Tests
 
-@Suite @MainActor
+@Suite(.tags(.volumeSync)) @MainActor
 struct VolumeSyncToNewVolumeTests {
     /// End-to-end: materialize all 8 fixtures on volume A, sync to volume B, verify hashes.
     @Test func syncAllFixturesFromVolumeAToVolumeB() async throws {
@@ -1308,7 +1308,7 @@ struct VolumeSyncToNewVolumeTests {
 
 // MARK: - Catalog Removal Tests
 
-@Suite @MainActor
+@Suite(.tags(.catalog)) @MainActor
 struct CatalogRemovalTests {
     @Test func removeAlbumFromCatalog() async {
         let service = CatalogService()
@@ -1369,7 +1369,7 @@ struct CatalogRemovalTests {
 
 // MARK: - Deletion Service Tests
 
-@Suite @MainActor
+@Suite(.tags(.deletion)) @MainActor
 struct DeletionServiceTests {
     @Test func deleteRemovesFilesFromVolume() async throws {
         let fm = FileManager.default
@@ -1575,7 +1575,7 @@ struct DeletionServiceTests {
 
 // MARK: - Encryption Service Tests
 
-@Suite
+@Suite(.tags(.encryption))
 struct EncryptionServiceTests {
     private static let testPassphrase = "lumivault-test-passphrase"
     private static let testSalt = Data(repeating: 0x42, count: 32)
@@ -1860,7 +1860,7 @@ struct EncryptionServiceTests {
 
 // MARK: - B2 Service Helper Tests
 
-@Suite
+@Suite(.tags(.b2Cloud))
 struct B2ServiceHelperTests {
     @Test func sha1HashKnownValue() async {
         let service = B2Service()
@@ -1936,7 +1936,7 @@ struct B2ServiceHelperTests {
 
 // MARK: - Export Progress Tests
 
-@Suite @MainActor
+@Suite(.tags(.exportProgress)) @MainActor
 struct ExportProgressTests {
     @Test func fractionZeroWhenEmpty() {
         let progress = ExportProgress()
@@ -2016,7 +2016,7 @@ struct ExportProgressTests {
 
 // MARK: - Catalog Backup Service Tests
 
-@Suite @MainActor
+@Suite(.tags(.catalog)) @MainActor
 struct CatalogBackupServiceTests {
     @Test func backupToVolumeWritesCatalogJSON() async throws {
         let fm = FileManager.default
@@ -2109,7 +2109,7 @@ struct CatalogBackupServiceTests {
 
 // MARK: - Deduplication Service Tests
 
-@Suite @MainActor
+@Suite(.tags(.deduplication)) @MainActor
 struct DeduplicationServiceTests {
     private func makeContainer() throws -> ModelContainer {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
@@ -2199,7 +2199,7 @@ struct DeduplicationServiceTests {
 
 // MARK: - Image Conversion Tests
 
-@Suite @MainActor
+@Suite(.tags(.imageProcessing)) @MainActor
 struct ImageConversionTests {
     @Test func convertToJPEGChangesExtension() async throws {
         let fm = FileManager.default
@@ -2313,7 +2313,7 @@ struct ImageConversionTests {
 
 // MARK: - Perceptual Hash Compute Tests
 
-@Suite
+@Suite(.tags(.deduplication))
 struct PerceptualHashComputeTests {
     @Test func computeReturnsEightBytes() throws {
         let fm = FileManager.default
@@ -2362,7 +2362,7 @@ struct PerceptualHashComputeTests {
 
 // MARK: - Volume Sync Additional Tests
 
-@Suite @MainActor
+@Suite(.tags(.volumeSync)) @MainActor
 struct VolumeSyncAdditionalTests {
     /// Sync a subset of fixtures (single album) from volume A to volume B.
     @Test func syncSingleAlbumFromVolumeAToVolumeB() async throws {
@@ -2477,7 +2477,7 @@ struct VolumeSyncAdditionalTests {
 
 // MARK: - Encrypt → PAR2 → Decrypt Integration Tests
 
-@Suite
+@Suite(.tags(.integration))
 struct EncryptPAR2IntegrationTests {
     private static let testPassphrase = "integration-test-key"
     private static let testSalt = Data(repeating: 0x77, count: 32)
@@ -2575,7 +2575,7 @@ struct EncryptPAR2IntegrationTests {
 
 // MARK: - Catalog Backup Service Additional Tests
 
-@Suite @MainActor
+@Suite(.tags(.catalog)) @MainActor
 struct CatalogBackupRestoreTests {
     @Test func restoreFromVolumeHappyPath() async throws {
         let fm = FileManager.default
@@ -2613,7 +2613,7 @@ struct CatalogBackupRestoreTests {
 
 // MARK: - Encryption Service Edge Case Tests
 
-@Suite
+@Suite(.tags(.encryption))
 struct EncryptionEdgeCaseTests {
     private static let testPassphrase = "edge-case-passphrase"
     private static let testSalt = Data(repeating: 0x33, count: 32)

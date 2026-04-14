@@ -32,6 +32,7 @@ schemes:
       config: Debug
     test:
       config: Debug
+      codeCoverage: true
       targets:
         - LumiVaultTests
         - LumiVaultUITests
