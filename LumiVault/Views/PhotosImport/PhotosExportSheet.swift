@@ -5,7 +5,7 @@ struct PhotosExportSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @State private var step: ExportStep = .pickAlbum
-    @State private var selectedAlbumId: String?
+    @State private var selectedAlbumIds: Set<String> = []
     @State private var selectedAlbumTitle: String = ""
     @State private var settings = ExportSettings(
         albumName: "",
@@ -16,10 +16,15 @@ struct PhotosExportSheet: View {
     @State private var progress = ExportProgress()
     @State private var isExporting = false
     @State private var exportTask: Task<Void, Never>?
+    @State private var currentExportAlbumIndex: Int = 0
+    @State private var totalExportAlbums: Int = 0
+    @State private var currentExportAlbumName: String = ""
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @Environment(\.encryptionService) private var encryptionService
     @Query private var volumes: [VolumeRecord]
     @State private var catalogAlbumCounts: [String: Int] = [:]
+
+    private var isMultiAlbum: Bool { selectedAlbumIds.count > 1 }
 
     private let catalogService = CatalogService()
 
@@ -86,7 +91,7 @@ struct PhotosExportSheet: View {
                     if hasStorage {
                         Button("Next") { goToSettings() }
                             .keyboardShortcut(.defaultAction)
-                            .disabled(selectedAlbumId == nil)
+                            .disabled(selectedAlbumIds.isEmpty)
                             .accessibilityIdentifier("export.next")
                     }
 
@@ -95,7 +100,7 @@ struct PhotosExportSheet: View {
                         .accessibilityIdentifier("export.back")
                     Button("Start Export") { startExport() }
                         .keyboardShortcut(.defaultAction)
-                        .disabled(settings.albumName.isEmpty)
+                        .disabled(!isMultiAlbum && settings.albumName.isEmpty)
                         .accessibilityIdentifier("export.start")
 
                 case .exporting:
@@ -132,12 +137,17 @@ struct PhotosExportSheet: View {
 
     private var albumPickerStep: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Select a Photos Album")
+            Text("Select Albums")
                 .font(Constants.Design.monoTitle3)
                 .padding(.horizontal)
                 .padding(.top, 12)
 
-            PhotosAlbumPicker(selectedAlbumId: $selectedAlbumId, catalogAlbumCounts: catalogAlbumCounts)
+            Text("Hold \u{2318} to select multiple albums")
+                .font(Constants.Design.monoCaption)
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal)
+
+            PhotosAlbumPicker(selectedAlbumIds: $selectedAlbumIds, catalogAlbumCounts: catalogAlbumCounts)
         }
     }
 
@@ -148,12 +158,25 @@ struct PhotosExportSheet: View {
                 .padding(.horizontal)
                 .padding(.top, 12)
 
-            ExportSettingsView(settings: $settings)
+            if isMultiAlbum {
+                Text("Importing \(selectedAlbumIds.count) albums. Each album will use its own name and date.")
+                    .font(Constants.Design.monoCaption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+            }
+
+            ExportSettingsView(settings: $settings, showAlbumDetails: !isMultiAlbum)
         }
     }
 
     private var exportingStep: some View {
         VStack(spacing: 16) {
+            if totalExportAlbums > 1 {
+                Text("Album \(currentExportAlbumIndex) of \(totalExportAlbums): \(currentExportAlbumName)")
+                    .font(Constants.Design.monoCaption)
+                    .foregroundStyle(.secondary)
+            }
+
             HStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.small)
@@ -254,6 +277,9 @@ struct PhotosExportSheet: View {
                 .font(Constants.Design.monoTitle3)
 
             VStack(spacing: 4) {
+                if totalExportAlbums > 1 {
+                    Text("\(totalExportAlbums) albums processed")
+                }
                 Text("\(progress.filesCataloged) images added to album")
                 if progress.filesDeduplicated > 0 {
                     Text("\(progress.filesDeduplicated) duplicates skipped")
@@ -339,28 +365,33 @@ struct PhotosExportSheet: View {
     // MARK: - Actions
 
     private func goToSettings() {
-        guard let albumId = selectedAlbumId else { return }
+        guard !selectedAlbumIds.isEmpty else { return }
 
-        // Pre-fill settings from the selected album
-        let service = PhotosImportService()
-        Task {
-            let albums = await service.fetchAlbums()
-            if let album = albums.first(where: { $0.id == albumId }) {
-                selectedAlbumTitle = album.title
-                settings.albumName = album.title
+        if selectedAlbumIds.count == 1, let albumId = selectedAlbumIds.first {
+            // Single album — pre-fill settings from the selected album
+            let service = PhotosImportService()
+            Task {
+                let albums = await service.fetchAlbums()
+                if let album = albums.first(where: { $0.id == albumId }) {
+                    selectedAlbumTitle = album.title
+                    settings.albumName = album.title
 
-                let date = album.startDate ?? .now
-                let calendar = Calendar.current
-                settings.year = String(calendar.component(.year, from: date))
-                settings.month = String(format: "%02d", calendar.component(.month, from: date))
-                settings.day = String(format: "%02d", calendar.component(.day, from: date))
+                    let date = album.startDate ?? .now
+                    let calendar = Calendar.current
+                    settings.year = String(calendar.component(.year, from: date))
+                    settings.month = String(format: "%02d", calendar.component(.month, from: date))
+                    settings.day = String(format: "%02d", calendar.component(.day, from: date))
+                }
+                step = .configure
             }
+        } else {
+            // Multiple albums — album details derived per-album during export
             step = .configure
         }
     }
 
     private func startExport() {
-        guard let albumId = selectedAlbumId else { return }
+        guard !selectedAlbumIds.isEmpty else { return }
         step = .exporting
         isExporting = true
 
@@ -371,21 +402,72 @@ struct PhotosExportSheet: View {
             try? await catalogService.load(from: URL(fileURLWithPath: catalogPath))
 
             let coordinator = PipelinedExportCoordinator(catalogService: catalogService, encryptionService: encryptionService)
-            do {
-                try await coordinator.export(
-                    photosAlbumId: albumId,
-                    settings: settings,
-                    modelContext: ctx,
-                    progress: progress
-                )
+
+            if selectedAlbumIds.count > 1 {
+                // Multi-album export
+                let service = PhotosImportService()
+                let allAlbums = await service.fetchAlbums()
+                let selected = allAlbums.filter { selectedAlbumIds.contains($0.id) }
+
+                totalExportAlbums = selected.count
+
+                for (index, album) in selected.enumerated() {
+                    currentExportAlbumIndex = index + 1
+                    currentExportAlbumName = album.title
+
+                    // Build per-album settings from shared settings + album metadata
+                    var albumSettings = settings
+                    albumSettings.albumName = album.title
+                    let date = album.startDate ?? .now
+                    let calendar = Calendar.current
+                    albumSettings.year = String(calendar.component(.year, from: date))
+                    albumSettings.month = String(format: "%02d", calendar.component(.month, from: date))
+                    albumSettings.day = String(format: "%02d", calendar.component(.day, from: date))
+
+                    // Reset per-album progress fields
+                    progress.phase = .exporting
+                    progress.currentFile = 0
+                    progress.totalFiles = 0
+                    progress.currentFilename = ""
+
+                    do {
+                        try await coordinator.export(
+                            photosAlbumId: album.id,
+                            settings: albumSettings,
+                            modelContext: ctx,
+                            progress: progress
+                        )
+                    } catch is CancellationError {
+                        progress.phase = .failed
+                        progress.errors.append("Export cancelled")
+                        break
+                    } catch {
+                        progress.errors.append("Export failed for \"\(album.title)\": \(error.localizedDescription)")
+                    }
+                }
+
                 await syncCoordinator.pushAfterLocalChange()
-            } catch is CancellationError {
-                progress.phase = .failed
-                progress.errors.append("Export cancelled")
-            } catch {
-                progress.errors.append("Export failed: \(error.localizedDescription)")
-                progress.phase = .failed
+            } else {
+                // Single album export
+                guard let albumId = selectedAlbumIds.first else { return }
+
+                do {
+                    try await coordinator.export(
+                        photosAlbumId: albumId,
+                        settings: settings,
+                        modelContext: ctx,
+                        progress: progress
+                    )
+                    await syncCoordinator.pushAfterLocalChange()
+                } catch is CancellationError {
+                    progress.phase = .failed
+                    progress.errors.append("Export cancelled")
+                } catch {
+                    progress.errors.append("Export failed: \(error.localizedDescription)")
+                    progress.phase = .failed
+                }
             }
+
             isExporting = false
             step = .complete
         }
@@ -399,7 +481,7 @@ private enum ExportStep: Int, CaseIterable {
 
     var label: String {
         switch self {
-        case .pickAlbum: "Select Album"
+        case .pickAlbum: "Select Albums"
         case .configure: "Settings"
         case .exporting: "Exporting"
         case .complete: "Done"

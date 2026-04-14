@@ -17,7 +17,7 @@ enum AlbumSyncStatus {
 }
 
 struct PhotosAlbumPicker: View {
-    @Binding var selectedAlbumId: String?
+    @Binding var selectedAlbumIds: Set<String>
     let catalogAlbumCounts: [String: Int]
     @State private var albums: [PhotosAlbum] = []
     @State private var searchText = ""
@@ -108,7 +108,7 @@ struct PhotosAlbumPicker: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
 
-                List(filteredAlbums, selection: $selectedAlbumId) { album in
+                List(filteredAlbums, selection: $selectedAlbumIds) { album in
                     AlbumPickerRow(album: album, syncStatus: syncStatus(for: album))
                         .tag(album.id)
                 }
