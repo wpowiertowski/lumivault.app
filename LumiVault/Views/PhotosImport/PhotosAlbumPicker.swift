@@ -7,8 +7,18 @@ private enum AlbumSortOrder: String, CaseIterable {
     case count = "Count"
 }
 
+enum AlbumSyncStatus {
+    /// Album exists in catalog with matching image count.
+    case synced
+    /// Album exists in catalog but image counts differ.
+    case needsUpdate(catalogCount: Int)
+    /// Album not found in catalog.
+    case notSynced
+}
+
 struct PhotosAlbumPicker: View {
     @Binding var selectedAlbumId: String?
+    let catalogAlbumCounts: [String: Int]
     @State private var albums: [PhotosAlbum] = []
     @State private var searchText = ""
     @State private var sortOrder: AlbumSortOrder = .name
@@ -99,7 +109,7 @@ struct PhotosAlbumPicker: View {
                 .padding(.vertical, 6)
 
                 List(filteredAlbums, selection: $selectedAlbumId) { album in
-                    AlbumPickerRow(album: album)
+                    AlbumPickerRow(album: album, syncStatus: syncStatus(for: album))
                         .tag(album.id)
                 }
                 .searchable(text: $searchText, prompt: "Search albums")
@@ -146,16 +156,55 @@ struct PhotosAlbumPicker: View {
         albums = await service.fetchAlbums()
         isLoading = false
     }
+
+    private func syncStatus(for album: PhotosAlbum) -> AlbumSyncStatus {
+        guard let catalogCount = catalogAlbumCounts[album.title] else {
+            return .notSynced
+        }
+        if catalogCount == album.assetCount {
+            return .synced
+        }
+        return .needsUpdate(catalogCount: catalogCount)
+    }
 }
 
 private struct AlbumPickerRow: View {
     let album: PhotosAlbum
+    let syncStatus: AlbumSyncStatus
+
+    private var statusColor: Color {
+        switch syncStatus {
+        case .synced: .green
+        case .needsUpdate: .yellow
+        case .notSynced: .gray
+        }
+    }
+
+    private var statusIcon: String {
+        switch syncStatus {
+        case .synced: "checkmark.circle.fill"
+        case .needsUpdate: "arrow.triangle.2.circlepath.circle.fill"
+        case .notSynced: "circle"
+        }
+    }
+
+    private var statusHelp: String {
+        switch syncStatus {
+        case .synced:
+            "Synced — \(album.assetCount) photos in album and catalog"
+        case .needsUpdate(let catalogCount):
+            "Needs update — album has \(album.assetCount) photos, catalog has \(catalogCount)"
+        case .notSynced:
+            "Not synced — album not found in catalog"
+        }
+    }
 
     var body: some View {
         HStack {
-            Image(systemName: "rectangle.stack")
-                .foregroundStyle(Constants.Design.accentColor)
+            Image(systemName: statusIcon)
+                .foregroundStyle(statusColor)
                 .frame(width: 24)
+                .help(statusHelp)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(album.title)
@@ -163,6 +212,10 @@ private struct AlbumPickerRow: View {
                     .lineLimit(1)
                 HStack(spacing: 8) {
                     Text("\(album.assetCount) photos")
+                    if case .needsUpdate(let catalogCount) = syncStatus {
+                        Text("(\(catalogCount) in catalog)")
+                            .foregroundStyle(.yellow)
+                    }
                     if let start = album.startDate {
                         Text(start, format: .dateTime.year().month())
                     }

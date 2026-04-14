@@ -59,11 +59,13 @@ class PipelinedExportCoordinator: @unchecked Sendable {
         if needsCopy { phases.append(.copying) }
         if needsUpload { phases.append(.uploading) }
         phases.append(.cataloging)
-        progress.activePhases = phases
-        progress.isPipelined = true
+        await MainActor.run {
+            progress.activePhases = phases
+            progress.isPipelined = true
+            progress.phase = .exporting
+        }
 
         // 1. Export from Photos
-        progress.phase = .exporting
         let exported = try await photosService.exportAlbum(
             albumId: photosAlbumId,
             to: staging
@@ -73,7 +75,7 @@ class PipelinedExportCoordinator: @unchecked Sendable {
                 progress.totalFiles = total
             }
         }
-        progress.totalFiles = exported.count
+        await MainActor.run { progress.totalFiles = exported.count }
 
         if Task.isCancelled {
             cancelFlag.withLock { $0 = true }
@@ -585,81 +587,114 @@ class PipelinedExportCoordinator: @unchecked Sendable {
         }
 
         // MARK: - Catalog (final sink) — awaited to completion
-        let albumRecord = AlbumRecord(
-            name: settings.albumName,
-            year: settings.year,
-            month: settings.month,
-            day: settings.day
-        )
-        modelContext.insert(albumRecord)
-
-        var encryptedSizes: [String: Int64] = [:]
-        var catalogItemCount = 0
-
-        progress.phase = .cataloging
-
-        for await item in catalogCh.stream {
-            await catalogCh.consumed()
-
-            // Stop processing if cancelled — stream may still drain buffered items
-            if Task.isCancelled { continue }
-
-            guard let snap = item.snapshot else { continue }
-
-            if let encSize = item.encryptedSize {
-                encryptedSizes[snap.sha256] = encSize
-            }
-
-            if let record = modelContext.model(for: snap.persistentModelID) as? ImageRecord {
-                record.album = albumRecord
-                albumRecord.images.append(record)
-
-                let catalogImage = CatalogImage(
-                    filename: record.filename,
-                    sha256: record.sha256,
-                    sizeBytes: record.sizeBytes,
-                    par2Filename: record.par2Filename,
-                    b2FileId: record.b2FileId,
-                    encryptionAlgorithm: record.isEncrypted ? "AES-256-GCM" : nil,
-                    encryptionKeyId: record.encryptionKeyId,
-                    encryptionNonce: record.encryptionNonce?.base64EncodedString(),
-                    encryptedSizeBytes: encryptedSizes[record.sha256]
-                )
-                await catalogService.addImage(
-                    catalogImage,
-                    toAlbum: settings.albumName,
+        // Run the entire catalog sink on MainActor to avoid data races on
+        // @Observable ExportProgress and to keep SwiftData access safe.
+        let catalogSinkTask = Task { @MainActor [ctx, settings] in
+            let modelContext = ctx.value
+            let albumName = settings.albumName
+            let albumYear = settings.year
+            let albumMonth = settings.month
+            let albumDay = settings.day
+            let existingDescriptor = FetchDescriptor<AlbumRecord>(
+                predicate: #Predicate {
+                    $0.name == albumName && $0.year == albumYear &&
+                    $0.month == albumMonth && $0.day == albumDay
+                }
+            )
+            let albumRecord: AlbumRecord
+            let isNewAlbum: Bool
+            if let existing = try? modelContext.fetch(existingDescriptor).first {
+                albumRecord = existing
+                isNewAlbum = false
+            } else {
+                albumRecord = AlbumRecord(
+                    name: settings.albumName,
                     year: settings.year,
                     month: settings.month,
                     day: settings.day
                 )
-                catalogItemCount += 1
-                progress.filesCataloged = catalogItemCount
-                progress.currentFilename = snap.filename
+                modelContext.insert(albumRecord)
+                isNewAlbum = true
             }
+
+            var encryptedSizes: [String: Int64] = [:]
+            var catalogItemCount = 0
+
+            progress.phase = .cataloging
+
+            for await item in catalogCh.stream {
+                await catalogCh.consumed()
+
+                // Stop processing if cancelled — stream may still drain buffered items
+                if Task.isCancelled { continue }
+
+                guard let snap = item.snapshot else { continue }
+
+                if let encSize = item.encryptedSize {
+                    encryptedSizes[snap.sha256] = encSize
+                }
+
+                if let record = modelContext.model(for: snap.persistentModelID) as? ImageRecord {
+                    if record.album != albumRecord {
+                        record.album = albumRecord
+                    }
+                    if !albumRecord.images.contains(record) {
+                        albumRecord.images.append(record)
+                    }
+
+                    let catalogImage = CatalogImage(
+                        filename: record.filename,
+                        sha256: record.sha256,
+                        sizeBytes: record.sizeBytes,
+                        par2Filename: record.par2Filename,
+                        b2FileId: record.b2FileId,
+                        encryptionAlgorithm: record.isEncrypted ? "AES-256-GCM" : nil,
+                        encryptionKeyId: record.encryptionKeyId,
+                        encryptionNonce: record.encryptionNonce?.base64EncodedString(),
+                        encryptedSizeBytes: encryptedSizes[record.sha256]
+                    )
+                    await catalogService.addImage(
+                        catalogImage,
+                        toAlbum: settings.albumName,
+                        year: settings.year,
+                        month: settings.month,
+                        day: settings.day
+                    )
+                    catalogItemCount += 1
+                    progress.filesCataloged = catalogItemCount
+                    progress.currentFilename = snap.filename
+                }
+            }
+
+            // Tear down sentinel
+            sentinelTask.cancel()
+
+            if Task.isCancelled {
+                if catalogItemCount == 0 && isNewAlbum {
+                    modelContext.delete(albumRecord)
+                }
+                progress.phase = .failed
+                return catalogItemCount
+            }
+
+            // Save
+            do {
+                try modelContext.save()
+                let catalogPath = NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
+                try await catalogService.save(to: URL(fileURLWithPath: catalogPath))
+            } catch {
+                progress.errors.append("Catalog save failed: \(error.localizedDescription)")
+            }
+
+            progress.phase = .complete
+            return catalogItemCount
         }
 
-        // Tear down sentinel
-        sentinelTask.cancel()
+        let catalogItemCount = await catalogSinkTask.value
 
-        if Task.isCancelled {
-            // Remove the album record if nothing was cataloged
-            if catalogItemCount == 0 {
-                modelContext.delete(albumRecord)
-            }
-            progress.phase = .failed
+        if Task.isCancelled && catalogItemCount == 0 {
             throw CancellationError()
         }
-
-        // Save
-        do {
-            try modelContext.save()
-            let catalogPath = NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
-            try await catalogService.save(to: URL(fileURLWithPath: catalogPath))
-        } catch {
-            progress.errors.append("Catalog save failed: \(error.localizedDescription)")
-        }
-
-        progress.phase = .complete
     }
 
     // MARK: - Image Conversion
@@ -674,8 +709,12 @@ class PipelinedExportCoordinator: @unchecked Sendable {
         guard let image = NSImage(contentsOf: asset.fileURL),
               let srcRep = image.representations.first else { return asset }
 
-        let pixelWidth = CGFloat(srcRep.pixelsWide)
-        let pixelHeight = CGFloat(srcRep.pixelsHigh)
+        // pixelsWide/pixelsHigh return -1 when unknown (HEIF, RAW, etc.)
+        // Fall back to the point-based image size in that case.
+        let pixelWidth = srcRep.pixelsWide > 0 ? CGFloat(srcRep.pixelsWide) : image.size.width
+        let pixelHeight = srcRep.pixelsHigh > 0 ? CGFloat(srcRep.pixelsHigh) : image.size.height
+
+        guard pixelWidth > 0, pixelHeight > 0 else { return asset }
 
         var targetWidth = pixelWidth
         var targetHeight = pixelHeight

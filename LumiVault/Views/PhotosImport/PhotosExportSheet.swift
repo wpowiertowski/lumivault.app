@@ -19,6 +19,7 @@ struct PhotosExportSheet: View {
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @Environment(\.encryptionService) private var encryptionService
     @Query private var volumes: [VolumeRecord]
+    @State private var catalogAlbumCounts: [String: Int] = [:]
 
     private let catalogService = CatalogService()
 
@@ -109,6 +110,9 @@ struct PhotosExportSheet: View {
             .padding()
         }
         .frame(width: 600, height: 500)
+        .task {
+            catalogAlbumCounts = await syncCoordinator.catalogAlbumCounts()
+        }
     }
 
     // MARK: - Steps
@@ -133,7 +137,7 @@ struct PhotosExportSheet: View {
                 .padding(.horizontal)
                 .padding(.top, 12)
 
-            PhotosAlbumPicker(selectedAlbumId: $selectedAlbumId)
+            PhotosAlbumPicker(selectedAlbumId: $selectedAlbumId, catalogAlbumCounts: catalogAlbumCounts)
         }
     }
 
@@ -355,6 +359,10 @@ struct PhotosExportSheet: View {
 
         nonisolated(unsafe) let ctx = modelContext
         exportTask = Task { @MainActor in
+            // Load existing catalog so new images are appended rather than overwriting it
+            let catalogPath = NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
+            try? await catalogService.load(from: URL(fileURLWithPath: catalogPath))
+
             let coordinator = PipelinedExportCoordinator(catalogService: catalogService, encryptionService: encryptionService)
             do {
                 try await coordinator.export(

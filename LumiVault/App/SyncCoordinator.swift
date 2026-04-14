@@ -156,6 +156,13 @@ final class SyncCoordinator: @unchecked Sendable {
         case file(URL)
     }
 
+    // MARK: - Catalog Queries
+
+    /// Aggregate image counts per album name from the current catalog.
+    func catalogAlbumCounts() async -> [String: Int] {
+        await catalogService.albumImageCounts()
+    }
+
     // MARK: - Catalog Mutation (for deletion flows)
 
     /// Remove an album from the catalog and save.

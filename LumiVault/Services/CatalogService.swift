@@ -46,6 +46,23 @@ actor CatalogService {
         catalog.lastUpdated = .now
     }
 
+    // MARK: - Query
+
+    /// Aggregate image counts per album name across all year/month/day entries.
+    func albumImageCounts() -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for year in catalog.years.values {
+            for month in year.months.values {
+                for day in month.days.values {
+                    for (name, album) in day.albums {
+                        counts[name, default: 0] += album.images.count
+                    }
+                }
+            }
+        }
+        return counts
+    }
+
     // MARK: - Remove Operations
 
     func removeAlbum(name: String, year: String, month: String, day: String) {

@@ -538,17 +538,36 @@ class ExportCoordinator {
         // 8. Create album record and update catalog
         progress.phase = .cataloging
 
-        let albumRecord = AlbumRecord(
-            name: settings.albumName,
-            year: settings.year,
-            month: settings.month,
-            day: settings.day
+        let albumName = settings.albumName
+        let albumYear = settings.year
+        let albumMonth = settings.month
+        let albumDay = settings.day
+        let existingAlbumDescriptor = FetchDescriptor<AlbumRecord>(
+            predicate: #Predicate {
+                $0.name == albumName && $0.year == albumYear &&
+                $0.month == albumMonth && $0.day == albumDay
+            }
         )
-        modelContext.insert(albumRecord)
+        let albumRecord: AlbumRecord
+        if let existing = try? modelContext.fetch(existingAlbumDescriptor).first {
+            albumRecord = existing
+        } else {
+            albumRecord = AlbumRecord(
+                name: settings.albumName,
+                year: settings.year,
+                month: settings.month,
+                day: settings.day
+            )
+            modelContext.insert(albumRecord)
+        }
 
         for item in imageRecords {
-            item.record.album = albumRecord
-            albumRecord.images.append(item.record)
+            if item.record.album != albumRecord {
+                item.record.album = albumRecord
+            }
+            if !albumRecord.images.contains(item.record) {
+                albumRecord.images.append(item.record)
+            }
 
             let catalogImage = CatalogImage(
                 filename: item.record.filename,
@@ -591,9 +610,12 @@ class ExportCoordinator {
         guard let image = NSImage(contentsOf: asset.fileURL),
               let srcRep = image.representations.first else { return asset }
 
-        // Use actual pixel dimensions, not point size (which differs on Retina)
-        let pixelWidth = CGFloat(srcRep.pixelsWide)
-        let pixelHeight = CGFloat(srcRep.pixelsHigh)
+        // pixelsWide/pixelsHigh return -1 when unknown (HEIF, RAW, etc.)
+        // Fall back to the point-based image size in that case.
+        let pixelWidth = srcRep.pixelsWide > 0 ? CGFloat(srcRep.pixelsWide) : image.size.width
+        let pixelHeight = srcRep.pixelsHigh > 0 ? CGFloat(srcRep.pixelsHigh) : image.size.height
+
+        guard pixelWidth > 0, pixelHeight > 0 else { return asset }
 
         var targetWidth = pixelWidth
         var targetHeight = pixelHeight
