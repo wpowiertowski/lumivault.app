@@ -410,6 +410,8 @@ struct PhotosExportSheet: View {
                 let selected = allAlbums.filter { selectedAlbumIds.contains($0.id) }
 
                 totalExportAlbums = selected.count
+                progress.globalTotalFiles = selected.reduce(0) { $0 + $1.assetCount }
+                progress.completedAlbumFiles = 0
 
                 for (index, album) in selected.enumerated() {
                     currentExportAlbumIndex = index + 1
@@ -437,11 +439,14 @@ struct PhotosExportSheet: View {
                             modelContext: ctx,
                             progress: progress
                         )
+                        // Accumulate completed files for smooth global progress
+                        progress.completedAlbumFiles += progress.totalFiles
                     } catch is CancellationError {
                         progress.phase = .failed
                         progress.errors.append("Export cancelled")
                         break
                     } catch {
+                        progress.completedAlbumFiles += progress.totalFiles
                         progress.errors.append("Export failed for \"\(album.title)\": \(error.localizedDescription)")
                     }
                 }
