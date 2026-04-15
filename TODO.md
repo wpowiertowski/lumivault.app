@@ -38,7 +38,7 @@ Items that would improve test coverage but require architectural changes.
 Source: TEST-PLAN.md "Remaining Automated Test TODOs"
 
 - [ ] **B2Service network methods** (upload, download, list, delete) — needs URLSession protocol abstraction or URLProtocol subclass for HTTP mocking. Medium effort.
-- [ ] **PipelinedExportCoordinator pipeline** — channel backpressure, cancellation teardown, and phase-skipping wiring are testable in isolation. Full end-to-end pipeline still needs protocol-based service injection. Medium effort.
+- [ ] **PipelinedImportCoordinator pipeline** — channel backpressure, cancellation teardown, and phase-skipping wiring are testable in isolation. Full end-to-end pipeline still needs protocol-based service injection. Medium effort.
 - [ ] **AsyncChannel / AsyncSemaphore** — new utilities with cancellation semantics (cancelAll unblocks waiters). No unit tests yet. Low effort.
 - [ ] **SyncService push/pull/merge** — depends on FileManager ubiquity container + NSFileCoordinator; needs filesystem abstraction. Medium effort.
 - [ ] **SyncCoordinator state machine** — orchestrates 3 services + UserDefaults + SwiftData; needs dependency injection. Medium effort.
@@ -66,5 +66,5 @@ Source: TEST-PLAN.md "Manual Test Cases NOT Automated"
 
 ## Code Quality
 
-- [ ] Extract shared `convertImage` from `ExportCoordinator` and `PipelinedExportCoordinator` (currently duplicated). Source: TEST-PLAN.md ImageConversionTests note.
+- [ ] Extract shared `convertImage` from `ImportCoordinator` and `PipelinedImportCoordinator` (currently duplicated). Source: TEST-PLAN.md ImageConversionTests note.
 - [ ] `IntegrityServiceTests` duplicates fixture materialization inline instead of using `TestFixtures.materializeVolume()`. Source: TEST-PLAN.md Redundancy & Overlap note.

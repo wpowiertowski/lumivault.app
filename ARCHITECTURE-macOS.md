@@ -68,14 +68,14 @@
           │ DeletionService         │  ← remove files from volumes + B2
           │ IntegrityService        │  ← scheduled verification sweeps
           │ EncryptionService       │  ← AES-256-GCM encrypt/decrypt, key derivation
-          │ PipelinedExportCoordinator│ ← pipelined export (AsyncChannel between phases)
-          │ ExportCoordinator       │  ← legacy sequential export (retained)
+          │ PipelinedImportCoord.   │  ← pipelined import (AsyncChannel between phases)
+          │ ImportCoordinator       │  ← legacy sequential import (retained)
           └────────────┬────────────┘
                        │
           ┌────────────┴────────────┐
           │     Persistence Layer   │
           ├─────────────────────────┤
-          │ SwiftData ModelContext  │  ← local index (ImageRecord, Album, Volume)
+          │ SwiftData ModelContext  │  ← local index (LumiVault.store)
           │ catalog.json (Codable)  │  ← portable JSON catalog (existing format)
           │ NSFileCoordinator       │  ← safe concurrent file access
           └─────────────────────────┘
@@ -263,12 +263,12 @@ PHAssetCollection.fetchAssetCollections(with: .album)     → user albums
 PHAssetCollection.fetchAssetCollections(with: .smartAlbum) → Favorites, Recents, etc.
 ```
 
-**Export pipeline** (per album):
+**Import pipeline** (per album):
 
 ```text
-1. User selects album in PhotosAlbumPicker
+1. User selects album(s) in PhotosAlbumPicker
 2. Configure: album name, date, format, PAR2 toggle, encryption, volume targets, B2 toggle
-3. PipelinedExportCoordinator orchestrates via async pipeline:
+3. PipelinedImportCoordinator orchestrates via async pipeline:
 
    ┌──────────┐   ┌────────────┐   ┌─────────┐   ┌────────────┐   ┌──────┐   ┌──────┐   ┌────────┐   ┌─────────┐
    │  Photos  │──>│ Conversion │──>│ Hashing │──>│ Encryption │──>│ PAR2 │──>│ Copy │──>│ Upload │──>│ Catalog │
@@ -298,7 +298,9 @@ tasks, (3) calls `channel.cancel()` on every channel — which resumes blocked s
 waiters and terminates all `for await` loops. Empty album records are cleaned up on cancel.
 
 **PipelineItem**: A `Sendable` struct flows through the pipeline, accumulating results
-(converted URL, SHA-256, encryption nonce, PAR2 filename, etc.). An `ImageRecordSnapshot`
+(converted URL, converted filename, SHA-256, encryption nonce, PAR2 filename, etc.).
+`activeFilename` resolves the effective filename (converted or original) and `activeFileURL`
+resolves the effective file URL (encrypted → converted → original). An `ImageRecordSnapshot`
 captures the `PersistentIdentifier` so downstream phases can look up the SwiftData record
 without passing non-Sendable `@Model` objects across isolation boundaries.
 
@@ -308,12 +310,17 @@ prefers the `.fullSizePhoto` resource (edited version with all Photos adjustment
 the `.photo` resource (unmodified original), while using the original resource's filename
 to avoid generic names like `FullSizeRender.jpeg`.
 
+**Multi-album import**: Users can select multiple albums in the picker. Each album is
+imported sequentially through the same pipeline, with per-album settings derived from
+the shared configuration (album name and date are overridden per-album from Photos
+metadata). Progress tracks both per-album and global file counts.
+
 **Album picker** supports search (`.searchable`) and sort (by name, date, or photo count
 with ascending/descending toggle). Asset counts reflect images only (`mediaType == .image`),
-matching the export filter — videos and other media types are excluded from counts to
+matching the import filter — videos and other media types are excluded from counts to
 prevent misleading sync status indicators.
 
-**Completion reporting**: The export completion screen shows `filesCataloged` (images
+**Completion reporting**: The import completion screen shows `filesCataloged` (images
 actually added to the album) as the primary count, plus a breakdown of duplicates
 skipped and any files that failed to import (`filesDropped`). Items that are silently
 dropped in the pipeline (e.g., hash failures producing no snapshot, or SwiftData model
@@ -575,9 +582,9 @@ LumiVault/
 │   ├── CatalogBackupService.swift       // Distribute catalog to volumes + B2, restore
 │   ├── PhotosImportService.swift        // PhotoKit album enumeration + export
 │   ├── B2Service.swift                  // B2 REST API (upload/download/list/delete)
-│   ├── PipelinedExportCoordinator.swift  // Pipelined async export (active)
+│   ├── PipelinedImportCoordinator.swift  // Pipelined async import (active)
 │   ├── PipelineItem.swift               // Sendable item + ImageRecordSnapshot
-│   ├── ExportCoordinator.swift          // Legacy sequential export (retained)
+│   ├── ImportCoordinator.swift          // Legacy sequential import (retained)
 │   ├── DeletionService.swift            // Remove files from volumes + B2
 │   ├── ReconciliationService.swift      // Scan volumes + B2 for discrepancies
 │   ├── SyncService.swift                // iCloud coordination
@@ -607,8 +614,8 @@ LumiVault/
 │   │   └── ImportProgressView.swift     // Per-file progress with dedup stats
 │   ├── PhotosImport/
 │   │   ├── PhotosAlbumPicker.swift      // Photos library album browser
-│   │   ├── ExportSettingsView.swift     // Export configuration form
-│   │   └── PhotosExportSheet.swift      // Multi-step export wizard
+│   │   ├── ImportSettingsView.swift      // Import configuration form
+│   │   └── PhotosImportSheet.swift      // Multi-step import wizard
 │   ├── NearDuplicatesView.swift  // Near-duplicate pairs browser
 │   └── Settings/
 │       ├── SettingsView.swift            // Settings tab container
@@ -621,7 +628,7 @@ LumiVault/
 │       ├── CloudSettingsView.swift       // iCloud sync toggle + status
 │       ├── B2SettingsView.swift          // Backblaze B2 credentials + test
 │       ├── EncryptionSettingsView.swift  // Passphrase management, key status
-│       ├── ExportDefaultsSettingsView.swift // Default format, quality, dimensions, PAR2
+│       ├── ImportDefaultsSettingsView.swift  // Default format, quality, dimensions, PAR2
 │       └── SupportSettingsView.swift     // Tip jar via StoreKit 2
 │
 └── Utilities/
@@ -657,15 +664,15 @@ actor ThumbnailService {
 }
 ```
 
-### Export Pipeline Concurrency
+### Import Pipeline Concurrency
 
-The export pipeline uses `AsyncChannel` (bounded `AsyncStream` + `AsyncSemaphore`) to
+The import pipeline uses `AsyncChannel` (bounded `AsyncStream` + `AsyncSemaphore`) to
 connect phases. Each phase runs as an unstructured `Task` on `@MainActor` (required for
 SwiftData `ModelContext` access). Backpressure prevents fast phases from overwhelming
 slow ones — a producer calling `channel.send()` suspends when the buffer is full.
 
 ```swift
-// Simplified pipeline wiring (from PipelinedExportCoordinator)
+// Simplified pipeline wiring (from PipelinedImportCoordinator)
 let hashingCh = AsyncChannel<PipelineItem>(bufferSize: 8)
 let par2Ch = AsyncChannel<PipelineItem>(bufferSize: 2)
 
@@ -687,7 +694,7 @@ and terminates all consumer `for await` loops (`continuation.finish()`).
 ### Other Concurrent Operations
 
 `TaskGroup` is used for bounded concurrency in non-pipeline contexts (thumbnail warm-up,
-integrity verification batches). Drag-and-drop import uses the legacy `ExportCoordinator`
+integrity verification batches). Drag-and-drop import uses the legacy `ImportCoordinator`
 with sequential phases.
 
 ---

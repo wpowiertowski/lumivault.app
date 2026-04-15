@@ -2,7 +2,7 @@
 
 ## Existing Automated Test Assessment
 
-### Summary: 114 tests across 23 suites
+### Summary: 125 tests across 23 suites
 
 | Rating | Suite | Tests | Assessment |
 | -------- | ------- | ------- | ------------ |
@@ -18,11 +18,11 @@
 | High Value | DeletionServiceTests | 4 | File removal from volumes, PAR2 companion cleanup, unmounted volume skip, bulk delete. Real FS operations. |
 | High Value | ReconciliationDiffTests | 5 | B2 diff logic: matched, dangling B2 IDs, orphans, PAR2 skip, mixed scenarios. Pure logic, well-structured. |
 | Medium Value | B2ServiceHelperTests | 7 | SHA-1 known test vectors, HTTP response validation for success (200, 299) and error (401, 500) status codes |
-| Medium Value | ExportProgressTests | 5 | Fraction calculation: empty state, mid-phase progress, complete, PAR2 sub-progress, single active phase. Note: progress model is shared between old ExportCoordinator and new PipelinedExportCoordinator — tests remain valid for both. `filesDropped` counter tracks items silently lost in the pipeline (no snapshot or model lookup failure). |
+| Medium Value | ExportProgressTests | 5 | Fraction calculation: empty state, mid-phase progress, complete, PAR2 sub-progress, single active phase. Note: progress model is shared between old ImportCoordinator and new PipelinedImportCoordinator — tests remain valid for both. `filesDropped` counter tracks items silently lost in the pipeline (no snapshot or model lookup failure). |
 | Medium Value | CatalogBackupServiceTests | 5 | Volume backup write + decode, error on bad path, nil mount skip, file restore round-trip, missing catalog error |
 | Medium Value | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture hash verification |
 | Medium Value | DeduplicationServiceTests | 3 | Unique file detection, exact SHA-256 match, returned hash + size verification (using real JPEG fixtures) |
-| Medium Value | ImageConversionTests | 5 | JPEG conversion with extension change, valid output, dimension scaling, original format pass-through, below-max preservation. Tests exercise ExportCoordinator.convertImage; PipelinedExportCoordinator has a duplicated copy — consider extracting shared. |
+| Medium Value | ImageConversionTests | 5 | JPEG conversion with extension change, valid output, dimension scaling, original format pass-through, below-max preservation. Tests exercise ImportCoordinator.convertImage; PipelinedImportCoordinator has a duplicated copy — consider extracting shared. |
 | Medium Value | HasherServiceTests | 4 | Fixture hash verification is the trust anchor for the entire test suite. Empty file + consistency checks are useful but simple. |
 | Medium Value | IntegrityServiceTests | 4 | Verify pass/fail/missing and batch-size limit. Solid, but `batchSize` test just checks truncation. |
 | Medium Value | CatalogTests | 5 | Codable round-trip, optional fields, snake_case keys, file I/O. Necessary for CLI compatibility guarantee, but scenarios are basic. |
@@ -42,7 +42,7 @@ IntegrityServiceTests duplicates fixture materialization inline instead of using
 | ------ | ------ | -------- |
 | EncryptionService | High | **Covered** — 20 tests across 3 suites: key derivation, round-trips, wrong key/AD, nonce uniqueness, file ops, edge cases, encrypt-PAR2-decrypt integration |
 | B2Service (network layer) | High | **Partially covered** — 7 tests on pure helpers (SHA-1, HTTP response validation). Network methods require URLSession abstraction; covered by manual QA. |
-| ExportCoordinator / PipelinedExportCoordinator | High | **Partially covered** — 5 tests on image conversion + 5 on ExportProgress. PipelinedExportCoordinator replaces sequential ExportCoordinator with async pipeline (AsyncChannel + backpressure). Pipeline orchestration, cancellation teardown, and channel wiring are not unit-tested; covered by manual QA (TC-2, TC-4). |
+| ImportCoordinator / PipelinedImportCoordinator | High | **Partially covered** — 5 tests on image conversion + 5 on ExportProgress. PipelinedImportCoordinator replaces sequential ImportCoordinator with async pipeline (AsyncChannel + backpressure). Pipeline orchestration, cancellation teardown, and channel wiring are not unit-tested; covered by manual QA (TC-2, TC-4). |
 | CatalogBackupService | Medium | **Covered** — 6 tests: volume backup/restore round-trip, error reporting, missing catalog, happy path restore |
 | DeduplicationService | Medium | **Covered** — 3 tests: unique detection, exact match, SHA-256 + size verification with real JPEG fixtures |
 | Volume sync | Medium | **Covered** — 8 tests across 2 suites: full A-to-B sync, dedup, mismatch, PAR2 companion, single-album, partial dedup, already-tracked |
@@ -59,7 +59,7 @@ These items would further improve coverage but require architectural changes:
 | Item | Blocker | Effort |
 | ------ | --------- | -------- |
 | B2Service network methods (upload, download, list, delete) | Needs URLSession protocol abstraction or URLProtocol subclass for HTTP mocking | Medium — touches B2Service constructor + all callers |
-| PipelinedExportCoordinator pipeline | Pipeline uses AsyncChannel/AsyncSemaphore for inter-phase communication. Channel backpressure, cancellation teardown (sentinel task + channel.cancel), and phase-skipping wiring are testable in isolation. Full end-to-end pipeline still needs protocol-based service injection. | Medium — channel/semaphore unit tests are straightforward; full pipeline test remains high effort |
+| PipelinedImportCoordinator pipeline | Pipeline uses AsyncChannel/AsyncSemaphore for inter-phase communication. Channel backpressure, cancellation teardown (sentinel task + channel.cancel), and phase-skipping wiring are testable in isolation. Full end-to-end pipeline still needs protocol-based service injection. | Medium — channel/semaphore unit tests are straightforward; full pipeline test remains high effort |
 | AsyncChannel / AsyncSemaphore | New utilities with cancellation semantics (cancelAll unblocks waiters). No unit tests yet. | Low — pure async logic, easy to test in isolation |
 | SyncService push/pull/merge | Depends on FileManager ubiquity container + NSFileCoordinator; needs filesystem abstraction | Medium — iCloud APIs deeply coupled |
 | SyncCoordinator state machine | Orchestrates 3 services + UserDefaults + SwiftData; needs dependency injection | Medium — requires constructor refactor |
@@ -84,14 +84,14 @@ The `LumiVaultUITests` target uses XCUIAutomation (Xcode 26) to automate a subse
 | `testSettingsTabsExist` | TC-22 | All 8 settings tabs (General through Support) are accessible |
 | `testB2CredentialFields` | TC-22 | B2 tab shows enable toggle |
 | `testEncryptionTabFields` | TC-22 | Encryption tab shows passphrase field |
-| `testPhotosImportOpensSheet` | TC-2 | Import button opens export sheet with cancel button |
-| `testExportCancelButtonExists` | TC-4 | Cancel and Next buttons exist; Next is disabled without album selection |
+| `testPhotosImportOpensSheet` | TC-2 | Import button opens import sheet with cancel button |
+| `testImportCancelButtonExists` | TC-4 | Cancel and Next buttons exist; Next is disabled without album selection |
 | `testAlbumContextMenuDeleteExists` | TC-16 | Right-click album shows Delete Album context menu (skips if no albums) |
-| `testExportDefaultsToggles` | TC-22 | Export Defaults tab shows PAR2 and near-duplicate toggles |
+| `testImportDefaultsToggles` | TC-22 | Import Defaults tab shows PAR2 and near-duplicate toggles |
 
 ### Accessibility Identifiers
 
-~65 `.accessibilityIdentifier()` modifiers have been added across 14 view files. Naming convention: `area.element` (e.g., `sidebar.albumList`, `export.cancel`, `b2.testConnection`).
+~65 `.accessibilityIdentifier()` modifiers have been added across 14 view files. Naming convention: `area.element` (e.g., `sidebar.albumList`, `import.cancel`, `b2.testConnection`).
 
 Key identifier groups:
 - **Navigation**: `nav.sidebar`, `toolbar.importPhotos`, `toolbar.nearDuplicates`
@@ -101,10 +101,10 @@ Key identifier groups:
 - **Settings tabs**: `settings.tab.general` through `settings.tab.support`
 - **B2**: `b2.enable`, `b2.keyId`, `b2.appKey`, `b2.bucketId`, `b2.bucketName`, `b2.testConnection`, `b2.save`
 - **Encryption**: `encryption.passphrase`, `encryption.confirmPassphrase`, `encryption.createKey`, `encryption.unlock`
-- **Export flow**: `export.cancel`, `export.next`, `export.back`, `export.start`, `export.done`, `export.phaseLabel`
-- **Export settings**: `exportSettings.albumName`, `exportSettings.year/month/day`, `exportSettings.par2`, `exportSettings.nearDupe`, `exportSettings.encrypt`, `exportSettings.b2Upload`
+- **Import flow**: `import.cancel`, `import.next`, `import.back`, `import.start`, `import.done`, `import.phaseLabel`
+- **Import settings**: `importSettings.albumName`, `importSettings.year/month/day`, `importSettings.par2`, `importSettings.nearDupe`, `importSettings.encrypt`, `importSettings.b2Upload`
 - **Import**: `import.dropZone`, `import.chooseFiles`, `import.importButton`, `import.cancel`
-- **Other settings**: `general.*`, `volumes.*`, `exportDefaults.*`, `integrity.scan`, `albums.*`
+- **Other settings**: `general.*`, `volumes.*`, `importDefaults.*`, `integrity.scan`, `albums.*`
 
 ### Running UI Tests
 
@@ -131,7 +131,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 6. Perform the flow you want to test in the running app
 7. Click the record button again to stop — Xcode inserts the generated code at your cursor position
 8. Add `XCTAssert` / `XCTAssertTrue` / `XCTAssertEqual` assertions after the recorded actions to verify expected state
-9. Clean up the generated code: replace fragile element queries with accessibility identifiers (e.g., `app.buttons["export.cancel"]` instead of `app.buttons["Cancel"]`)
+9. Clean up the generated code: replace fragile element queries with accessibility identifiers (e.g., `app.buttons["import.cancel"]` instead of `app.buttons["Cancel"]`)
 
 **Tips for reliable recorded tests:**
 - Always use `.accessibilityIdentifier()` queries over text-based queries — text changes break tests, identifiers don't
@@ -189,9 +189,9 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 | 2.2 | Verify album list | Albums from Photos.app displayed with image-only counts (videos excluded), sorted alphabetically |
 | 2.3 | Use search field | Filters albums by name in real-time |
 | 2.4 | Change sort order (name/count/date) | Album list re-sorts correctly |
-| 2.5 | Select an album, click "Next" | Export settings screen appears |
+| 2.5 | Select an album, click "Next" | Import settings screen appears |
 | 2.6 | Configure: PAR2 on, JPEG conversion off, near-dupe detection on | Settings reflected in summary |
-| 2.7 | Click "Export" | Progress bar appears with phase labels (Exporting, Hashing, PAR2, etc.). Pipeline runs phases concurrently — e.g., early images may be hashing while later images still export. |
+| 2.7 | Click "Start Import" | Progress bar appears with phase labels (Importing, Hashing, PAR2, etc.). Pipeline runs phases concurrently — e.g., early images may be hashing while later images are still importing. |
 | 2.8 | Wait for completion | "Complete" screen shows images added to album (`filesCataloged`) as primary count, plus duplicates skipped and any files that failed to import (`filesDropped`). Copied/Uploaded counts shown when applicable. Orange warning icon if any files dropped or errors occurred. |
 | 2.9 | Check sidebar | New album appears under correct year/month/day |
 | 2.10 | Click album in sidebar | Photo grid shows all imported thumbnails |
@@ -202,18 +202,18 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 
 | # | Action | Expected |
 | --- | -------- | ---------- |
-| 3.1 | Import an album with JPEG conversion ON, quality 85%, max dimension 2048px | Export completes without error |
-| 3.2 | Inspect an exported file on volume | File is JPEG, dimensions <= 2048px on longest edge |
+| 3.1 | Import an album with JPEG conversion ON, quality 85%, max dimension 2048px | Import completes without error |
+| 3.2 | Inspect a file on volume | File is JPEG (`.jpg` extension), dimensions <= 2048px on longest edge |
 | 3.3 | Verify SHA-256 in metadata inspector | Hash matches the converted JPEG, not the original HEIC |
 
 ---
 
-### TC-4: Export Cancellation
+### TC-4: Import Cancellation
 
 | # | Action | Expected |
 | --- | -------- | ---------- |
-| 4.1 | Start a large album export (20+ photos) | Progress begins, phases advance as images flow through pipeline |
-| 4.2 | Click "Cancel" during export | Export stops within 2-3 seconds. All pipeline tasks killed (sentinel cancels child tasks + channels). |
+| 4.1 | Start a large album import (20+ photos) | Progress begins, phases advance as images flow through pipeline |
+| 4.2 | Click "Cancel" during import | Import stops within 2-3 seconds. All pipeline tasks killed (sentinel cancels child tasks + channels). |
 | 4.3 | Check sidebar | No partial/corrupt album entry created (empty album record deleted on cancel) |
 | 4.4 | Check volumes | No partial files left on disk (staging directory cleaned up via defer) |
 | 4.5 | Cancel during PAR2 phase specifically | PAR2 OperationQueue stopped via cancelFlag; channel backpressure unblocked via semaphore.cancelAll() |
@@ -246,7 +246,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 
 | # | Action | Expected |
 | --- | -------- | ---------- |
-| 7.1 | Import photos that include slight crops/edits of the same image | Near-duplicate warning appears during export (if detection enabled) |
+| 7.1 | Import photos that include slight crops/edits of the same image | Near-duplicate warning appears during import (if detection enabled) |
 | 7.2 | Open Library > Near Duplicates view | Duplicate pairs listed with similarity percentage |
 | 7.3 | Verify Hamming distance threshold | Only pairs within threshold (default <5) are flagged |
 
@@ -257,7 +257,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 | # | Action | Expected |
 | --- | -------- | ---------- |
 | 8.1 | Settings > Volumes > Add Volume > select QA-Vol-A | Volume appears in list with label and ID |
-| 8.2 | Export an album targeting QA-Vol-A | Files appear on QA-Vol-A under `year/month/day/albumName/` hierarchy |
+| 8.2 | Import an album targeting QA-Vol-A | Files appear on QA-Vol-A under `year/month/day/albumName/` hierarchy |
 | 8.3 | Add QA-Vol-B via Settings > Volumes | Second volume appears |
 | 8.4 | Settings > Volumes > Sync to QA-Vol-B | Progress shown; files copied from QA-Vol-A to QA-Vol-B |
 | 8.5 | Verify files on QA-Vol-B | Same directory structure, same file hashes as QA-Vol-A |
@@ -281,7 +281,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 
 | # | Action | Expected |
 | --- | -------- | ---------- |
-| 10.1 | Export an album with PAR2 enabled | `.par2` index and `.vol0+N.par2` volume files created alongside each image |
+| 10.1 | Import an album with PAR2 enabled | `.par2` index and `.vol0+N.par2` volume files created alongside each image |
 | 10.2 | Right-click image > Verify Integrity | "Passed" result, green checkmark |
 | 10.3 | Hex-edit an image file on the volume (corrupt ~5% of bytes) | — |
 | 10.4 | Verify Integrity on the corrupted file | "Failed" — hash mismatch detected |
@@ -295,13 +295,13 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 | # | Action | Expected |
 | --- | -------- | ---------- |
 | 11.1 | Settings > Encryption > Set passphrase "test1234" | Passphrase saved, encryption enabled |
-| 11.2 | Export an album with encryption ON | Files on volume are encrypted (not viewable in Finder preview) |
+| 11.2 | Import an album with encryption ON | Files on volume are encrypted (not viewable in Finder preview) |
 | 11.3 | Select encrypted image in grid | Thumbnail loads (decrypted in-memory for display) |
 | 11.4 | Open detail view | Full-resolution decrypted preview shown |
 | 11.5 | Metadata inspector | Shows "Encrypted: Yes", encryption nonce present |
 | 11.6 | Change passphrase to "newpass" | — |
 | 11.7 | Verify old encrypted files still decrypt | App should use stored per-file key derivation, NOT require the current passphrase to match |
-| 11.8 | Export new album with new passphrase | New files encrypted with new key |
+| 11.8 | Import new album with new passphrase | New files encrypted with new key |
 
 ---
 
@@ -311,7 +311,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 | --- | -------- | ---------- |
 | 12.1 | Settings > B2 > Enter application key ID, application key, bucket name | Credentials saved |
 | 12.2 | Click "Test Connection" | Success message with bucket info |
-| 12.3 | Export album with B2 upload enabled | Upload progress shown per-file; SHA-1 verification on upload |
+| 12.3 | Import album with B2 upload enabled | Upload progress shown per-file; SHA-1 verification on upload |
 | 12.4 | Check B2 bucket (via web console) | Files present at `year/month/day/albumName/filename` paths |
 | 12.5 | Upload same album again | All files reported as "already exists" — no re-upload |
 | 12.6 | Check `b2FileId` in metadata inspector | Populated for each uploaded image |
@@ -322,7 +322,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 
 | # | Action | Expected |
 | --- | -------- | ---------- |
-| 13.1 | Export album with both PAR2 and B2 enabled | Both image and `.par2` files uploaded to B2 |
+| 13.1 | Import album with both PAR2 and B2 enabled | Both image and `.par2` files uploaded to B2 |
 | 13.2 | Verify in B2 console | PAR2 files present alongside images |
 
 ---
@@ -332,9 +332,9 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 | # | Action | Expected |
 | --- | -------- | ---------- |
 | 14.1 | Settings > iCloud > Enable sync | Sync status indicator appears |
-| 14.2 | Export an album on Device A | Catalog updates locally and pushes to iCloud |
+| 14.2 | Import an album on Device A | Catalog updates locally and pushes to iCloud |
 | 14.3 | Open LumiVault on Device B (same iCloud account) | Catalog pulls from iCloud; new album visible in sidebar |
-| 14.4 | Export a different album on Device B | — |
+| 14.4 | Import a different album on Device B | — |
 | 14.5 | Return to Device A, trigger sync | Device B's album now visible; union merge preserves both |
 | 14.6 | Simulate conflict: edit album on both devices while offline, then reconnect | Merge uses union-by-SHA + newest-timestamp-wins; no data loss |
 
@@ -432,7 +432,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 | # | Action | Expected |
 | --- | -------- | ---------- |
 | 22.1 | General tab | App preferences displayed and editable |
-| 22.2 | Export Defaults tab | Format, quality, max dimension, PAR2 toggle, near-dupe toggle — all persist after closing settings |
+| 22.2 | Import Defaults tab | Format, quality, max dimension, PAR2 toggle, near-dupe toggle — all persist after closing settings |
 | 22.3 | Volumes tab | Lists registered volumes with mount status |
 | 22.4 | iCloud tab | Sync toggle, last sync timestamp |
 | 22.5 | B2 tab | Credential fields, test connection button, setup guide link |
@@ -446,16 +446,16 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 
 | # | Action | Expected |
 | --- | -------- | ---------- |
-| 23.1 | Export to a full disk (no space) | Graceful error with message, no partial corruption |
-| 23.2 | Eject volume during export | Export fails with error, no crash, partial files cleaned up |
+| 23.1 | Import to a full disk (no space) | Graceful error with message, no partial corruption |
+| 23.2 | Eject volume during import | Import fails with error, no crash, partial files cleaned up |
 | 23.3 | Invalid B2 credentials | "Test Connection" shows clear error message |
 | 23.4 | Network disconnection during B2 upload | Upload fails gracefully, retry possible |
 | 23.5 | Import album with 0 photos | Empty album created or rejected — document behavior |
 | 23.6 | Photo with no EXIF data | Imports successfully with default/empty metadata |
 | 23.7 | Filename with special characters (spaces, accents, emoji) | Handled correctly across export, volume copy, B2 upload |
-| 23.8 | Very large image (>50MB RAW) | Exports without timeout or memory crash |
+| 23.8 | Very large image (>50MB RAW) | Imports without timeout or memory crash |
 | 23.9 | Photos library permission denied | App shows permission prompt, Settings link to System Preferences |
-| 23.10 | Pipeline backpressure: export 50+ images with PAR2 (slow) and no B2 | PAR2 phase should not cause unbounded memory growth; earlier phases pause via channel backpressure when PAR2 falls behind |
+| 23.10 | Pipeline backpressure: import 50+ images with PAR2 (slow) and no B2 | PAR2 phase should not cause unbounded memory growth; earlier phases pause via channel backpressure when PAR2 falls behind |
 | 23.11 | Eject volume mid-pipeline during copy phase | Copy phase errors are per-item; remaining pipeline phases continue for other items; errors shown in completion screen |
 
 ---
@@ -486,7 +486,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 ### P0 — Must Pass (data loss risk)
 
 - TC-2: Photos Import (pipelined flow)
-- TC-4: Export Cancellation (pipeline teardown — sentinel kills all tasks + channels)
+- TC-4: Import Cancellation (pipeline teardown — sentinel kills all tasks + channels)
 - TC-6: SHA-256 Dedup
 - TC-8: Multi-Volume Sync
 - TC-10: PAR2 Error Correction
@@ -494,7 +494,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 - TC-15: Catalog Backup & Restore
 - TC-16: Album Deletion
 - TC-18: Reconciliation
-- TC-23.1-23.2: Disk full / eject during export
+- TC-23.1-23.2: Disk full / eject during import
 - TC-23.10: Pipeline backpressure under slow PAR2
 
 ### P1 — Should Pass (functionality risk)

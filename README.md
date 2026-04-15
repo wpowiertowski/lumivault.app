@@ -19,7 +19,7 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 
 ## Features
 
-- **Apple Photos Import** — browse, search, and sort albums from your Photos library; exports the current edited state (crops, filters, adjustments) via PhotoKit and archives in one step
+- **Apple Photos Import** — browse, search, and sort albums from your Photos library; imports the current edited state (crops, filters, adjustments) via PhotoKit and archives in one step; supports multi-album batch import with per-album progress tracking
 - **Reed-Solomon Error Correction** — standard PAR2 2.0 format with GF(2^16) Vandermonde-matrix Reed-Solomon coding, fully compatible with par2cmdline and other PAR2 tools; GPU-accelerated via Metal compute shaders (CPU fallback), adaptive block sizing for guaranteed 10% recovery, split file output (.par2 index + .vol0+N.par2 recovery volumes)
 - **Integrity Verification & Auto-Repair** — re-hash files against stored SHA-256 digests to detect corruption; auto-repair by copying from a healthy volume or using PAR2 Reed-Solomon recovery; verify and repair individual albums or images via right-click context menus
 - **Backblaze B2 Cloud Upload** — upload photos and PAR2 recovery data to B2 cloud storage via the REST API with SHA-1 verification; existence checks prevent duplicate uploads
@@ -30,7 +30,7 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 - **iCloud Catalog Sync** — catalog.json syncs across devices via iCloud Drive with conflict-free merge (union by SHA-256, newest timestamp wins)
 - **Catalog Backup & Restore** — catalog.json is automatically distributed to all external volumes and B2 after every mutation; restore from any backup source (volume, B2, or local file) on fresh run or via Settings
 - **Drag & Drop Import** — native file import via `UniformTypeIdentifiers` with image-type filtering
-- **Image Format Conversion** — optional JPEG conversion with configurable quality and max dimension during export; originals in Photos are never modified
+- **Image Format Conversion** — optional JPEG/HEIF conversion with configurable quality and max dimension during import; originals in Photos are never modified
 - **Thumbnail Generation** — HEIC/RAW/CR2/CR3/NEF/ARW/DNG support with a multi-resolution cache (256px grid, 64px list) keyed by content hash
 
 ## Technology Stack
@@ -79,8 +79,8 @@ Photos are organized into date-based albums, deduplicated across multiple extern
           │ DeletionService         │  remove files from volumes + B2
           │ IntegrityService        │  verification sweeps
           │ EncryptionService       │  AES-256-GCM encrypt/decrypt, key derivation
-          │ PipelinedExportCoord.   │  pipelined async export (AsyncChannel)
-          │ ExportCoordinator       │  legacy sequential export
+          │ PipelinedImportCoord.   │  pipelined async import (AsyncChannel)
+          │ ImportCoordinator       │  legacy sequential import
           └────────────┬────────────┘
                        │
           ┌────────────┴────────────┐
@@ -106,8 +106,8 @@ LumiVault/
 │   ├── Grid/             LazyVGrid thumbnail browser with context menus (verify, delete)
 │   ├── Detail/           Full-resolution preview + metadata inspector
 │   ├── Import/           Drag-and-drop file import with progress
-│   ├── PhotosImport/     Photos library album picker + export wizard
-│   ├── Settings/         General, Volumes, iCloud, B2, Encryption, Export, Integrity, Support
+│   ├── PhotosImport/     Photos library album picker + import wizard
+│   ├── Settings/         General, Volumes, iCloud, B2, Encryption, Import Defaults, Integrity, Support
 │   └── Shared/           Reusable components (EmptyStateView)
 ├── Utilities/            Perceptual hashing, file coordination, bookmarks
 └── Resources/            Asset catalog, StoreKit configuration

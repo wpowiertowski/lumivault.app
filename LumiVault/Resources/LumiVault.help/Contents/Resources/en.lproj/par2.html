@@ -42,13 +42,13 @@
 
     <h2>How It Works</h2>
     <ol>
-        <li>During export, LumiVault generates PAR2 parity files alongside each image.</li>
+        <li>During import, LumiVault generates PAR2 parity files alongside each image.</li>
         <li>Parity files contain redundant data computed from the original file using Reed-Solomon coding.</li>
         <li>If a file is later damaged (bit rot, bad sectors), the parity data can reconstruct the missing or corrupted bytes.</li>
     </ol>
 
     <h2>Enabling PAR2</h2>
-    <p>Toggle <strong>PAR2</strong> in the export configuration step, or set it as default in <strong>Settings &gt; Export</strong>.</p>
+    <p>Toggle <strong>PAR2</strong> in the import configuration step, or set it as default in <strong>Settings &gt; Import Defaults</strong>.</p>
 
     <h2>Redundancy</h2>
     <p>LumiVault generates 10% redundancy for each file &mdash; enough to recover from typical storage corruption while keeping parity files compact.</p>

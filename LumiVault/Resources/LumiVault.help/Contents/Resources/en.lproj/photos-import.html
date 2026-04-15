@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="description" content="Import albums from your Apple Photos library into LumiVault.">
-    <meta name="keywords" content="import, photos, album, export, archive">
+    <meta name="keywords" content="import, photos, album, archive">
     <title>Import from Photos Library</title>
     <style>
         :root { color-scheme: light dark; }
@@ -40,15 +40,15 @@
 
     <p>LumiVault imports albums directly from your Apple Photos library, including any edits (crops, filters, adjustments) you've made.</p>
 
-    <h2>Step 1: Select an Album</h2>
+    <h2>Step 1: Select Albums</h2>
     <p>Click <strong>Import from Photos</strong> in the toolbar (or press <kbd>&#x21E7;&#x2318;I</kbd>). The album picker shows all albums in your Photos library.</p>
     <ul>
         <li><strong>Search</strong> &mdash; type to filter albums by name.</li>
         <li><strong>Sort</strong> &mdash; use the segmented control to sort by Name, Date, or Count. Click the arrow to toggle ascending/descending.</li>
-        <li>Select an album and click <strong>Next</strong>.</li>
+        <li>Select one or more albums and click <strong>Next</strong>. Multi-album import processes each album sequentially with shared settings.</li>
     </ul>
 
-    <h2>Step 2: Configure Export</h2>
+    <h2>Step 2: Configure Import</h2>
     <ul>
         <li><strong>Album Name</strong> &mdash; pre-filled from Photos, editable.</li>
         <li><strong>Date</strong> &mdash; year/month/day determine the folder structure on volumes.</li>
@@ -61,9 +61,10 @@
         <li><strong>B2 Upload</strong> &mdash; upload to Backblaze B2 cloud (requires credentials in Settings).</li>
     </ul>
 
-    <h2>Step 3: Export</h2>
-    <p>Click <strong>Start Export</strong>. The progress screen shows each phase:</p>
+    <h2>Step 3: Import</h2>
+    <p>Click <strong>Start Import</strong>. The progress screen shows each phase:</p>
     <ol>
+        <li><strong>Importing</strong> &mdash; extracting photos from the Photos library.</li>
         <li><strong>Converting</strong> &mdash; format/dimension conversion (if enabled).</li>
         <li><strong>Hashing</strong> &mdash; SHA-256 computation for deduplication and integrity.</li>
         <li><strong>Deduplicating</strong> &mdash; skips files already in the catalog.</li>
@@ -77,7 +78,7 @@
     <p>The completion screen shows counts of processed, duplicated, copied, and uploaded files. Near-duplicate pairs are shown with thumbnail previews and Hamming distances.</p>
 
     <div class="note">
-        <strong>Tip:</strong> Originals in your Photos library are never modified. LumiVault exports the current edited state and works with copies.
+        <strong>Tip:</strong> Originals in your Photos library are never modified. LumiVault imports the current edited state and works with copies.
     </div>
 
     <h2>Photos Library Access</h2>
