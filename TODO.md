@@ -11,8 +11,6 @@ Items explicitly scoped out of v1 but worth tracking for future development.
 Source: ARCHITECTURE-macOS.md Section 11
 
 - [ ] iOS / iPadOS companion app (catalog viewable via iCloud, no native app yet)
-- [ ] AI-based tagging or face detection
-- [ ] Photo editing or RAW development
 - [ ] Video file support
 - [ ] Perceptual hash near-duplicate threshold tuning (fixed at Hamming distance < 5; adjustable threshold deferred)
 
@@ -22,7 +20,7 @@ Source: ARCHITECTURE-macOS.md Section 11
 
 ### Bulk Album Import & Auto-Sync
 
-- [ ] **Bulk album import** — allow selecting and importing multiple Photos albums in a single operation instead of one at a time. Queue albums and run them sequentially through the export pipeline with a combined progress/completion summary.
+- [x] **Bulk album import** — allow selecting and importing multiple Photos albums in a single operation instead of one at a time. Queue albums and run them sequentially through the export pipeline with a combined progress/completion summary.
 - [ ] **Automated album sync** — detect when a previously imported album has changed in Apple Photos (new images added, images removed, edits applied) and offer to re-sync. Could use `PHChange` observation or a periodic poll comparing Photos asset count/modification dates against the catalog. Should support both manual "check for updates" and optional background monitoring.
 
 ### Near-Duplicate Handling
