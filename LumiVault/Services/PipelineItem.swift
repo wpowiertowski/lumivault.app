@@ -11,13 +11,13 @@ struct ImageRecordSnapshot: Sendable {
     let isNew: Bool
 }
 
-/// Item flowing through the export pipeline. Each image gets one PipelineItem
+/// Item flowing through the import pipeline. Each image gets one PipelineItem
 /// that accumulates results as it passes through phases.
 struct PipelineItem: Sendable {
     /// Populated during the hashing phase once an ImageRecord is created/found.
     var snapshot: ImageRecordSnapshot?
     let albumName: String
-    let exportDate: Date
+    let importDate: Date
     let fileURL: URL
     let originalFilename: String
 

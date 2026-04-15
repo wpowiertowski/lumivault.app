@@ -26,7 +26,7 @@ enum MaxDimension: Sendable, Hashable {
     ]
 }
 
-struct ExportSettings: Sendable {
+struct ImportSettings: Sendable {
     var albumName: String
     var year: String
     var month: String
@@ -43,8 +43,8 @@ struct ExportSettings: Sendable {
 }
 
 @Observable
-final class ExportProgress: @unchecked Sendable {
-    var phase: ExportPhase = .exporting
+final class PhotosImportProgress: @unchecked Sendable {
+    var phase: ImportPhase = .importing
     var totalFiles: Int = 0
     var currentFile: Int = 0
     var currentFilename: String = ""
@@ -62,11 +62,11 @@ final class ExportProgress: @unchecked Sendable {
     var errors: [String] = []
     var nearDuplicates: [NearDuplicateMatch] = []
 
-    /// Active phases in order, set at export start based on settings
-    var activePhases: [ExportPhase] = [.exporting, .hashing, .par2, .cataloging]
+    /// Active phases in order, set at import start based on settings
+    var activePhases: [ImportPhase] = [.importing, .hashing, .par2, .cataloging]
 
     /// When true, fraction is based on files fully processed (cataloged) rather than phase index.
-    /// Used by PipelinedExportCoordinator where phases run concurrently.
+    /// Used by PipelinedImportCoordinator where phases run concurrently.
     var isPipelined: Bool = false
 
     /// Multi-album tracking: total files across all albums (0 = single-album mode).
@@ -87,7 +87,7 @@ final class ExportProgress: @unchecked Sendable {
         let albumFraction: Double
 
         if isPipelined {
-            if phase == .exporting {
+            if phase == .importing {
                 albumFraction = Double(currentFile) / Double(totalFiles) * 0.1
             } else if phase == .complete {
                 albumFraction = 1.0
@@ -139,8 +139,8 @@ struct NearDuplicateMatch: Identifiable, Sendable {
     let hammingDistance: Int
 }
 
-enum ExportPhase: String, Sendable {
-    case exporting = "Exporting from Photos"
+enum ImportPhase: String, Sendable {
+    case importing = "Importing from Photos"
     case converting = "Converting images"
     case hashing = "Hashing & deduplicating"
     case encrypting = "Encrypting files"
@@ -153,7 +153,7 @@ enum ExportPhase: String, Sendable {
 
     var verb: String {
         switch self {
-        case .exporting: "Exporting"
+        case .importing: "Importing"
         case .converting: "Converting"
         case .hashing: "Hashing"
         case .encrypting: "Encrypting"
@@ -167,7 +167,7 @@ enum ExportPhase: String, Sendable {
     }
 }
 
-class ExportCoordinator {
+class ImportCoordinator {
     private let photosService = PhotosImportService()
     private let hasher = HasherService()
     private let thumbnailService = ThumbnailService()
@@ -181,11 +181,11 @@ class ExportCoordinator {
         self.encryptionService = encryptionService
     }
 
-    func export(
+    func importAlbum(
         photosAlbumId: String,
-        settings: ExportSettings,
+        settings: ImportSettings,
         modelContext: ModelContext,
-        progress: ExportProgress
+        progress: PhotosImportProgress
     ) async throws {
         // Shared cancellation flag for non-async work (PAR2 OperationQueue)
         let cancelFlag = OSAllocatedUnfairLock(initialState: false)
@@ -200,12 +200,12 @@ class ExportCoordinator {
 
         // 1. Create staging directory
         let staging = FileManager.default.temporaryDirectory
-            .appendingPathComponent("lumivault-export-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("lumivault-import-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: staging) }
 
         // Determine active phases for accurate progress tracking
         let needsConversion = settings.imageFormat == .jpeg || settings.maxDimension != .original
-        var phases: [ExportPhase] = [.exporting]
+        var phases: [ImportPhase] = [.importing]
         if needsConversion { phases.append(.converting) }
         phases.append(.hashing)
         if settings.encryptFiles { phases.append(.encrypting) }
@@ -215,9 +215,9 @@ class ExportCoordinator {
         phases.append(.cataloging)
         progress.activePhases = phases
 
-        // 2. Export from Photos library
-        progress.phase = .exporting
-        let exported = try await photosService.exportAlbum(
+        // 2. Import from Photos library
+        progress.phase = .importing
+        let imported = try await photosService.importAlbum(
             albumId: photosAlbumId,
             to: staging
         ) { current, total in
@@ -227,17 +227,17 @@ class ExportCoordinator {
             }
         }
 
-        progress.totalFiles = exported.count
+        progress.totalFiles = imported.count
         try checkCancellation()
 
         // 2.5. Convert images if needed (JPEG conversion / resize)
-        var processedAssets = exported
+        var processedAssets = imported
         if needsConversion {
             progress.phase = .converting
             progress.currentFile = 0
 
-            var converted: [ExportedAsset] = []
-            for (index, asset) in exported.enumerated() {
+            var converted: [ImportedAsset] = []
+            for (index, asset) in imported.enumerated() {
                 try checkCancellation()
                 progress.currentFile = index + 1
                 progress.currentFilename = asset.originalFilename
@@ -624,12 +624,12 @@ class ExportCoordinator {
     // MARK: - Image Conversion
 
     func convertImage(
-        asset: ExportedAsset,
+        asset: ImportedAsset,
         format: ImageFormat,
         quality: Double,
         maxDimension: MaxDimension,
         staging: URL
-    ) -> ExportedAsset {
+    ) -> ImportedAsset {
         guard let image = NSImage(contentsOf: asset.fileURL),
               let srcRep = image.representations.first else { return asset }
 
@@ -724,7 +724,7 @@ class ExportCoordinator {
         let outputURL = convertedDir.appendingPathComponent(outputFilename)
         do {
             try data.write(to: outputURL, options: .atomic)
-            return ExportedAsset(
+            return ImportedAsset(
                 fileURL: outputURL,
                 originalFilename: outputFilename,
                 creationDate: asset.creationDate

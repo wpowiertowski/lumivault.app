@@ -8,11 +8,11 @@ struct SettingsView: View {
                     Label("General", systemImage: "gearshape")
                 }
                 .accessibilityIdentifier("settings.tab.general")
-            ExportDefaultsSettingsView()
+            ImportDefaultsSettingsView()
                 .tabItem {
-                    Label("Export", systemImage: "square.and.arrow.up")
+                    Label("Import Defaults", systemImage: "square.and.arrow.down")
                 }
-                .accessibilityIdentifier("settings.tab.export")
+                .accessibilityIdentifier("settings.tab.import")
             VolumesSettingsView()
                 .tabItem {
                     Label("Volumes", systemImage: "externaldrive")

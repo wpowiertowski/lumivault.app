@@ -98,7 +98,7 @@ extension LumiVaultUITests {
 
         let tabIds = [
             "settings.tab.general",
-            "settings.tab.export",
+            "settings.tab.import",
             "settings.tab.volumes",
             "settings.tab.icloud",
             "settings.tab.b2",
@@ -167,7 +167,7 @@ extension LumiVaultUITests {
 
 extension LumiVaultUITests {
 
-    /// TC-2.1: Import from Photos button opens the export sheet.
+    /// TC-2.1: Import from Photos button opens the import sheet.
     func testPhotosImportOpensSheet() {
         let importButton = app.buttons["toolbar.importPhotos"]
         guard importButton.waitForExistence(timeout: 5) else {
@@ -177,8 +177,8 @@ extension LumiVaultUITests {
 
         importButton.click()
 
-        // The export sheet should appear with the cancel button
-        let cancelButton = app.buttons["export.cancel"]
+        // The import sheet should appear with the cancel button
+        let cancelButton = app.buttons["import.cancel"]
         XCTAssertTrue(cancelButton.waitForExistence(timeout: 5),
                       "Export sheet should open with cancel button visible")
 
@@ -186,8 +186,8 @@ extension LumiVaultUITests {
         cancelButton.click()
     }
 
-    /// TC-4.1-4.2: Cancel button is accessible during export flow.
-    func testExportCancelButtonExists() {
+    /// TC-4.1-4.2: Cancel button is accessible during import flow.
+    func testImportCancelButtonExists() {
         let importButton = app.buttons["toolbar.importPhotos"]
         guard importButton.waitForExistence(timeout: 5) else {
             XCTFail("Import button should exist")
@@ -196,12 +196,12 @@ extension LumiVaultUITests {
 
         importButton.click()
 
-        let cancelButton = app.buttons["export.cancel"]
+        let cancelButton = app.buttons["import.cancel"]
         XCTAssertTrue(cancelButton.waitForExistence(timeout: 5),
-                      "Cancel button should be visible in export sheet")
+                      "Cancel button should be visible in import sheet")
 
         // Next button should be disabled (no album selected)
-        let nextButton = app.buttons["export.next"]
+        let nextButton = app.buttons["import.next"]
         if nextButton.waitForExistence(timeout: 3) {
             XCTAssertFalse(nextButton.isEnabled,
                            "Next button should be disabled when no album is selected")
@@ -241,12 +241,12 @@ extension LumiVaultUITests {
     }
 }
 
-// MARK: - TC-22: Export Defaults Persistence
+// MARK: - TC-22: Import Defaults Persistence
 
 extension LumiVaultUITests {
 
-    /// TC-22.2: Export defaults tab shows PAR2 and near-dupe toggles.
-    func testExportDefaultsToggles() {
+    /// TC-22.2: Import defaults tab shows PAR2 and near-dupe toggles.
+    func testImportDefaultsToggles() {
         // Open Settings
         app.typeKey(",", modifierFlags: .command)
 
@@ -256,18 +256,18 @@ extension LumiVaultUITests {
             return
         }
 
-        // Navigate to Export tab
-        let exportTab = settingsWindow.descendants(matching: .any)["settings.tab.export"]
-        if exportTab.waitForExistence(timeout: 3) {
-            exportTab.click()
+        // Navigate to Import Defaults tab
+        let importTab = settingsWindow.descendants(matching: .any)["settings.tab.import"]
+        if importTab.waitForExistence(timeout: 3) {
+            importTab.click()
         }
 
-        let par2Toggle = settingsWindow.descendants(matching: .any)["exportDefaults.par2"]
-        let nearDupeToggle = settingsWindow.descendants(matching: .any)["exportDefaults.nearDupe"]
+        let par2Toggle = settingsWindow.descendants(matching: .any)["importDefaults.par2"]
+        let nearDupeToggle = settingsWindow.descendants(matching: .any)["importDefaults.nearDupe"]
 
         XCTAssertTrue(par2Toggle.waitForExistence(timeout: 3),
-                      "PAR2 toggle should exist on Export Defaults tab")
+                      "PAR2 toggle should exist on Import Defaults tab")
         XCTAssertTrue(nearDupeToggle.exists,
-                      "Near-duplicate toggle should exist on Export Defaults tab")
+                      "Near-duplicate toggle should exist on Import Defaults tab")
     }
 }

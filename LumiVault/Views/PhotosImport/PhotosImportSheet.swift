@@ -1,24 +1,24 @@
 import SwiftUI
 import SwiftData
 
-struct PhotosExportSheet: View {
+struct PhotosImportSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @State private var step: ExportStep = .pickAlbum
+    @State private var step: ImportStep = .pickAlbum
     @State private var selectedAlbumIds: Set<String> = []
     @State private var selectedAlbumTitle: String = ""
-    @State private var settings = ExportSettings(
+    @State private var settings = ImportSettings(
         albumName: "",
         year: "",
         month: "",
         day: ""
     )
-    @State private var progress = ExportProgress()
-    @State private var isExporting = false
-    @State private var exportTask: Task<Void, Never>?
-    @State private var currentExportAlbumIndex: Int = 0
-    @State private var totalExportAlbums: Int = 0
-    @State private var currentExportAlbumName: String = ""
+    @State private var progress = PhotosImportProgress()
+    @State private var isImporting = false
+    @State private var importTask: Task<Void, Never>?
+    @State private var currentImportAlbumIndex: Int = 0
+    @State private var totalImportAlbums: Int = 0
+    @State private var currentImportAlbumName: String = ""
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @Environment(\.encryptionService) private var encryptionService
     @Query private var volumes: [VolumeRecord]
@@ -64,8 +64,8 @@ struct PhotosExportSheet: View {
                         albumPickerStep
                     case .configure:
                         configureStep
-                    case .exporting:
-                        exportingStep
+                    case .importing:
+                        importingStep
                     case .complete:
                         completeStep
                     }
@@ -78,11 +78,11 @@ struct PhotosExportSheet: View {
             // Navigation buttons
             HStack {
                 Button("Cancel") {
-                    exportTask?.cancel()
+                    importTask?.cancel()
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
-                .accessibilityIdentifier("export.cancel")
+                .accessibilityIdentifier("import.cancel")
 
                 Spacer()
 
@@ -92,24 +92,24 @@ struct PhotosExportSheet: View {
                         Button("Next") { goToSettings() }
                             .keyboardShortcut(.defaultAction)
                             .disabled(selectedAlbumIds.isEmpty)
-                            .accessibilityIdentifier("export.next")
+                            .accessibilityIdentifier("import.next")
                     }
 
                 case .configure:
                     Button("Back") { step = .pickAlbum }
-                        .accessibilityIdentifier("export.back")
-                    Button("Start Export") { startExport() }
+                        .accessibilityIdentifier("import.back")
+                    Button("Start Import") { startImport() }
                         .keyboardShortcut(.defaultAction)
                         .disabled(!isMultiAlbum && settings.albumName.isEmpty)
-                        .accessibilityIdentifier("export.start")
+                        .accessibilityIdentifier("import.start")
 
-                case .exporting:
+                case .importing:
                     EmptyView()
 
                 case .complete:
                     Button("Done") { dismiss() }
                         .keyboardShortcut(.defaultAction)
-                        .accessibilityIdentifier("export.done")
+                        .accessibilityIdentifier("import.done")
                 }
             }
             .padding()
@@ -153,7 +153,7 @@ struct PhotosExportSheet: View {
 
     private var configureStep: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Export Settings")
+            Text("Import Settings")
                 .font(Constants.Design.monoTitle3)
                 .padding(.horizontal)
                 .padding(.top, 12)
@@ -165,14 +165,14 @@ struct PhotosExportSheet: View {
                     .padding(.horizontal)
             }
 
-            ExportSettingsView(settings: $settings, showAlbumDetails: !isMultiAlbum)
+            ImportSettingsView(settings: $settings, showAlbumDetails: !isMultiAlbum)
         }
     }
 
-    private var exportingStep: some View {
+    private var importingStep: some View {
         VStack(spacing: 16) {
-            if totalExportAlbums > 1 {
-                Text("Album \(currentExportAlbumIndex) of \(totalExportAlbums): \(currentExportAlbumName)")
+            if totalImportAlbums > 1 {
+                Text("Album \(currentImportAlbumIndex) of \(totalImportAlbums): \(currentImportAlbumName)")
                     .font(Constants.Design.monoCaption)
                     .foregroundStyle(.secondary)
             }
@@ -182,7 +182,7 @@ struct PhotosExportSheet: View {
                     .controlSize(.small)
                 Text(progress.phase.rawValue)
                     .font(Constants.Design.monoHeadline)
-                    .accessibilityIdentifier("export.phaseLabel")
+                    .accessibilityIdentifier("import.phaseLabel")
             }
 
             VStack(spacing: 6) {
@@ -198,7 +198,7 @@ struct PhotosExportSheet: View {
                 // Live status line: stage + filename + counter
                 HStack(spacing: 0) {
                     if !progress.currentFilename.isEmpty {
-                        if progress.isPipelined && progress.phase != .exporting {
+                        if progress.isPipelined && progress.phase != .importing {
                             Text(progress.currentFilename)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
@@ -215,7 +215,7 @@ struct PhotosExportSheet: View {
                     }
                     Spacer(minLength: 4)
                     if progress.totalFiles > 0 {
-                        if progress.isPipelined && progress.phase != .exporting {
+                        if progress.isPipelined && progress.phase != .importing {
                             Text("\(progress.filesCataloged)/\(progress.totalFiles)")
                                 .foregroundStyle(.quaternary)
                         } else {
@@ -231,19 +231,19 @@ struct PhotosExportSheet: View {
 
             HStack(spacing: 24) {
                 if progress.filesConverted > 0 {
-                    ExportStat(label: "Converted", value: progress.filesConverted)
+                    ImportStat(label: "Converted", value: progress.filesConverted)
                 }
-                ExportStat(label: "Hashed", value: progress.filesHashed)
-                ExportStat(label: "Deduped", value: progress.filesDeduplicated)
+                ImportStat(label: "Hashed", value: progress.filesHashed)
+                ImportStat(label: "Deduped", value: progress.filesDeduplicated)
                 if progress.nearDuplicatesFound > 0 {
-                    ExportStat(label: "Near-dupes", value: progress.nearDuplicatesFound)
+                    ImportStat(label: "Near-dupes", value: progress.nearDuplicatesFound)
                 }
                 if progress.filesEncrypted > 0 {
-                    ExportStat(label: "Encrypted", value: progress.filesEncrypted)
+                    ImportStat(label: "Encrypted", value: progress.filesEncrypted)
                 }
-                ExportStat(label: "PAR2", value: progress.filesProtected)
-                ExportStat(label: "Copied", value: progress.filesCopied)
-                ExportStat(label: "Uploaded", value: progress.filesUploaded)
+                ImportStat(label: "PAR2", value: progress.filesProtected)
+                ImportStat(label: "Copied", value: progress.filesCopied)
+                ImportStat(label: "Uploaded", value: progress.filesUploaded)
             }
             .font(Constants.Design.monoCaption)
 
@@ -273,12 +273,12 @@ struct PhotosExportSheet: View {
                 .font(.system(size: 48))
                 .foregroundStyle(hasErrors || hasDropped ? .orange : .green)
 
-            Text(hasErrors || hasDropped ? "Export Completed with Issues" : "Export Complete")
+            Text(hasErrors || hasDropped ? "Import Completed with Issues" : "Import Complete")
                 .font(Constants.Design.monoTitle3)
 
             VStack(spacing: 4) {
-                if totalExportAlbums > 1 {
-                    Text("\(totalExportAlbums) albums processed")
+                if totalImportAlbums > 1 {
+                    Text("\(totalImportAlbums) albums processed")
                 }
                 Text("\(progress.filesCataloged) images added to album")
                 if progress.filesDeduplicated > 0 {
@@ -385,37 +385,37 @@ struct PhotosExportSheet: View {
                 step = .configure
             }
         } else {
-            // Multiple albums — album details derived per-album during export
+            // Multiple albums — album details derived per-album during import
             step = .configure
         }
     }
 
-    private func startExport() {
+    private func startImport() {
         guard !selectedAlbumIds.isEmpty else { return }
-        step = .exporting
-        isExporting = true
+        step = .importing
+        isImporting = true
 
         nonisolated(unsafe) let ctx = modelContext
-        exportTask = Task { @MainActor in
+        importTask = Task { @MainActor in
             // Load existing catalog so new images are appended rather than overwriting it
             let catalogPath = NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
             try? await catalogService.load(from: URL(fileURLWithPath: catalogPath))
 
-            let coordinator = PipelinedExportCoordinator(catalogService: catalogService, encryptionService: encryptionService)
+            let coordinator = PipelinedImportCoordinator(catalogService: catalogService, encryptionService: encryptionService)
 
             if selectedAlbumIds.count > 1 {
-                // Multi-album export
+                // Multi-album import
                 let service = PhotosImportService()
                 let allAlbums = await service.fetchAlbums()
                 let selected = allAlbums.filter { selectedAlbumIds.contains($0.id) }
 
-                totalExportAlbums = selected.count
+                totalImportAlbums = selected.count
                 progress.globalTotalFiles = selected.reduce(0) { $0 + $1.assetCount }
                 progress.completedAlbumFiles = 0
 
                 for (index, album) in selected.enumerated() {
-                    currentExportAlbumIndex = index + 1
-                    currentExportAlbumName = album.title
+                    currentImportAlbumIndex = index + 1
+                    currentImportAlbumName = album.title
 
                     // Build per-album settings from shared settings + album metadata
                     var albumSettings = settings
@@ -427,13 +427,13 @@ struct PhotosExportSheet: View {
                     albumSettings.day = String(format: "%02d", calendar.component(.day, from: date))
 
                     // Reset per-album progress fields
-                    progress.phase = .exporting
+                    progress.phase = .importing
                     progress.currentFile = 0
                     progress.totalFiles = 0
                     progress.currentFilename = ""
 
                     do {
-                        try await coordinator.export(
+                        try await coordinator.importAlbum(
                             photosAlbumId: album.id,
                             settings: albumSettings,
                             modelContext: ctx,
@@ -443,21 +443,21 @@ struct PhotosExportSheet: View {
                         progress.completedAlbumFiles += progress.totalFiles
                     } catch is CancellationError {
                         progress.phase = .failed
-                        progress.errors.append("Export cancelled")
+                        progress.errors.append("Import cancelled")
                         break
                     } catch {
                         progress.completedAlbumFiles += progress.totalFiles
-                        progress.errors.append("Export failed for \"\(album.title)\": \(error.localizedDescription)")
+                        progress.errors.append("Import failed for \"\(album.title)\": \(error.localizedDescription)")
                     }
                 }
 
                 await syncCoordinator.pushAfterLocalChange()
             } else {
-                // Single album export
+                // Single album import
                 guard let albumId = selectedAlbumIds.first else { return }
 
                 do {
-                    try await coordinator.export(
+                    try await coordinator.importAlbum(
                         photosAlbumId: albumId,
                         settings: settings,
                         modelContext: ctx,
@@ -466,14 +466,14 @@ struct PhotosExportSheet: View {
                     await syncCoordinator.pushAfterLocalChange()
                 } catch is CancellationError {
                     progress.phase = .failed
-                    progress.errors.append("Export cancelled")
+                    progress.errors.append("Import cancelled")
                 } catch {
-                    progress.errors.append("Export failed: \(error.localizedDescription)")
+                    progress.errors.append("Import failed: \(error.localizedDescription)")
                     progress.phase = .failed
                 }
             }
 
-            isExporting = false
+            isImporting = false
             step = .complete
         }
     }
@@ -481,25 +481,25 @@ struct PhotosExportSheet: View {
 
 // MARK: - Supporting Views
 
-private enum ExportStep: Int, CaseIterable {
-    case pickAlbum, configure, exporting, complete
+private enum ImportStep: Int, CaseIterable {
+    case pickAlbum, configure, importing, complete
 
     var label: String {
         switch self {
         case .pickAlbum: "Select Albums"
         case .configure: "Settings"
-        case .exporting: "Exporting"
+        case .importing: "Importing"
         case .complete: "Done"
         }
     }
 }
 
 private struct StepIndicator: View {
-    let current: ExportStep
+    let current: ImportStep
 
     var body: some View {
         HStack(spacing: 4) {
-            ForEach(ExportStep.allCases, id: \.rawValue) { step in
+            ForEach(ImportStep.allCases, id: \.rawValue) { step in
                 HStack(spacing: 4) {
                     Circle()
                         .fill(step.rawValue <= current.rawValue ? Constants.Design.accentColor : Color.secondary.opacity(0.3))
@@ -508,7 +508,7 @@ private struct StepIndicator: View {
                         .font(Constants.Design.monoCaption)
                         .foregroundStyle(step.rawValue <= current.rawValue ? .primary : .secondary)
                 }
-                if step != ExportStep.allCases.last {
+                if step != ImportStep.allCases.last {
                     Rectangle()
                         .fill(step.rawValue < current.rawValue ? Constants.Design.accentColor : Color.secondary.opacity(0.3))
                         .frame(height: 1)
@@ -519,7 +519,7 @@ private struct StepIndicator: View {
     }
 }
 
-private struct ExportStat: View {
+private struct ImportStat: View {
     let label: String
     let value: Int
 

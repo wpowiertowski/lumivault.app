@@ -66,7 +66,7 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showingPhotosImport) {
-            PhotosExportSheet()
+            PhotosImportSheet()
         }
         .sheet(isPresented: $showingNearDuplicates) {
             NearDuplicatesView()

@@ -10,12 +10,12 @@ private struct UnsafeSendable<T>: @unchecked Sendable {
     let value: T
 }
 
-/// Export coordinator that pipelines images through phases so that
+/// Import coordinator that pipelines images through phases so that
 /// already-converted images can hash while later images still convert, etc.
 ///
 /// Pipeline topology (phases skipped when disabled):
-///   Export -> Conversion -> Hashing/Dedup -> Encryption -> PAR2 -> Copy -> Upload -> Catalog
-class PipelinedExportCoordinator: @unchecked Sendable {
+///   Import -> Conversion -> Hashing/Dedup -> Encryption -> PAR2 -> Copy -> Upload -> Catalog
+class PipelinedImportCoordinator: @unchecked Sendable {
     private let photosService = PhotosImportService()
     private let hasher = HasherService()
     private let thumbnailService = ThumbnailService()
@@ -29,17 +29,17 @@ class PipelinedExportCoordinator: @unchecked Sendable {
         self.encryptionService = encryptionService
     }
 
-    func export(
+    func importAlbum(
         photosAlbumId: String,
-        settings: ExportSettings,
+        settings: ImportSettings,
         modelContext: ModelContext,
-        progress: ExportProgress
+        progress: PhotosImportProgress
     ) async throws {
         let cancelFlag = OSAllocatedUnfairLock(initialState: false)
 
         // Staging directory
         let staging = FileManager.default.temporaryDirectory
-            .appendingPathComponent("lumivault-export-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("lumivault-import-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: staging) }
 
@@ -51,7 +51,7 @@ class PipelinedExportCoordinator: @unchecked Sendable {
         let needsCopy = !settings.targetVolumeIDs.isEmpty
         let needsUpload = settings.uploadToB2 && settings.b2Credentials != nil
 
-        var phases: [ExportPhase] = [.exporting]
+        var phases: [ImportPhase] = [.importing]
         if needsConversion { phases.append(.converting) }
         phases.append(.hashing)
         if needsEncryption { phases.append(.encrypting) }
@@ -62,11 +62,11 @@ class PipelinedExportCoordinator: @unchecked Sendable {
         await MainActor.run {
             progress.activePhases = phases
             progress.isPipelined = true
-            progress.phase = .exporting
+            progress.phase = .importing
         }
 
-        // 1. Export from Photos
-        let exported = try await photosService.exportAlbum(
+        // 1. Import from Photos
+        let imported = try await photosService.importAlbum(
             albumId: photosAlbumId,
             to: staging
         ) { current, total in
@@ -75,7 +75,7 @@ class PipelinedExportCoordinator: @unchecked Sendable {
                 progress.totalFiles = total
             }
         }
-        await MainActor.run { progress.totalFiles = exported.count }
+        await MainActor.run { progress.totalFiles = imported.count }
 
         if Task.isCancelled {
             cancelFlag.withLock { $0 = true }
@@ -143,12 +143,12 @@ class PipelinedExportCoordinator: @unchecked Sendable {
 
         // MARK: - Feed
         let firstChannel = needsConversion ? conversionCh : hashingCh
-        let feedTask = Task { @MainActor [exported, settings] in
-            for asset in exported {
+        let feedTask = Task { @MainActor [imported, settings] in
+            for asset in imported {
                 guard !Task.isCancelled else { break }
                 let item = PipelineItem(
                     albumName: settings.albumName,
-                    exportDate: .now,
+                    importDate: .now,
                     fileURL: asset.fileURL,
                     originalFilename: asset.originalFilename
                 )
@@ -169,7 +169,7 @@ class PipelinedExportCoordinator: @unchecked Sendable {
 
                     var mutableItem = item
                     let converted = self.convertImage(
-                        asset: ExportedAsset(
+                        asset: ImportedAsset(
                             fileURL: item.fileURL,
                             originalFilename: item.originalFilename,
                             creationDate: nil
@@ -588,7 +588,7 @@ class PipelinedExportCoordinator: @unchecked Sendable {
 
         // MARK: - Catalog (final sink) — awaited to completion
         // Run the entire catalog sink on MainActor to avoid data races on
-        // @Observable ExportProgress and to keep SwiftData access safe.
+        // @Observable PhotosImportProgress and to keep SwiftData access safe.
         let catalogSinkTask = Task { @MainActor [ctx, settings] in
             let modelContext = ctx.value
             let albumName = settings.albumName
@@ -713,12 +713,12 @@ class PipelinedExportCoordinator: @unchecked Sendable {
     // MARK: - Image Conversion
 
     func convertImage(
-        asset: ExportedAsset,
+        asset: ImportedAsset,
         format: ImageFormat,
         quality: Double,
         maxDimension: MaxDimension,
         staging: URL
-    ) -> ExportedAsset {
+    ) -> ImportedAsset {
         guard let image = NSImage(contentsOf: asset.fileURL),
               let srcRep = image.representations.first else { return asset }
 
@@ -809,7 +809,7 @@ class PipelinedExportCoordinator: @unchecked Sendable {
         let outputURL = convertedDir.appendingPathComponent(outputFilename)
         do {
             try data.write(to: outputURL, options: .atomic)
-            return ExportedAsset(
+            return ImportedAsset(
                 fileURL: outputURL,
                 originalFilename: outputFilename,
                 creationDate: asset.creationDate

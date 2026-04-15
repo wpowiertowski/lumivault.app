@@ -9,7 +9,7 @@ struct PhotosAlbum: Identifiable, Sendable {
     let endDate: Date?
 }
 
-struct ExportedAsset: Sendable {
+struct ImportedAsset: Sendable {
     let fileURL: URL
     let originalFilename: String
     let creationDate: Date?
@@ -32,7 +32,7 @@ actor PhotosImportService {
     func fetchAlbums() -> [PhotosAlbum] {
         var albums: [PhotosAlbum] = []
 
-        // Only count images — export filters to images, so counts must match
+        // Only count images — import filters to images, so counts must match
         let imageOnly = PHFetchOptions()
         imageOnly.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
 
@@ -70,13 +70,13 @@ actor PhotosImportService {
         return albums
     }
 
-    // MARK: - Asset Export
+    // MARK: - Asset Import
 
-    func exportAlbum(
+    func importAlbum(
         albumId: String,
-        to exportDirectory: URL,
+        to importDirectory: URL,
         progress: @Sendable (Int, Int) -> Void
-    ) async throws -> [ExportedAsset] {
+    ) async throws -> [ImportedAsset] {
         let fetchResult = PHAssetCollection.fetchAssetCollections(
             withLocalIdentifiers: [albumId], options: nil
         )
@@ -90,27 +90,27 @@ actor PhotosImportService {
         let assets = PHAsset.fetchAssets(in: collection, options: fetchOptions)
 
         let total = assets.count
-        var exported: [ExportedAsset] = []
+        var imported: [ImportedAsset] = []
 
-        try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: importDirectory, withIntermediateDirectories: true)
 
         for index in 0..<total {
             let asset = assets.object(at: index)
-            let result = try await exportAsset(asset, to: exportDirectory)
-            exported.append(result)
+            let result = try await importAsset(asset, to: importDirectory)
+            imported.append(result)
             progress(index + 1, total)
         }
 
-        return exported
+        return imported
     }
 
-    // MARK: - Single Asset Export
+    // MARK: - Single Asset Import
 
-    private func exportAsset(_ asset: PHAsset, to directory: URL) async throws -> ExportedAsset {
+    private func importAsset(_ asset: PHAsset, to directory: URL) async throws -> ImportedAsset {
         let resources = PHAssetResource.assetResources(for: asset)
 
         // Prefer edited (fullSizePhoto) over unedited original (photo)
-        // so that user edits from Photos are preserved in the export
+        // so that user edits from Photos are preserved in the import
         guard let resource = resources.first(where: { $0.type == .fullSizePhoto })
                 ?? resources.first(where: { $0.type == .photo })
                 ?? resources.first else {
@@ -127,7 +127,7 @@ actor PhotosImportService {
 
         try await writeResource(resource, to: finalURL)
 
-        return ExportedAsset(
+        return ImportedAsset(
             fileURL: finalURL,
             originalFilename: filename,
             creationDate: asset.creationDate

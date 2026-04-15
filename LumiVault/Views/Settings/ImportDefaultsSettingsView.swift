@@ -1,11 +1,11 @@
 import SwiftUI
 
-struct ExportDefaultsSettingsView: View {
-    @AppStorage("exportFormat") private var formatRaw = ImageFormat.original.rawValue
-    @AppStorage("exportJpegQuality") private var jpegQuality = 0.85
-    @AppStorage("exportMaxDimension") private var maxDimensionRaw = 0 // 0 = original
-    @AppStorage("exportGeneratePAR2") private var generatePAR2 = true
-    @AppStorage("exportDetectNearDuplicates") private var detectNearDuplicates = true
+struct ImportDefaultsSettingsView: View {
+    @AppStorage("importFormat") private var formatRaw = ImageFormat.original.rawValue
+    @AppStorage("importJpegQuality") private var jpegQuality = 0.85
+    @AppStorage("importMaxDimension") private var maxDimensionRaw = 0 // 0 = original
+    @AppStorage("importGeneratePAR2") private var generatePAR2 = true
+    @AppStorage("importDetectNearDuplicates") private var detectNearDuplicates = true
 
     private var format: Binding<ImageFormat> {
         Binding(
@@ -57,7 +57,7 @@ struct ExportDefaultsSettingsView: View {
                 .font(Constants.Design.monoBody)
 
                 if format.wrappedValue != .original || maxDimension.wrappedValue != .original {
-                    Text("Images will be converted during export. Originals in Photos are not modified.")
+                    Text("Images will be converted during import. Originals in Photos are not modified.")
                         .font(Constants.Design.monoCaption)
                         .foregroundStyle(.tertiary)
                 }
@@ -65,9 +65,9 @@ struct ExportDefaultsSettingsView: View {
 
             Section("Processing") {
                 Toggle("Generate PAR2 error correction", isOn: $generatePAR2)
-                    .accessibilityIdentifier("exportDefaults.par2")
+                    .accessibilityIdentifier("importDefaults.par2")
                 Toggle("Detect near-duplicate images", isOn: $detectNearDuplicates)
-                    .accessibilityIdentifier("exportDefaults.nearDupe")
+                    .accessibilityIdentifier("importDefaults.nearDupe")
             }
         }
         .formStyle(.grouped)
