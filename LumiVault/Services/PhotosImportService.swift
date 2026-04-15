@@ -32,12 +32,16 @@ actor PhotosImportService {
     func fetchAlbums() -> [PhotosAlbum] {
         var albums: [PhotosAlbum] = []
 
+        // Only count images — export filters to images, so counts must match
+        let imageOnly = PHFetchOptions()
+        imageOnly.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+
         // User-created albums
         let userAlbums = PHAssetCollection.fetchAssetCollections(
             with: .album, subtype: .any, options: nil
         )
         userAlbums.enumerateObjects { collection, _, _ in
-            let assets = PHAsset.fetchAssets(in: collection, options: nil)
+            let assets = PHAsset.fetchAssets(in: collection, options: imageOnly)
             albums.append(PhotosAlbum(
                 id: collection.localIdentifier,
                 title: collection.localizedTitle ?? "Untitled",
@@ -52,7 +56,7 @@ actor PhotosImportService {
             with: .smartAlbum, subtype: .any, options: nil
         )
         smartAlbums.enumerateObjects { collection, _, _ in
-            let assets = PHAsset.fetchAssets(in: collection, options: nil)
+            let assets = PHAsset.fetchAssets(in: collection, options: imageOnly)
             guard assets.count > 0 else { return }
             albums.append(PhotosAlbum(
                 id: collection.localIdentifier,

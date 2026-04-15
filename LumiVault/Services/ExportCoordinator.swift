@@ -58,6 +58,7 @@ final class ExportProgress: @unchecked Sendable {
     var filesProtected: Int = 0
     var par2FileFraction: Double = 0
     var filesCataloged: Int = 0
+    var filesDropped: Int = 0
     var errors: [String] = []
     var nearDuplicates: [NearDuplicateMatch] = []
 

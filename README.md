@@ -79,7 +79,8 @@ Photos are organized into date-based albums, deduplicated across multiple extern
           │ DeletionService         │  remove files from volumes + B2
           │ IntegrityService        │  verification sweeps
           │ EncryptionService       │  AES-256-GCM encrypt/decrypt, key derivation
-          │ ExportCoordinator       │  orchestrates full export pipeline
+          │ PipelinedExportCoord.   │  pipelined async export (AsyncChannel)
+          │ ExportCoordinator       │  legacy sequential export
           └────────────┬────────────┘
                        │
           ┌────────────┴────────────┐
