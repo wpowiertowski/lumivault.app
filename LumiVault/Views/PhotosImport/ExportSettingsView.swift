@@ -3,6 +3,7 @@ import SwiftData
 
 struct ExportSettingsView: View {
     @Binding var settings: ExportSettings
+    var showAlbumDetails: Bool = true
     @Query private var volumes: [VolumeRecord]
     @AppStorage("b2Enabled") private var b2Enabled = false
     @AppStorage("encryptionEnabled") private var encryptionEnabled = false
@@ -19,23 +20,25 @@ struct ExportSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Album Details") {
-                TextField("Album Name", text: $settings.albumName)
-                    .font(Constants.Design.monoBody)
-                    .accessibilityIdentifier("exportSettings.albumName")
+            if showAlbumDetails {
+                Section("Album Details") {
+                    TextField("Album Name", text: $settings.albumName)
+                        .font(Constants.Design.monoBody)
+                        .accessibilityIdentifier("exportSettings.albumName")
 
-                HStack(spacing: 12) {
-                    TextField("Year", text: $settings.year)
-                        .frame(minWidth: 70)
-                        .accessibilityIdentifier("exportSettings.year")
-                    TextField("Month", text: $settings.month)
-                        .frame(minWidth: 55)
-                        .accessibilityIdentifier("exportSettings.month")
-                    TextField("Day", text: $settings.day)
-                        .frame(minWidth: 55)
-                        .accessibilityIdentifier("exportSettings.day")
+                    HStack(spacing: 12) {
+                        TextField("Year", text: $settings.year)
+                            .frame(minWidth: 70)
+                            .accessibilityIdentifier("exportSettings.year")
+                        TextField("Month", text: $settings.month)
+                            .frame(minWidth: 55)
+                            .accessibilityIdentifier("exportSettings.month")
+                        TextField("Day", text: $settings.day)
+                            .frame(minWidth: 55)
+                            .accessibilityIdentifier("exportSettings.day")
+                    }
+                    .font(Constants.Design.monoBody)
                 }
-                .font(Constants.Design.monoBody)
             }
 
             Section("Image Format") {

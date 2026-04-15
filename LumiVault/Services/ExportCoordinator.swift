@@ -69,42 +69,64 @@ final class ExportProgress: @unchecked Sendable {
     /// Used by PipelinedExportCoordinator where phases run concurrently.
     var isPipelined: Bool = false
 
+    /// Multi-album tracking: total files across all albums (0 = single-album mode).
+    var globalTotalFiles: Int = 0
+    /// Multi-album tracking: files fully processed in previously completed albums.
+    var completedAlbumFiles: Int = 0
+
     var fraction: Double {
-        guard totalFiles > 0 else { return 0 }
+        guard totalFiles > 0 else {
+            // No files yet for this album — show progress from completed albums only
+            if globalTotalFiles > 0 {
+                return Double(completedAlbumFiles) / Double(globalTotalFiles)
+            }
+            return 0
+        }
+
+        // Compute progress within the current album (0.0 – 1.0)
+        let albumFraction: Double
 
         if isPipelined {
             if phase == .exporting {
-                // Still in the initial Photos export phase — show export progress
-                return Double(currentFile) / Double(totalFiles) * 0.1
+                albumFraction = Double(currentFile) / Double(totalFiles) * 0.1
+            } else if phase == .complete {
+                albumFraction = 1.0
+            } else {
+                let pipelineFraction = Double(filesCataloged) / Double(totalFiles)
+                albumFraction = 0.1 + pipelineFraction * 0.9
             }
-            if phase == .complete { return 1.0 }
-            // Once the pipeline is running, track files fully cataloged
-            let pipelineFraction = Double(filesCataloged) / Double(totalFiles)
-            // Reserve 0-10% for Photos export, 10-100% for the pipeline
-            return 0.1 + pipelineFraction * 0.9
-        }
-
-        // Legacy sequential mode: phase-weighted progress
-        guard !activePhases.isEmpty else { return 0 }
-        let phaseCount = activePhases.count
-        guard let phaseIndex = activePhases.firstIndex(of: phase) else {
-            return phase == .complete ? 1.0 : 0.0
-        }
-
-        let phaseWeight = 1.0 / Double(phaseCount)
-        let baseFraction = Double(phaseIndex) * phaseWeight
-
-        // Per-file progress within current phase
-        var phaseFraction: Double
-        if phase == .par2 {
-            let fileFraction = totalFiles > 0 ? Double(max(currentFile - 1, 0)) / Double(totalFiles) : 0
-            let subFraction = totalFiles > 0 ? par2FileFraction / Double(totalFiles) : 0
-            phaseFraction = fileFraction + subFraction
         } else {
-            phaseFraction = totalFiles > 0 ? Double(currentFile) / Double(totalFiles) : 0
+            // Legacy sequential mode: phase-weighted progress
+            guard !activePhases.isEmpty else { return 0 }
+            let phaseCount = activePhases.count
+            guard let phaseIndex = activePhases.firstIndex(of: phase) else {
+                return globalFraction(for: phase == .complete ? 1.0 : 0.0)
+            }
+
+            let phaseWeight = 1.0 / Double(phaseCount)
+            let baseFraction = Double(phaseIndex) * phaseWeight
+
+            var phaseFraction: Double
+            if phase == .par2 {
+                let fileFraction = totalFiles > 0 ? Double(max(currentFile - 1, 0)) / Double(totalFiles) : 0
+                let subFraction = totalFiles > 0 ? par2FileFraction / Double(totalFiles) : 0
+                phaseFraction = fileFraction + subFraction
+            } else {
+                phaseFraction = totalFiles > 0 ? Double(currentFile) / Double(totalFiles) : 0
+            }
+
+            albumFraction = baseFraction + phaseFraction * phaseWeight
         }
 
-        return baseFraction + phaseFraction * phaseWeight
+        return globalFraction(for: albumFraction)
+    }
+
+    /// Maps a per-album fraction (0–1) to a global fraction weighted by file count.
+    private func globalFraction(for albumFraction: Double) -> Double {
+        guard globalTotalFiles > 0 else { return albumFraction }
+        let completedPortion = Double(completedAlbumFiles) / Double(globalTotalFiles)
+        let albumPortion = Double(totalFiles) / Double(globalTotalFiles)
+        return completedPortion + albumFraction * albumPortion
     }
 }
 
