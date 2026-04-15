@@ -204,7 +204,7 @@ class ImportCoordinator {
         defer { try? FileManager.default.removeItem(at: staging) }
 
         // Determine active phases for accurate progress tracking
-        let needsConversion = settings.imageFormat == .jpeg || settings.maxDimension != .original
+        let needsConversion = settings.imageFormat != .original || settings.maxDimension != .original
         var phases: [ImportPhase] = [.importing]
         if needsConversion { phases.append(.converting) }
         phases.append(.hashing)

@@ -181,6 +181,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                     )
                     if converted.fileURL != item.fileURL {
                         mutableItem.convertedURL = converted.fileURL
+                        mutableItem.convertedFilename = converted.originalFilename
                     }
                     progress.filesConverted += 1
                     progress.currentFile = progress.filesConverted
@@ -229,7 +230,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                     } else {
                         let record = ImageRecord(
                             sha256: hash,
-                            filename: item.originalFilename,
+                            filename: item.activeFilename,
                             sizeBytes: size
                         )
                         try? await self.thumbnailService.generateThumbnail(for: fileToHash, sha256: hash)
@@ -267,7 +268,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                         mutableItem.snapshot = ImageRecordSnapshot(
                             persistentModelID: record.persistentModelID,
                             sha256: hash,
-                            filename: item.originalFilename,
+                            filename: item.activeFilename,
                             sizeBytes: size,
                             isNew: true
                         )

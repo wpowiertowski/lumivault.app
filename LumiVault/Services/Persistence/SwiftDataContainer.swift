@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 
 struct SwiftDataContainer {
@@ -7,9 +8,12 @@ struct SwiftDataContainer {
             AlbumRecord.self,
             VolumeRecord.self
         ])
+        let storeURL = URL.applicationSupportDirectory
+            .appendingPathComponent("LumiVault.store")
         let config = ModelConfiguration(
             "LumiVault",
-            schema: schema
+            schema: schema,
+            url: storeURL
         )
         do {
             return try ModelContainer(

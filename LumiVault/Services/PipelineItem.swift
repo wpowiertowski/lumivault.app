@@ -23,6 +23,7 @@ struct PipelineItem: Sendable {
 
     // Phase outputs
     var convertedURL: URL?
+    var convertedFilename: String?
     var sha256: String?
     var sizeBytes: Int64 = 0
     var isDuplicate: Bool = false
@@ -35,6 +36,11 @@ struct PipelineItem: Sendable {
     var storageLocations: [StorageLocation] = []
     var b2FileId: String?
     var error: String?
+
+    /// The filename to use for the stored file (converted name if conversion happened).
+    var activeFilename: String {
+        convertedFilename ?? originalFilename
+    }
 
     /// The file URL to use for downstream phases (encryption -> PAR2 -> copy -> upload).
     var activeFileURL: URL {
