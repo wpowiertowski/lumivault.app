@@ -47,108 +47,146 @@ actor DeletionService {
     }
 
     /// Delete image files from all external volumes and B2.
+    ///
+    /// - `entireAlbum = true` (default): removes the album directory (`year/month/day/albumName`)
+    ///   directly, then prunes empty ancestors. B2: lists all objects under the album prefix.
+    /// - `entireAlbum = false`: removes only the specific files listed in `images` by
+    ///   `albumPath/filename` (and their PAR2 companions). B2: deletes by specific file name.
     func deleteImageFiles(
         images: [ImageDeletionInput],
         mountedVolumes: [(volumeID: String, mountURL: URL)],
         b2Credentials: B2Credentials?,
-        progress: DeletionProgress
+        progress: DeletionProgress,
+        entireAlbum: Bool = true
     ) async -> DeletionResult {
         var result = DeletionResult()
         let fm = FileManager.default
 
-        // Phase 1: Remove from volumes
-        await MainActor.run { progress.phase = .removingFromVolumes }
-        let totalVolumeOps = images.reduce(0) { $0 + $1.storageLocations.count }
-        await MainActor.run { progress.totalItems = totalVolumeOps + (b2Credentials != nil ? images.count : 0) }
+        // All images in a deletion batch share the same albumPath.
+        guard let albumPath = images.first?.albumPath else { return result }
 
-        for image in images {
-            for location in image.storageLocations {
-                guard let (_, mountURL) = mountedVolumes.first(where: { $0.volumeID == location.volumeID }) else {
-                    continue
-                }
+        // Phase 1: Remove from each mounted volume
+        await MainActor.run {
+            progress.phase = .removingFromVolumes
+            progress.totalItems = mountedVolumes.count + (b2Credentials != nil ? 1 : 0)
+        }
 
-                let filePath = mountURL.appendingPathComponent(location.relativePath)
+        for (_, mountURL) in mountedVolumes {
+            let albumDir = mountURL.appendingPathComponent(albumPath, isDirectory: true)
+
+            if entireAlbum {
+                // Remove the entire album directory
                 do {
-                    if fm.fileExists(atPath: filePath.path) {
-                        try fm.removeItem(at: filePath)
-                        result.volumeFilesRemoved += 1
+                    if fm.fileExists(atPath: albumDir.path) {
+                        let contents = try fm.contentsOfDirectory(atPath: albumDir.path)
+                        try fm.removeItem(at: albumDir)
+                        result.volumeFilesRemoved += contents.count
                     }
-
-                    // Also remove PAR2 companion files (index + vol)
-                    if !image.par2Filename.isEmpty {
-                        let dir = filePath.deletingLastPathComponent()
-                        let companions = RedundancyService.companionFiles(
-                            forIndex: image.par2Filename, in: dir
-                        )
-                        for companion in companions {
-                            if fm.fileExists(atPath: companion.path) {
-                                try fm.removeItem(at: companion)
-                            }
-                        }
-                    }
-
-                    // Clean up empty directories up to volume root
                     Self.removeEmptyAncestors(
-                        from: filePath.deletingLastPathComponent(),
+                        from: albumDir.deletingLastPathComponent(),
                         stopAt: mountURL,
                         fileManager: fm
                     )
                 } catch {
-                    result.errors.append("Volume remove failed: \(image.filename) on \(location.volumeID) — \(error.localizedDescription)")
+                    result.errors.append("Volume remove failed: \(albumPath) — \(error.localizedDescription)")
                 }
-
-                await MainActor.run { progress.processedItems += 1 }
+            } else {
+                // Remove only specific files
+                for image in images {
+                    let filePath = albumDir.appendingPathComponent(image.filename)
+                    if fm.fileExists(atPath: filePath.path) {
+                        do {
+                            try fm.removeItem(at: filePath)
+                            result.volumeFilesRemoved += 1
+                        } catch {
+                            result.errors.append("Volume remove failed: \(image.filename) — \(error.localizedDescription)")
+                        }
+                    }
+                    // Also remove PAR2 companion if present
+                    if !image.par2Filename.isEmpty {
+                        let par2Path = albumDir.appendingPathComponent(image.par2Filename)
+                        if fm.fileExists(atPath: par2Path.path) {
+                            try? fm.removeItem(at: par2Path)
+                        }
+                    }
+                }
+                // Prune empty directories after individual file removal
+                Self.removeEmptyAncestors(
+                    from: albumDir,
+                    stopAt: mountURL,
+                    fileManager: fm
+                )
             }
+
+            await MainActor.run { progress.processedItems += 1 }
         }
 
         // Phase 2: Remove from B2
         if let credentials = b2Credentials {
             await MainActor.run { progress.phase = .removingFromB2 }
 
-            for image in images {
-                if let fileId = image.b2FileId, !fileId.isEmpty {
-                    // B2 stores decoded file names (it decodes the percent-encoded
-                    // X-Bz-File-Name header on upload). Use the raw unencoded path
-                    // for listing prefix, comparison, and deletion.
-                    let remotePath = "\(image.albumPath)/\(image.filename)"
-
-                    // Look up current file version by name — stored fileId may be stale
+            if entireAlbum {
+                // List and delete all objects under the album prefix
+                do {
+                    let listings = try await b2Service.listAllFiles(
+                        bucketId: credentials.bucketId,
+                        credentials: credentials,
+                        prefix: albumPath + "/"
+                    )
+                    for listing in listings {
+                        try await b2Service.deleteFile(
+                            fileId: listing.fileId,
+                            fileName: listing.fileName,
+                            credentials: credentials
+                        )
+                        result.b2FilesRemoved += 1
+                    }
+                } catch {
+                    result.errors.append("B2 delete failed: \(albumPath) — \(error.localizedDescription)")
+                }
+            } else {
+                // Delete specific files by listing with their exact prefix
+                for image in images {
+                    let filePrefix = albumPath + "/" + image.filename
                     do {
                         let listings = try await b2Service.listAllFiles(
                             bucketId: credentials.bucketId,
                             credentials: credentials,
-                            prefix: remotePath
+                            prefix: filePrefix
                         )
-                        if let listing = listings.first(where: { $0.fileName == remotePath }) {
-                            try await b2Service.deleteFile(fileId: listing.fileId, fileName: listing.fileName, credentials: credentials)
+                        for listing in listings {
+                            try await b2Service.deleteFile(
+                                fileId: listing.fileId,
+                                fileName: listing.fileName,
+                                credentials: credentials
+                            )
                             result.b2FilesRemoved += 1
                         }
                     } catch {
                         result.errors.append("B2 delete failed: \(image.filename) — \(error.localizedDescription)")
                     }
-
-                    // Also delete PAR2 companion files from B2 (index + vol)
+                    // Also delete PAR2 companion from B2
                     if !image.par2Filename.isEmpty {
-                        let baseName = String(image.par2Filename.dropLast(5)) // remove ".par2"
-                        let prefix = "\(image.albumPath)/\(baseName)"
-
-                        do {
-                            let listings = try await b2Service.listAllFiles(
-                                bucketId: credentials.bucketId,
-                                credentials: credentials,
-                                prefix: prefix
-                            )
-                            for listing in listings where listing.fileName.hasSuffix(".par2") {
-                                try await b2Service.deleteFile(fileId: listing.fileId, fileName: listing.fileName, credentials: credentials)
+                        let par2Prefix = albumPath + "/" + image.par2Filename
+                        if let listings = try? await b2Service.listAllFiles(
+                            bucketId: credentials.bucketId,
+                            credentials: credentials,
+                            prefix: par2Prefix
+                        ) {
+                            for listing in listings {
+                                try? await b2Service.deleteFile(
+                                    fileId: listing.fileId,
+                                    fileName: listing.fileName,
+                                    credentials: credentials
+                                )
+                                result.b2FilesRemoved += 1
                             }
-                        } catch {
-                            // PAR2 B2 deletion is best-effort
                         }
                     }
                 }
-
-                await MainActor.run { progress.processedItems += 1 }
             }
+
+            await MainActor.run { progress.processedItems += 1 }
         }
 
         return result

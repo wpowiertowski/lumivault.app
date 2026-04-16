@@ -115,7 +115,8 @@ struct PhotoGridView: View {
                 images: [input],
                 mountedVolumes: mountedVolumes,
                 b2Credentials: b2Credentials,
-                progress: progress
+                progress: progress,
+                entireAlbum: false
             )
 
             for (_, url) in mountedVolumes {

@@ -1376,108 +1376,16 @@ struct DeletionServiceTests {
         let root = try TestFixtures.materializeVolume(label: "deletion")
         defer { try? fm.removeItem(at: root) }
 
-        let spec = TestFixtures.files[0]
+        let vacationFiles = TestFixtures.files(inAlbum: "Vacation")
         let progress = DeletionProgress()
 
-        let input = DeletionService.ImageDeletionInput(
-            sha256: spec.sha256,
-            filename: spec.name,
-            par2Filename: "",
-            b2FileId: nil,
-            storageLocations: [StorageLocation(volumeID: "vol-1", relativePath: "\(spec.albumPath)/\(spec.name)")],
-            albumPath: spec.albumPath
-        )
-
-        let service = DeletionService()
-        let result = await service.deleteImageFiles(
-            images: [input],
-            mountedVolumes: [("vol-1", root)],
-            b2Credentials: nil,
-            progress: progress
-        )
-
-        #expect(result.volumeFilesRemoved == 1)
-        #expect(result.errors.isEmpty)
-
-        let filePath = root.appendingPathComponent(spec.albumPath).appendingPathComponent(spec.name)
-        #expect(!fm.fileExists(atPath: filePath.path))
-    }
-
-    @Test func deleteRemovesPAR2Companion() async throws {
-        let fm = FileManager.default
-        let root = try await TestFixtures.materializeVolumeWithPAR2(label: "deletion-par2")
-        defer { try? fm.removeItem(at: root) }
-
-        let spec = TestFixtures.files[0]
-        let progress = DeletionProgress()
-
-        let input = DeletionService.ImageDeletionInput(
-            sha256: spec.sha256,
-            filename: spec.name,
-            par2Filename: spec.par2Name,
-            b2FileId: nil,
-            storageLocations: [StorageLocation(volumeID: "vol-1", relativePath: "\(spec.albumPath)/\(spec.name)")],
-            albumPath: spec.albumPath
-        )
-
-        let service = DeletionService()
-        _ = await service.deleteImageFiles(
-            images: [input],
-            mountedVolumes: [("vol-1", root)],
-            b2Credentials: nil,
-            progress: progress
-        )
-
-        let par2Path = root.appendingPathComponent(spec.albumPath).appendingPathComponent(spec.par2Name)
-        #expect(!fm.fileExists(atPath: par2Path.path))
-    }
-
-    @Test func deleteSkipsUnmountedVolumes() async throws {
-        let fm = FileManager.default
-        let root = try TestFixtures.materializeVolume(label: "deletion-skip")
-        defer { try? fm.removeItem(at: root) }
-
-        let spec = TestFixtures.files[0]
-        let progress = DeletionProgress()
-
-        let input = DeletionService.ImageDeletionInput(
-            sha256: spec.sha256,
-            filename: spec.name,
-            par2Filename: "",
-            b2FileId: nil,
-            storageLocations: [StorageLocation(volumeID: "vol-missing", relativePath: "\(spec.albumPath)/\(spec.name)")],
-            albumPath: spec.albumPath
-        )
-
-        let service = DeletionService()
-        let result = await service.deleteImageFiles(
-            images: [input],
-            mountedVolumes: [("vol-1", root)], // vol-missing is not here
-            b2Credentials: nil,
-            progress: progress
-        )
-
-        #expect(result.volumeFilesRemoved == 0)
-        #expect(result.errors.isEmpty)
-
-        // File should still exist (not deleted from vol-1)
-        let filePath = root.appendingPathComponent(spec.albumPath).appendingPathComponent(spec.name)
-        #expect(fm.fileExists(atPath: filePath.path))
-    }
-
-    @Test func deleteAllFixtureFilesFromVolume() async throws {
-        let fm = FileManager.default
-        let root = try TestFixtures.materializeVolume(label: "deletion-all")
-        defer { try? fm.removeItem(at: root) }
-
-        let progress = DeletionProgress()
-        let inputs = TestFixtures.files.map { spec in
+        let inputs = vacationFiles.map { spec in
             DeletionService.ImageDeletionInput(
                 sha256: spec.sha256,
                 filename: spec.name,
                 par2Filename: "",
                 b2FileId: nil,
-                storageLocations: [StorageLocation(volumeID: "vol-1", relativePath: "\(spec.albumPath)/\(spec.name)")],
+                storageLocations: [],
                 albumPath: spec.albumPath
             )
         }
@@ -1490,8 +1398,115 @@ struct DeletionServiceTests {
             progress: progress
         )
 
-        #expect(result.volumeFilesRemoved == TestFixtures.files.count)
+        #expect(result.volumeFilesRemoved == vacationFiles.count)
         #expect(result.errors.isEmpty)
+
+        // Album directory should be gone
+        let albumDir = root.appendingPathComponent(vacationFiles[0].albumPath)
+        #expect(!fm.fileExists(atPath: albumDir.path))
+    }
+
+    @Test func deleteRemovesPAR2Companion() async throws {
+        let fm = FileManager.default
+        let root = try await TestFixtures.materializeVolumeWithPAR2(label: "deletion-par2")
+        defer { try? fm.removeItem(at: root) }
+
+        let vacationFiles = TestFixtures.files(inAlbum: "Vacation")
+        let progress = DeletionProgress()
+
+        let inputs = vacationFiles.map { spec in
+            DeletionService.ImageDeletionInput(
+                sha256: spec.sha256,
+                filename: spec.name,
+                par2Filename: spec.par2Name,
+                b2FileId: nil,
+                storageLocations: [],
+                albumPath: spec.albumPath
+            )
+        }
+
+        let service = DeletionService()
+        _ = await service.deleteImageFiles(
+            images: inputs,
+            mountedVolumes: [("vol-1", root)],
+            b2Credentials: nil,
+            progress: progress
+        )
+
+        // Entire album directory (including PAR2 files) should be gone
+        let albumDir = root.appendingPathComponent(vacationFiles[0].albumPath)
+        #expect(!fm.fileExists(atPath: albumDir.path))
+    }
+
+    @Test func deleteSkipsNonExistentAlbumDir() async throws {
+        let fm = FileManager.default
+        let root = try TestFixtures.materializeVolume(label: "deletion-skip")
+        defer { try? fm.removeItem(at: root) }
+
+        let progress = DeletionProgress()
+
+        // Use a non-existent album path — no directory to remove
+        let input = DeletionService.ImageDeletionInput(
+            sha256: "fake",
+            filename: "fake.heic",
+            par2Filename: "",
+            b2FileId: nil,
+            storageLocations: [],
+            albumPath: "2099/01/01/NonExistent"
+        )
+
+        let service = DeletionService()
+        let result = await service.deleteImageFiles(
+            images: [input],
+            mountedVolumes: [("vol-1", root)],
+            b2Credentials: nil,
+            progress: progress
+        )
+
+        #expect(result.volumeFilesRemoved == 0)
+        #expect(result.errors.isEmpty)
+
+        // Existing files should be untouched
+        let filePath = root.appendingPathComponent(TestFixtures.files[0].albumPath)
+            .appendingPathComponent(TestFixtures.files[0].name)
+        #expect(fm.fileExists(atPath: filePath.path))
+    }
+
+    @Test func deleteAllFixtureFilesFromVolume() async throws {
+        let fm = FileManager.default
+        let root = try TestFixtures.materializeVolume(label: "deletion-all")
+        defer { try? fm.removeItem(at: root) }
+
+        let service = DeletionService()
+
+        // Delete each album separately (the service handles one album per call)
+        var totalRemoved = 0
+        for albumPath in TestFixtures.albumPaths {
+            let albumFiles = TestFixtures.files.filter { $0.albumPath == albumPath }
+            let progress = DeletionProgress()
+            let inputs = albumFiles.map { spec in
+                DeletionService.ImageDeletionInput(
+                    sha256: spec.sha256,
+                    filename: spec.name,
+                    par2Filename: "",
+                    b2FileId: nil,
+                    storageLocations: [],
+                    albumPath: spec.albumPath
+                )
+            }
+
+            let result = await service.deleteImageFiles(
+                images: inputs,
+                mountedVolumes: [("vol-1", root)],
+                b2Credentials: nil,
+                progress: progress
+            )
+
+            #expect(result.errors.isEmpty)
+            totalRemoved += result.volumeFilesRemoved
+        }
+
+        #expect(totalRemoved == TestFixtures.files.count)
 
         // Verify no fixture files remain
         for spec in TestFixtures.files {
@@ -1514,7 +1529,7 @@ struct DeletionServiceTests {
                 filename: spec.name,
                 par2Filename: "",
                 b2FileId: nil,
-                storageLocations: [StorageLocation(volumeID: "vol-1", relativePath: "\(spec.albumPath)/\(spec.name)")],
+                storageLocations: [],
                 albumPath: spec.albumPath
             )
         }
@@ -1547,29 +1562,76 @@ struct DeletionServiceTests {
         let root = try TestFixtures.materializeVolume(label: "deletion-tree")
         defer { try? fm.removeItem(at: root) }
 
-        let progress = DeletionProgress()
-        let inputs = TestFixtures.files.map { spec in
-            DeletionService.ImageDeletionInput(
-                sha256: spec.sha256,
-                filename: spec.name,
-                par2Filename: "",
-                b2FileId: nil,
-                storageLocations: [StorageLocation(volumeID: "vol-1", relativePath: "\(spec.albumPath)/\(spec.name)")],
-                albumPath: spec.albumPath
+        let service = DeletionService()
+
+        // Delete each album separately
+        for albumPath in TestFixtures.albumPaths {
+            let albumFiles = TestFixtures.files.filter { $0.albumPath == albumPath }
+            let progress = DeletionProgress()
+            let inputs = albumFiles.map { spec in
+                DeletionService.ImageDeletionInput(
+                    sha256: spec.sha256,
+                    filename: spec.name,
+                    par2Filename: "",
+                    b2FileId: nil,
+                    storageLocations: [],
+                    albumPath: spec.albumPath
+                )
+            }
+
+            _ = await service.deleteImageFiles(
+                images: inputs,
+                mountedVolumes: [("vol-1", root)],
+                b2Credentials: nil,
+                progress: progress
             )
         }
-
-        let service = DeletionService()
-        _ = await service.deleteImageFiles(
-            images: inputs,
-            mountedVolumes: [("vol-1", root)],
-            b2Credentials: nil,
-            progress: progress
-        )
 
         // All ancestor directories should be gone, only volume root remains
         let contents = try fm.contentsOfDirectory(atPath: root.path)
         #expect(contents.isEmpty, "Volume root should be empty after deleting all files, found: \(contents)")
+    }
+
+    @Test func deleteSingleImagePreservesOtherFiles() async throws {
+        let fm = FileManager.default
+        let root = try TestFixtures.materializeVolume(label: "deletion-single")
+        defer { try? fm.removeItem(at: root) }
+
+        // Delete only the first Vacation file, leaving the other two
+        let target = TestFixtures.files[0] // sunset.heic in Vacation
+        let others = TestFixtures.files(inAlbum: "Vacation").filter { $0.name != target.name }
+        let progress = DeletionProgress()
+
+        let input = DeletionService.ImageDeletionInput(
+            sha256: target.sha256,
+            filename: target.name,
+            par2Filename: "",
+            b2FileId: nil,
+            storageLocations: [],
+            albumPath: target.albumPath
+        )
+
+        let service = DeletionService()
+        let result = await service.deleteImageFiles(
+            images: [input],
+            mountedVolumes: [("vol-1", root)],
+            b2Credentials: nil,
+            progress: progress,
+            entireAlbum: false
+        )
+
+        #expect(result.volumeFilesRemoved == 1)
+        #expect(result.errors.isEmpty)
+
+        // Target file should be gone
+        let deletedPath = root.appendingPathComponent(target.albumPath).appendingPathComponent(target.name)
+        #expect(!fm.fileExists(atPath: deletedPath.path))
+
+        // Other files in the same album should still exist
+        for spec in others {
+            let path = root.appendingPathComponent(spec.albumPath).appendingPathComponent(spec.name)
+            #expect(fm.fileExists(atPath: path.path), "\(spec.name) should still exist")
+        }
     }
 }
 
