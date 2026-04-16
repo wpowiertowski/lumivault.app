@@ -217,8 +217,9 @@ struct SidebarView: View {
 
             albumToDelete = nil
 
-            // Distribute updated catalog in background (iCloud, volumes, B2)
-            await syncCoordinator.pushAfterLocalChange()
+            // Distribute updated catalog in background (iCloud, volumes, B2).
+            // Skip reload — in-memory catalog was already updated by removeAlbumFromCatalog.
+            await syncCoordinator.pushAfterLocalChange(reloadFromDisk: false)
         }
     }
 }

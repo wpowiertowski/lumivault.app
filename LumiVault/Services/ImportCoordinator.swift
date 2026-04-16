@@ -1,13 +1,13 @@
 import Foundation
 import SwiftData
 import AppKit
-import CoreImage
+import ImageIO
 import os
 
 enum ImageFormat: String, Sendable, CaseIterable {
     case original = "Original"
     case jpeg = "JPEG"
-    case heif = "HEIF"
+    case heic = "HEIC"
 }
 
 enum MaxDimension: Sendable, Hashable {
@@ -633,7 +633,7 @@ class ImportCoordinator {
         guard let image = NSImage(contentsOf: asset.fileURL),
               let srcRep = image.representations.first else { return asset }
 
-        // pixelsWide/pixelsHigh return -1 when unknown (HEIF, RAW, etc.)
+        // pixelsWide/pixelsHigh return -1 when unknown (HEIC, RAW, etc.)
         // Fall back to the point-based image size in that case.
         let pixelWidth = srcRep.pixelsWide > 0 ? CGFloat(srcRep.pixelsWide) : image.size.width
         let pixelHeight = srcRep.pixelsHigh > 0 ? CGFloat(srcRep.pixelsHigh) : image.size.height
@@ -652,7 +652,7 @@ class ImportCoordinator {
         }
 
         let needsResize = targetWidth != pixelWidth || targetHeight != pixelHeight
-        let needsConversion = format == .jpeg || format == .heif
+        let needsConversion = format == .jpeg || format == .heic
 
         guard needsResize || needsConversion else { return asset }
 
@@ -691,22 +691,16 @@ class ImportCoordinator {
                 properties: [.compressionFactor: quality]
             )
             outputFilename = stem + ".jpg"
-        case .heif:
-            // Use CIImage + CIContext for HEIF encoding (NSBitmapImageRep doesn't support HEIF directly)
-            if let ciImage = CIImage(bitmapImageRep: bitmapRep) {
-                let context = CIContext()
-                let colorSpace = ciImage.colorSpace ?? CGColorSpaceCreateDeviceRGB()
-                let tempURL = staging.appendingPathComponent("heif-\(UUID().uuidString).heic")
-                let options: [CIImageRepresentationOption: Any] = [
-                    CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): quality
-                ]
-                try? context.writeHEIFRepresentation(of: ciImage,
-                                                     to: tempURL,
-                                                     format: .RGBA8,
-                                                     colorSpace: colorSpace,
-                                                     options: options)
-                outputData = try? Data(contentsOf: tempURL)
-                try? FileManager.default.removeItem(at: tempURL)
+        case .heic:
+            if let cgImage = bitmapRep.cgImage {
+                let data = NSMutableData()
+                if let dest = CGImageDestinationCreateWithData(data, "public.heic" as CFString, 1, nil) {
+                    let props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: quality]
+                    CGImageDestinationAddImage(dest, cgImage, props as CFDictionary)
+                    outputData = CGImageDestinationFinalize(dest) ? data as Data : nil
+                } else {
+                    outputData = nil
+                }
             } else {
                 outputData = nil
             }

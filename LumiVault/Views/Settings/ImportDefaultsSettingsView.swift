@@ -37,7 +37,7 @@ struct ImportDefaultsSettingsView: View {
                 .pickerStyle(.segmented)
                 .font(Constants.Design.monoBody)
 
-                if format.wrappedValue == .jpeg || format.wrappedValue == .heif {
+                if format.wrappedValue == .jpeg || format.wrappedValue == .heic {
                     HStack {
                         Text("Quality")
                             .font(Constants.Design.monoBody)

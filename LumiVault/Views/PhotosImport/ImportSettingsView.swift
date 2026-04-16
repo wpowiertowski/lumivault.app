@@ -50,7 +50,7 @@ struct ImportSettingsView: View {
                 .pickerStyle(.segmented)
                 .font(Constants.Design.monoBody)
 
-                if settings.imageFormat == .jpeg || settings.imageFormat == .heif {
+                if settings.imageFormat == .jpeg || settings.imageFormat == .heic {
                     HStack {
                         Text("Quality")
                             .font(Constants.Design.monoBody)

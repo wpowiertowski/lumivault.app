@@ -30,7 +30,7 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 - **iCloud Catalog Sync** — catalog.json syncs across devices via iCloud Drive with conflict-free merge (union by SHA-256, newest timestamp wins)
 - **Catalog Backup & Restore** — catalog.json is automatically distributed to all external volumes and B2 after every mutation; restore from any backup source (volume, B2, or local file) on fresh run or via Settings
 - **Drag & Drop Import** — native file import via `UniformTypeIdentifiers` with image-type filtering
-- **Image Format Conversion** — optional JPEG/HEIF conversion with configurable quality and max dimension during import; originals in Photos are never modified
+- **Image Format Conversion** — optional JPEG/HEIC conversion with configurable quality and max dimension during import; originals in Photos are never modified
 - **Thumbnail Generation** — HEIC/RAW/CR2/CR3/NEF/ARW/DNG support with a multi-resolution cache (256px grid, 64px list) keyed by content hash
 
 ## Technology Stack

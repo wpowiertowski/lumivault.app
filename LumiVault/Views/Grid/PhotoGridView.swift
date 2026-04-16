@@ -143,8 +143,9 @@ struct PhotoGridView: View {
 
             imageToDelete = nil
 
-            // Distribute updated catalog in background (iCloud, volumes, B2)
-            await syncCoordinator.pushAfterLocalChange()
+            // Distribute updated catalog in background (iCloud, volumes, B2).
+            // Skip reload — in-memory catalog was already updated by removeImageFromCatalog.
+            await syncCoordinator.pushAfterLocalChange(reloadFromDisk: false)
         }
     }
 }

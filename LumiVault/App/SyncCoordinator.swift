@@ -87,12 +87,19 @@ final class SyncCoordinator: @unchecked Sendable {
 
     /// Push local catalog to iCloud after a local mutation (export, delete, etc.),
     /// and distribute catalog.json to all external volumes and B2.
-    func pushAfterLocalChange() async {
-        // Reload local catalog to pick up the latest changes
-        let catalogPath = await MainActor.run {
-            NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
+    ///
+    /// - Parameter reloadFromDisk: When `true` (default), reloads the catalog from disk before
+    ///   distributing. Set to `false` when the in-memory catalog was already updated directly
+    ///   (e.g. after deletion via `removeAlbumFromCatalog`), so the reload does not risk
+    ///   restoring stale data if the prior save failed silently.
+    func pushAfterLocalChange(reloadFromDisk: Bool = true) async {
+        if reloadFromDisk {
+            // Reload local catalog to pick up changes made by external CatalogService instances
+            let catalogPath = await MainActor.run {
+                NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
+            }
+            try? await catalogService.load(from: URL(fileURLWithPath: catalogPath))
         }
-        try? await catalogService.load(from: URL(fileURLWithPath: catalogPath))
 
         let catalog = await catalogService.currentCatalog()
 
