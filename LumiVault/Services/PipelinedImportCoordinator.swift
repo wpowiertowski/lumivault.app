@@ -165,7 +165,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
                 for await item in conversionCh.stream {
                     await conversionCh.consumed()
-                    guard !Task.isCancelled else { continue }
+                    guard !Task.isCancelled else { break }
 
                     var mutableItem = item
                     let converted = self.convertImage(
@@ -203,7 +203,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
             for await item in hashingCh.stream {
                 await hashingCh.consumed()
-                guard !Task.isCancelled else { continue }
+                guard !Task.isCancelled else { break }
 
                 var mutableItem = item
                 let fileToHash = item.convertedURL ?? item.fileURL
@@ -297,7 +297,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
                 for await item in encryptionCh.stream {
                     await encryptionCh.consumed()
-                    guard !Task.isCancelled else { continue }
+                    guard !Task.isCancelled else { break }
 
                     var mutableItem = item
                     guard let snap = item.snapshot, item.error == nil, snap.isNew else {
@@ -344,7 +344,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
                 for await item in par2Ch.stream {
                     await par2Ch.consumed()
-                    guard !Task.isCancelled else { continue }
+                    guard !Task.isCancelled else { break }
 
                     var mutableItem = item
                     guard let snap = item.snapshot, item.error == nil, snap.isNew else {
@@ -397,7 +397,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
                 for await item in copyCh.stream {
                     await copyCh.consumed()
-                    guard !Task.isCancelled else { continue }
+                    guard !Task.isCancelled else { break }
 
                     var mutableItem = item
                     guard let snap = item.snapshot, item.error == nil else {
@@ -473,7 +473,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
                 for await item in uploadCh.stream {
                     await uploadCh.consumed()
-                    guard !Task.isCancelled else { continue }
+                    guard !Task.isCancelled else { break }
 
                     var mutableItem = item
                     guard let snap = item.snapshot, item.error == nil else {
@@ -626,8 +626,8 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             for await item in catalogCh.stream {
                 await catalogCh.consumed()
 
-                // Stop processing if cancelled — stream may still drain buffered items
-                if Task.isCancelled { continue }
+                // Stop processing if cancelled — break immediately instead of draining buffer
+                if Task.isCancelled { break }
 
                 guard let snap = item.snapshot else {
                     // Item has no snapshot — hash phase failed or was skipped.

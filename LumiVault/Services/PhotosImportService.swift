@@ -95,6 +95,7 @@ actor PhotosImportService {
         try FileManager.default.createDirectory(at: importDirectory, withIntermediateDirectories: true)
 
         for index in 0..<total {
+            try Task.checkCancellation()
             let asset = assets.object(at: index)
             let result = try await importAsset(asset, to: importDirectory)
             imported.append(result)
