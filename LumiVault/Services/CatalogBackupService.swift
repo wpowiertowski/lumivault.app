@@ -59,7 +59,9 @@ actor CatalogBackupService {
         return errors
     }
 
-    /// Upload catalog.json to B2.
+    /// Upload catalog.json, its SHA-256 sidecar, and PAR2 recovery files to B2.
+    /// All uploads flow through `B2Service.uploadImage(fileURL:...)` so they get the same
+    /// exponential-backoff retry protection as photo uploads.
     func backupToB2(catalog: Catalog, credentials: B2Credentials) async -> String? {
         let data: Data
         do {
@@ -73,36 +75,39 @@ actor CatalogBackupService {
             return "Failed to encode catalog: \(error.localizedDescription)"
         }
 
+        let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         do {
-            try await b2Service.authorize(credentials: credentials)
-            try await b2Service.getUploadURL(bucketId: credentials.bucketId)
-
-            let sha1 = B2Service.sha1Hash(of: data)
-            _ = try await b2Service.uploadFile(
-                fileData: data,
-                fileName: "catalog.json",
-                sha1: sha1,
-                contentType: "application/json"
-            )
-
-            // Upload SHA-256 checksum sidecar
-            let checksum = Catalog.sha256Hex(of: data)
-            let checksumData = Data(checksum.utf8)
-            let checksumSha1 = B2Service.sha1Hash(of: checksumData)
-            try await b2Service.getUploadURL(bucketId: credentials.bucketId)
-            _ = try await b2Service.uploadFile(
-                fileData: checksumData,
-                fileName: "catalog.json.sha256",
-                sha1: checksumSha1,
-                contentType: "text/plain"
-            )
-
-            // Upload PAR2 recovery data (index + vol files)
-            let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-            defer { try? FileManager.default.removeItem(at: tmpDir) }
+        } catch {
+            return "Failed to prepare temp directory: \(error.localizedDescription)"
+        }
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        do {
+            // Write catalog to temp file (reused for both upload and PAR2 generation)
             let tmpCatalog = tmpDir.appendingPathComponent("catalog.json")
             try data.write(to: tmpCatalog, options: .atomic)
+            let catalogSha256 = Catalog.sha256Hex(of: data)
+
+            _ = try await b2Service.uploadImage(
+                fileURL: tmpCatalog,
+                remotePath: "catalog.json",
+                sha256: catalogSha256,
+                credentials: credentials
+            )
+
+            // SHA-256 checksum sidecar
+            let checksumData = Data(catalogSha256.utf8)
+            let tmpChecksum = tmpDir.appendingPathComponent("catalog.json.sha256")
+            try checksumData.write(to: tmpChecksum, options: .atomic)
+            _ = try await b2Service.uploadImage(
+                fileURL: tmpChecksum,
+                remotePath: "catalog.json.sha256",
+                sha256: Catalog.sha256Hex(of: checksumData),
+                credentials: credentials
+            )
+
+            // PAR2 recovery data (index + vol files)
             let redundancy = RedundancyService()
             let par2URL = try redundancy.generatePAR2(for: tmpCatalog, outputDirectory: tmpDir)
             let par2Files = RedundancyService.companionFiles(
@@ -110,13 +115,11 @@ actor CatalogBackupService {
             )
             for par2File in par2Files {
                 let par2Data = try Data(contentsOf: par2File)
-                let fileSha1 = B2Service.sha1Hash(of: par2Data)
-                try await b2Service.getUploadURL(bucketId: credentials.bucketId)
-                _ = try await b2Service.uploadFile(
-                    fileData: par2Data,
-                    fileName: par2File.lastPathComponent,
-                    sha1: fileSha1,
-                    contentType: "application/octet-stream"
+                _ = try await b2Service.uploadImage(
+                    fileURL: par2File,
+                    remotePath: par2File.lastPathComponent,
+                    sha256: Catalog.sha256Hex(of: par2Data),
+                    credentials: credentials
                 )
             }
             return nil
