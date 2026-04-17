@@ -66,5 +66,4 @@ Source: TEST-PLAN.md "Manual Test Cases NOT Automated"
 
 ## Code Quality
 
-- [ ] Extract shared `convertImage` from `ImportCoordinator` and `PipelinedImportCoordinator` (currently duplicated). Source: TEST-PLAN.md ImageConversionTests note.
 - [ ] `IntegrityServiceTests` duplicates fixture materialization inline instead of using `TestFixtures.materializeVolume()`. Source: TEST-PLAN.md Redundancy & Overlap note.

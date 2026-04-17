@@ -69,7 +69,6 @@
           │ IntegrityService        │  ← scheduled verification sweeps
           │ EncryptionService       │  ← AES-256-GCM encrypt/decrypt, key derivation
           │ PipelinedImportCoord.   │  ← pipelined import (AsyncChannel between phases)
-          │ ImportCoordinator       │  ← legacy sequential import (retained)
           └────────────┬────────────┘
                        │
           ┌────────────┴────────────┐
@@ -582,9 +581,9 @@ LumiVault/
 │   ├── CatalogBackupService.swift       // Distribute catalog to volumes + B2, restore
 │   ├── PhotosImportService.swift        // PhotoKit album enumeration + export
 │   ├── B2Service.swift                  // B2 REST API (upload/download/list/delete)
-│   ├── PipelinedImportCoordinator.swift  // Pipelined async import (active)
+│   ├── PipelinedImportCoordinator.swift  // Pipelined async import
 │   ├── PipelineItem.swift               // Sendable item + ImageRecordSnapshot
-│   ├── ImportCoordinator.swift          // Legacy sequential import (retained)
+│   ├── ImageConversionService.swift     // JPEG/HEIC conversion + resize
 │   ├── DeletionService.swift            // Remove files from volumes + B2
 │   ├── ReconciliationService.swift      // Scan volumes + B2 for discrepancies
 │   ├── SyncService.swift                // iCloud coordination
@@ -694,8 +693,7 @@ and terminates all consumer `for await` loops (`continuation.finish()`).
 ### Other Concurrent Operations
 
 `TaskGroup` is used for bounded concurrency in non-pipeline contexts (thumbnail warm-up,
-integrity verification batches). Drag-and-drop import uses the legacy `ImportCoordinator`
-with sequential phases.
+integrity verification batches).
 
 ---
 

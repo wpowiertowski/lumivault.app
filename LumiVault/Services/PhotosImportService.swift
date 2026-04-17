@@ -92,41 +92,6 @@ actor PhotosImportService {
         return albums
     }
 
-    // MARK: - Asset Import (legacy non-streaming, used by ImportCoordinator)
-
-    func importAlbum(
-        albumId: String,
-        to importDirectory: URL,
-        progress: @Sendable (Int, Int) -> Void
-    ) async throws -> [ImportedAsset] {
-        let fetchResult = PHAssetCollection.fetchAssetCollections(
-            withLocalIdentifiers: [albumId], options: nil
-        )
-        guard let collection = fetchResult.firstObject else {
-            throw PhotosImportError.albumNotFound
-        }
-
-        let fetchOptions = PHFetchOptions()
-        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
-        fetchOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
-        let assets = PHAsset.fetchAssets(in: collection, options: fetchOptions)
-
-        let total = assets.count
-        var imported: [ImportedAsset] = []
-
-        try FileManager.default.createDirectory(at: importDirectory, withIntermediateDirectories: true)
-
-        for index in 0..<total {
-            try Task.checkCancellation()
-            let asset = assets.object(at: index)
-            let result = try await importAsset(asset, to: importDirectory, callbacks: PhotosImportCallbacks())
-            imported.append(result)
-            progress(index + 1, total)
-        }
-
-        return imported
-    }
-
     // MARK: - Single Asset Import
 
     private func importAsset(

@@ -2006,73 +2006,55 @@ struct PhotosImportProgressTests {
         #expect(progress.fraction == 0)
     }
 
-    @Test func fractionReflectsProgress() {
+    @Test func fractionDuringImportPhase() {
         let progress = PhotosImportProgress()
-        progress.activePhases = [.hashing, .par2, .cataloging]
-        progress.totalFiles = 10
-        progress.phase = .hashing
-        progress.currentFile = 5
-
-        // Phase 0 of 3 → base = 0, phaseFraction = 5/10 = 0.5, weight = 1/3
-        let expected = 0.0 + 0.5 * (1.0 / 3.0)
-        #expect(abs(progress.fraction - expected) < 0.001)
-    }
-
-    @Test func fractionOneWhenComplete() {
-        let progress = PhotosImportProgress()
-        progress.activePhases = [.hashing, .cataloging]
-        progress.totalFiles = 5
-        progress.phase = .complete
-
-        #expect(progress.fraction == 1.0)
-    }
-
-    @Test func fractionWithPAR2SubProgress() {
-        let progress = PhotosImportProgress()
-        progress.activePhases = [.par2, .cataloging]
-        progress.totalFiles = 4
-        progress.phase = .par2
-        progress.currentFile = 2 // Processing file 2 (1 complete, 1 in progress)
-        progress.par2FileFraction = 0.5
-
-        // Phase 0 of 2 → base = 0, weight = 0.5
-        // PAR2 formula: fileFraction = max(2-1,0)/4 = 0.25, subFraction = 0.5/4 = 0.125
-        // phaseFraction = 0.25 + 0.125 = 0.375
-        let expected = 0.0 + 0.375 * 0.5
-        #expect(abs(progress.fraction - expected) < 0.001)
-    }
-
-    @Test func fractionWithSinglePhase() {
-        let progress = PhotosImportProgress()
-        progress.activePhases = [.hashing]
-        progress.totalFiles = 4
-        progress.phase = .hashing
-        progress.currentFile = 2
-
-        // Phase 0 of 1 → base = 0, weight = 1.0, phaseFraction = 2/4 = 0.5
-        #expect(abs(progress.fraction - 0.5) < 0.001)
-    }
-
-    @Test func pipelinedFractionBasedOnFilesCataloged() {
-        let progress = PhotosImportProgress()
-        progress.isPipelined = true
-        progress.totalFiles = 20
-        progress.phase = .cataloging
-        progress.filesCataloged = 10
-
-        // Pipeline: 0.1 + (10/20) * 0.9 = 0.1 + 0.45 = 0.55
-        #expect(abs(progress.fraction - 0.55) < 0.001)
-    }
-
-    @Test func pipelinedFractionDuringImport() {
-        let progress = PhotosImportProgress()
-        progress.isPipelined = true
         progress.totalFiles = 20
         progress.phase = .importing
         progress.currentFile = 10
 
         // Import phase: (10/20) * 0.1 = 0.05
         #expect(abs(progress.fraction - 0.05) < 0.001)
+    }
+
+    @Test func fractionMidPipeline() {
+        let progress = PhotosImportProgress()
+        progress.totalFiles = 20
+        progress.phase = .hashing
+        progress.filesCataloged = 10
+
+        // Post-import phases: 0.1 + (10/20) * 0.9 = 0.55
+        #expect(abs(progress.fraction - 0.55) < 0.001)
+    }
+
+    @Test func fractionOneWhenComplete() {
+        let progress = PhotosImportProgress()
+        progress.totalFiles = 5
+        progress.phase = .complete
+
+        #expect(progress.fraction == 1.0)
+    }
+
+    @Test func fractionWithGlobalProgress() {
+        let progress = PhotosImportProgress()
+        progress.globalTotalFiles = 100
+        progress.completedAlbumFiles = 50
+        progress.totalFiles = 20
+        progress.phase = .hashing
+        progress.filesCataloged = 10
+
+        // Album fraction: 0.1 + (10/20) * 0.9 = 0.55
+        // Global: 50/100 + 0.55 * (20/100) = 0.5 + 0.11 = 0.61
+        #expect(abs(progress.fraction - 0.61) < 0.001)
+    }
+
+    @Test func fractionUsesCompletedAlbumsWhenCurrentEmpty() {
+        let progress = PhotosImportProgress()
+        progress.globalTotalFiles = 100
+        progress.completedAlbumFiles = 30
+        progress.totalFiles = 0
+
+        // No files in current album yet — show completed albums progress
+        #expect(abs(progress.fraction - 0.3) < 0.001)
     }
 }
 
@@ -2276,8 +2258,7 @@ struct ImageConversionTests {
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
 
         let asset = ImportedAsset(fileURL: sourceURL, originalFilename: "photo.heic", creationDate: nil)
-        let coordinator = ImportCoordinator(catalogService: CatalogService(), encryptionService: EncryptionService())
-        let result = await coordinator.convertImage(asset: asset, format: ImageFormat.jpeg, quality: 0.85, maxDimension: MaxDimension.original, staging: staging)
+        let result = ImageConversionService.convertImage(asset: asset, format: ImageFormat.jpeg, quality: 0.85, maxDimension: MaxDimension.original, staging: staging)
 
         #expect(result.fileURL.pathExtension == "jpg")
     }
@@ -2295,8 +2276,7 @@ struct ImageConversionTests {
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
 
         let asset = ImportedAsset(fileURL: sourceURL, originalFilename: "photo.png", creationDate: nil)
-        let coordinator = ImportCoordinator(catalogService: CatalogService(), encryptionService: EncryptionService())
-        let result = await coordinator.convertImage(asset: asset, format: ImageFormat.jpeg, quality: 0.85, maxDimension: MaxDimension.original, staging: staging)
+        let result = ImageConversionService.convertImage(asset: asset, format: ImageFormat.jpeg, quality: 0.85, maxDimension: MaxDimension.original, staging: staging)
 
         let image = NSImage(contentsOf: result.fileURL)
         #expect(image != nil)
@@ -2317,8 +2297,7 @@ struct ImageConversionTests {
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
 
         let asset = ImportedAsset(fileURL: sourceURL, originalFilename: "large.png", creationDate: nil)
-        let coordinator = ImportCoordinator(catalogService: CatalogService(), encryptionService: EncryptionService())
-        let result = await coordinator.convertImage(asset: asset, format: ImageFormat.jpeg, quality: 0.85, maxDimension: MaxDimension.capped(50), staging: staging)
+        let result = ImageConversionService.convertImage(asset: asset, format: ImageFormat.jpeg, quality: 0.85, maxDimension: MaxDimension.capped(50), staging: staging)
 
         let image = NSImage(contentsOf: result.fileURL)
         #expect(image != nil)
@@ -2341,8 +2320,7 @@ struct ImageConversionTests {
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
 
         let asset = ImportedAsset(fileURL: sourceURL, originalFilename: "photo.heic", creationDate: nil)
-        let coordinator = ImportCoordinator(catalogService: CatalogService(), encryptionService: EncryptionService())
-        let result = await coordinator.convertImage(asset: asset, format: ImageFormat.original, quality: 0.85, maxDimension: MaxDimension.original, staging: staging)
+        let result = ImageConversionService.convertImage(asset: asset, format: ImageFormat.original, quality: 0.85, maxDimension: MaxDimension.original, staging: staging)
 
         // No conversion needed — same URL returned
         #expect(result.fileURL == sourceURL)
@@ -2361,8 +2339,7 @@ struct ImageConversionTests {
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
 
         let asset = ImportedAsset(fileURL: sourceURL, originalFilename: "small.png", creationDate: nil)
-        let coordinator = ImportCoordinator(catalogService: CatalogService(), encryptionService: EncryptionService())
-        let result = await coordinator.convertImage(asset: asset, format: ImageFormat.jpeg, quality: 0.85, maxDimension: MaxDimension.capped(200), staging: staging)
+        let result = ImageConversionService.convertImage(asset: asset, format: ImageFormat.jpeg, quality: 0.85, maxDimension: MaxDimension.capped(200), staging: staging)
 
         let image = NSImage(contentsOf: result.fileURL)
         #expect(image != nil)

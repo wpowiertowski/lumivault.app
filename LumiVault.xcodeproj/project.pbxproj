@@ -53,6 +53,7 @@
 		901ED8814C1AF339CD3CAC25 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6E2C8CD562F32019EB774DA /* ContentView.swift */; };
 		92A8BF69B17C32CBBA801C36 /* AlbumDeletionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 795EC7A08A0ABF43F828C239 /* AlbumDeletionSheet.swift */; };
 		93AB452DC206E0A2C5C02909 /* AlbumExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2BF78C573AEB3723FAA6B52 /* AlbumExportSheet.swift */; };
+		A1E3C9C6FEDD55A4C790841A /* ImageConversionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFA740881D64DEF9AAD992E7 /* ImageConversionService.swift */; };
 		A3686A95F9248D888E85A241 /* IntegrityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32581D0BD97222E337F12E24 /* IntegrityService.swift */; };
 		AB0DD7ACC613A9C5169FA268 /* PerceptualHash.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F99517836AFD89561B41EE /* PerceptualHash.swift */; };
 		B10D8A06390125F91AC69B08 /* MetadataInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47A770A92996FA81A51FB1A1 /* MetadataInspector.swift */; };
@@ -60,12 +61,12 @@
 		B6087FD659F665B3227E6778 /* PhotosImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC1982FE3C2E560E783753AF /* PhotosImportService.swift */; };
 		B74403416D7B5B267D435D02 /* SupportSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08151D3FAC4937C0EE5104CC /* SupportSettingsView.swift */; };
 		B99329806C565AFC0EF68260 /* VolumesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52BF3E9C2E27A222A01E3E43 /* VolumesSettingsView.swift */; };
-		BC59799BE5D84CCCAE8F04A8 /* ImportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA8B73A9CA2C5A8CBACD3FC7 /* ImportCoordinator.swift */; };
 		C3CF5E268A47CFFAD589C4DD /* AsyncChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55E512C07356078D3E3D8CD /* AsyncChannel.swift */; };
 		C3E2B48BC52875B0CC34CFBD /* HasherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3198F0E915EFA392E07CBB6B /* HasherService.swift */; };
 		CDFE6E5E0536944B2630D0C1 /* AsyncSemaphore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FD4E291C18518482ADDCA6A /* AsyncSemaphore.swift */; };
 		D614E72A43BEE42BDCD6896F /* GaloisField16.swift in Sources */ = {isa = PBXBuildFile; fileRef = A705C358860AAE79B6C774A6 /* GaloisField16.swift */; };
 		D667D68E0E1F064E5955284C /* RedundancyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0933DB339B93FFE9258AEA7 /* RedundancyService.swift */; };
+		DCA7881A48055EE6FC8BC7A6 /* ImportTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEDAF6545E18E7FAB1A8EC7A /* ImportTypes.swift */; };
 		E5AD622448575773B6865BB8 /* EncryptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2227CE0EBFDA45BA03F75D10 /* EncryptionService.swift */; };
 		E7503627D9380F2FA62D1C7C /* IntegritySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78323BB35DE5C1DE3D74C325 /* IntegritySheet.swift */; };
 		E9CC0D815365176B7AC4CA64 /* LumiVaultUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C8416D7A7C9047F26714AD /* LumiVaultUITests.swift */; };
@@ -147,9 +148,11 @@
 		AE3332C0A7A1C08678599C4D /* LumiVaultTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LumiVaultTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AEAF14912766D866BE0697E2 /* FileCoordination.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileCoordination.swift; sourceTree = "<group>"; };
 		AEC59B854884275F7D860BD8 /* SwiftDataContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftDataContainer.swift; sourceTree = "<group>"; };
+		AEDAF6545E18E7FAB1A8EC7A /* ImportTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportTypes.swift; sourceTree = "<group>"; };
 		B0933DB339B93FFE9258AEA7 /* RedundancyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedundancyService.swift; sourceTree = "<group>"; };
 		B389A2EDF5A08E2BE8AF007A /* AlbumRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumRecord.swift; sourceTree = "<group>"; };
 		B98A6688AC0797C85950E76D /* ReconciliationTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconciliationTypes.swift; sourceTree = "<group>"; };
+		BFA740881D64DEF9AAD992E7 /* ImageConversionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageConversionService.swift; sourceTree = "<group>"; };
 		C07AF15364718C2056F0DE5F /* ImportProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportProgressView.swift; sourceTree = "<group>"; };
 		C2BF78C573AEB3723FAA6B52 /* AlbumExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumExportSheet.swift; sourceTree = "<group>"; };
 		C4C3BA5B6E3D68DA9A56B7BE /* VolumeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeService.swift; sourceTree = "<group>"; };
@@ -159,7 +162,6 @@
 		D4F69A5682C9063F979E533C /* LumiVaultTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumiVaultTests.swift; sourceTree = "<group>"; };
 		D55E512C07356078D3E3D8CD /* AsyncChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncChannel.swift; sourceTree = "<group>"; };
 		D6E2C8CD562F32019EB774DA /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		DA8B73A9CA2C5A8CBACD3FC7 /* ImportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportCoordinator.swift; sourceTree = "<group>"; };
 		E01DC6510FDA76A175275263 /* ImportSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportSettingsView.swift; sourceTree = "<group>"; };
 		E154D6C9BE1D38992E43BA85 /* SyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCoordinator.swift; sourceTree = "<group>"; };
 		E1B876E2BEAD4C3EBF5E1688 /* LumiVault.help */ = {isa = PBXFileReference; lastKnownFileType = folder; name = LumiVault.help; path = LumiVault/Resources/LumiVault.help; sourceTree = SOURCE_ROOT; };
@@ -189,6 +191,7 @@
 				F90BF32093AC2357CD61747D /* Catalog.swift */,
 				E6826A2A2F1B0541A700F497 /* EXIFData.swift */,
 				1E605ECCBCE62C39786BEF19 /* ImageRecord.swift */,
+				AEDAF6545E18E7FAB1A8EC7A /* ImportTypes.swift */,
 				B98A6688AC0797C85950E76D /* ReconciliationTypes.swift */,
 				669B957B8485AF442AEB2DA8 /* VolumeRecord.swift */,
 			);
@@ -300,7 +303,7 @@
 				42278B7E563F76C6F7FC1EE7 /* DeletionService.swift */,
 				2227CE0EBFDA45BA03F75D10 /* EncryptionService.swift */,
 				3198F0E915EFA392E07CBB6B /* HasherService.swift */,
-				DA8B73A9CA2C5A8CBACD3FC7 /* ImportCoordinator.swift */,
+				BFA740881D64DEF9AAD992E7 /* ImageConversionService.swift */,
 				32581D0BD97222E337F12E24 /* IntegrityService.swift */,
 				1E7AF86B7699D2920ED076EB /* MetalPAR2Service.swift */,
 				FC1982FE3C2E560E783753AF /* PhotosImportService.swift */,
@@ -536,13 +539,14 @@
 				D614E72A43BEE42BDCD6896F /* GaloisField16.swift in Sources */,
 				576927D602EDB37C9C821BEF /* GeneralSettingsView.swift in Sources */,
 				C3E2B48BC52875B0CC34CFBD /* HasherService.swift in Sources */,
+				A1E3C9C6FEDD55A4C790841A /* ImageConversionService.swift in Sources */,
 				FB607540471DB65A4F19B74B /* ImageRecord.swift in Sources */,
-				BC59799BE5D84CCCAE8F04A8 /* ImportCoordinator.swift in Sources */,
 				FF73CCC9E5DA42613C13ADF1 /* ImportDefaultsSettingsView.swift in Sources */,
 				669DDC7D1389AB0C47C80F66 /* ImportFromPhotosCommands.swift in Sources */,
 				863485B86E9A23410301996B /* ImportProgressView.swift in Sources */,
 				8BF3B0F0C701C584B70F424E /* ImportSettingsView.swift in Sources */,
 				8E278B72DB5073512F515562 /* ImportSheet.swift in Sources */,
+				DCA7881A48055EE6FC8BC7A6 /* ImportTypes.swift in Sources */,
 				A3686A95F9248D888E85A241 /* IntegrityService.swift in Sources */,
 				E7503627D9380F2FA62D1C7C /* IntegritySheet.swift in Sources */,
 				EDE76EA25C3EC99DAF2962EE /* LumiVaultApp.swift in Sources */,

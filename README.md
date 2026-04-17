@@ -80,7 +80,6 @@ Photos are organized into date-based albums, deduplicated across multiple extern
           │ IntegrityService        │  verification sweeps
           │ EncryptionService       │  AES-256-GCM encrypt/decrypt, key derivation
           │ PipelinedImportCoord.   │  pipelined async import (AsyncChannel)
-          │ ImportCoordinator       │  legacy sequential import
           └────────────┬────────────┘
                        │
           ┌────────────┴────────────┐

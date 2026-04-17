@@ -198,7 +198,7 @@ struct PhotosImportSheet: View {
                 // Live status line: stage + filename + counter
                 HStack(spacing: 0) {
                     if !progress.currentFilename.isEmpty {
-                        if progress.isPipelined && progress.phase != .importing {
+                        if progress.phase != .importing {
                             Text(progress.currentFilename)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
@@ -215,7 +215,7 @@ struct PhotosImportSheet: View {
                     }
                     Spacer(minLength: 4)
                     if progress.totalFiles > 0 {
-                        if progress.isPipelined && progress.phase != .importing {
+                        if progress.phase != .importing {
                             Text("\(progress.filesCataloged)/\(progress.totalFiles)")
                                 .foregroundStyle(.quaternary)
                         } else {

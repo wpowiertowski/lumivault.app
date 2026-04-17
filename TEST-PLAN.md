@@ -18,11 +18,11 @@
 | High Value | DeletionServiceTests | 4 | File removal from volumes, PAR2 companion cleanup, unmounted volume skip, bulk delete. Real FS operations. |
 | High Value | ReconciliationDiffTests | 5 | B2 diff logic: matched, dangling B2 IDs, orphans, PAR2 skip, mixed scenarios. Pure logic, well-structured. |
 | Medium Value | B2ServiceHelperTests | 7 | SHA-1 known test vectors, HTTP response validation for success (200, 299) and error (401, 500) status codes |
-| Medium Value | ExportProgressTests | 5 | Fraction calculation: empty state, mid-phase progress, complete, PAR2 sub-progress, single active phase. Note: progress model is shared between old ImportCoordinator and new PipelinedImportCoordinator — tests remain valid for both. `filesDropped` counter tracks items silently lost in the pipeline (no snapshot or model lookup failure). |
+| Medium Value | ExportProgressTests | 5 | Fraction calculation for the pipelined import: empty state, import-phase progress, mid-pipeline progress, complete, and global multi-album progress. `filesDropped` counter tracks items silently lost in the pipeline (no snapshot or model lookup failure). |
 | Medium Value | CatalogBackupServiceTests | 5 | Volume backup write + decode, error on bad path, nil mount skip, file restore round-trip, missing catalog error |
 | Medium Value | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture hash verification |
 | Medium Value | DeduplicationServiceTests | 3 | Unique file detection, exact SHA-256 match, returned hash + size verification (using real JPEG fixtures) |
-| Medium Value | ImageConversionTests | 5 | JPEG conversion with extension change, valid output, dimension scaling, original format pass-through, below-max preservation. Tests exercise ImportCoordinator.convertImage; PipelinedImportCoordinator has a duplicated copy — consider extracting shared. |
+| Medium Value | ImageConversionTests | 5 | JPEG conversion with extension change, valid output, dimension scaling, original format pass-through, below-max preservation. Tests exercise the shared `ImageConversionService.convertImage`. |
 | Medium Value | HasherServiceTests | 4 | Fixture hash verification is the trust anchor for the entire test suite. Empty file + consistency checks are useful but simple. |
 | Medium Value | IntegrityServiceTests | 4 | Verify pass/fail/missing and batch-size limit. Solid, but `batchSize` test just checks truncation. |
 | Medium Value | CatalogTests | 5 | Codable round-trip, optional fields, snake_case keys, file I/O. Necessary for CLI compatibility guarantee, but scenarios are basic. |
@@ -42,7 +42,7 @@ IntegrityServiceTests duplicates fixture materialization inline instead of using
 | ------ | ------ | -------- |
 | EncryptionService | High | **Covered** — 20 tests across 3 suites: key derivation, round-trips, wrong key/AD, nonce uniqueness, file ops, edge cases, encrypt-PAR2-decrypt integration |
 | B2Service (network layer) | High | **Partially covered** — 7 tests on pure helpers (SHA-1, HTTP response validation). Network methods require URLSession abstraction; covered by manual QA. |
-| ImportCoordinator / PipelinedImportCoordinator | High | **Partially covered** — 5 tests on image conversion + 5 on ExportProgress. PipelinedImportCoordinator replaces sequential ImportCoordinator with async pipeline (AsyncChannel + backpressure). Pipeline orchestration, cancellation teardown, and channel wiring are not unit-tested; covered by manual QA (TC-2, TC-4). |
+| PipelinedImportCoordinator | High | **Partially covered** — 5 tests on image conversion + 5 on ExportProgress. Pipeline uses AsyncChannel + backpressure; orchestration, cancellation teardown, and channel wiring are not unit-tested; covered by manual QA (TC-2, TC-4). |
 | CatalogBackupService | Medium | **Covered** — 6 tests: volume backup/restore round-trip, error reporting, missing catalog, happy path restore |
 | DeduplicationService | Medium | **Covered** — 3 tests: unique detection, exact match, SHA-256 + size verification with real JPEG fixtures |
 | Volume sync | Medium | **Covered** — 8 tests across 2 suites: full A-to-B sync, dedup, mismatch, PAR2 companion, single-album, partial dedup, already-tracked |
