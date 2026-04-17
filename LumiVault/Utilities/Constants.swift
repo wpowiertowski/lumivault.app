@@ -21,6 +21,13 @@ enum Constants {
     enum Paths {
         nonisolated static let defaultCatalog = "~/.lumivault/catalog.json"
         nonisolated static let iCloudContainer = "iCloud.app.lumivault"
+
+        /// Resolves the user's configured catalog path (or the default) into a file URL,
+        /// expanding `~` tildes. Safe to call from any isolation context.
+        nonisolated static var resolvedCatalogURL: URL {
+            let raw = UserDefaults.standard.string(forKey: "catalogPath") ?? defaultCatalog
+            return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
+        }
     }
 
     // MARK: - Thumbnails

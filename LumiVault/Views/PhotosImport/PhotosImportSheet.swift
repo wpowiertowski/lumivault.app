@@ -428,8 +428,7 @@ struct PhotosImportSheet: View {
         nonisolated(unsafe) let ctx = modelContext
         importTask = Task { @MainActor in
             // Load existing catalog so new images are appended rather than overwriting it
-            let catalogPath = NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
-            try? await catalogService.load(from: URL(fileURLWithPath: catalogPath))
+            try? await catalogService.load(from: Constants.Paths.resolvedCatalogURL)
 
             let coordinator = PipelinedImportCoordinator(catalogService: catalogService, encryptionService: encryptionService)
 

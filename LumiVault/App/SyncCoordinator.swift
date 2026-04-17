@@ -26,13 +26,10 @@ final class SyncCoordinator: @unchecked Sendable {
 
     func setup() async {
         // Load local catalog
-        let catalogPath = await MainActor.run {
-            NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
-        }
-        let catalogURL = URL(fileURLWithPath: catalogPath)
+        let catalogURL = Constants.Paths.resolvedCatalogURL
 
         // Verify catalog integrity before loading
-        if FileManager.default.fileExists(atPath: catalogPath) {
+        if FileManager.default.fileExists(atPath: catalogURL.path) {
             let status = await MainActor.run { Catalog.verifyIntegrity(at: catalogURL) }
             await MainActor.run { catalogIntegrity = status }
         }
@@ -95,10 +92,7 @@ final class SyncCoordinator: @unchecked Sendable {
     func pushAfterLocalChange(reloadFromDisk: Bool = true) async {
         if reloadFromDisk {
             // Reload local catalog to pick up changes made by external CatalogService instances
-            let catalogPath = await MainActor.run {
-                NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
-            }
-            try? await catalogService.load(from: URL(fileURLWithPath: catalogPath))
+            try? await catalogService.load(from: Constants.Paths.resolvedCatalogURL)
         }
 
         let catalog = await catalogService.currentCatalog()
@@ -144,10 +138,7 @@ final class SyncCoordinator: @unchecked Sendable {
         }
 
         // Save restored catalog locally
-        let catalogPath = await MainActor.run {
-            NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
-        }
-        let catalogURL = URL(fileURLWithPath: catalogPath)
+        let catalogURL = Constants.Paths.resolvedCatalogURL
         try await MainActor.run {
             try catalog.save(to: catalogURL)
         }
@@ -175,19 +166,13 @@ final class SyncCoordinator: @unchecked Sendable {
     /// Remove an album from the catalog and save.
     func removeAlbumFromCatalog(name: String, year: String, month: String, day: String) async {
         await catalogService.removeAlbum(name: name, year: year, month: month, day: day)
-        let catalogPath = await MainActor.run {
-            NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
-        }
-        try? await catalogService.save(to: URL(fileURLWithPath: catalogPath))
+        try? await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
     }
 
     /// Remove a single image from a catalog album and save.
     func removeImageFromCatalog(sha256: String, albumName: String, year: String, month: String, day: String) async {
         await catalogService.removeImage(sha256: sha256, fromAlbum: albumName, year: year, month: month, day: day)
-        let catalogPath = await MainActor.run {
-            NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
-        }
-        try? await catalogService.save(to: URL(fileURLWithPath: catalogPath))
+        try? await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
     }
 
     func startMonitoring() async {

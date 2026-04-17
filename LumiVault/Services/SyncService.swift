@@ -127,10 +127,7 @@ actor SyncService {
         try await pushToICloud()
 
         // Also save merged catalog locally
-        let catalogPath = await MainActor.run {
-            NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
-        }
-        try await catalogService.save(to: URL(fileURLWithPath: catalogPath))
+        try await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
     }
 
     // MARK: - NSMetadataQuery Monitoring

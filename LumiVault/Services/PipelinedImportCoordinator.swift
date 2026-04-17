@@ -737,8 +737,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             // Save
             do {
                 try modelContext.save()
-                let catalogPath = NSString(string: UserDefaults.standard.string(forKey: "catalogPath") ?? Constants.Paths.defaultCatalog).expandingTildeInPath
-                try await catalogService.save(to: URL(fileURLWithPath: catalogPath))
+                try await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
             } catch {
                 progress.errors.append("Catalog save failed: \(error.localizedDescription)")
             }
