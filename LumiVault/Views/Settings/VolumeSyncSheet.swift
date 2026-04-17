@@ -166,7 +166,25 @@ struct VolumeSyncSheet: View {
         let b2Service = b2Credentials != nil ? B2Service() : nil
 
         let volumeID = volume.volumeID
-        let imagesToSync = Array(images)
+
+        // Snapshot image data for background file I/O
+        let snapshots: [SyncImageSnapshot] = images.compactMap { image in
+            guard let album = image.album else { return nil }
+            return SyncImageSnapshot(
+                persistentModelID: image.persistentModelID,
+                sha256: image.sha256,
+                filename: image.filename,
+                par2Filename: image.par2Filename,
+                b2FileId: image.b2FileId,
+                storageLocations: image.storageLocations,
+                albumYear: album.year,
+                albumMonth: album.month,
+                albumDay: album.day,
+                albumName: album.name
+            )
+        }
+        let skippedNoAlbum = images.count - snapshots.count
+        let sourceVolumePaths: [(volumeID: String, url: URL)] = sourceVolumes.map { ($0.0.volumeID, $0.1) }
 
         Task { @MainActor in
             defer {
@@ -176,84 +194,61 @@ struct VolumeSyncSheet: View {
                 }
             }
 
-            for image in imagesToSync {
-                guard let album = image.album else {
-                    skippedCount += 1
-                    processedImages += 1
-                    continue
-                }
+            // Account for images without albums
+            skippedCount += skippedNoAlbum
+            processedImages += skippedNoAlbum
 
+            for snap in snapshots {
                 let destBase = volumeURL
-                    .appendingPathComponent(album.year, isDirectory: true)
-                    .appendingPathComponent(album.month, isDirectory: true)
-                    .appendingPathComponent(album.day, isDirectory: true)
-                    .appendingPathComponent(album.name, isDirectory: true)
-
-                let destFile = destBase.appendingPathComponent(image.filename)
-                let relativePath = "\(album.year)/\(album.month)/\(album.day)/\(album.name)/\(image.filename)"
+                    .appendingPathComponent(snap.albumYear, isDirectory: true)
+                    .appendingPathComponent(snap.albumMonth, isDirectory: true)
+                    .appendingPathComponent(snap.albumDay, isDirectory: true)
+                    .appendingPathComponent(snap.albumName, isDirectory: true)
+                let destFile = destBase.appendingPathComponent(snap.filename)
+                let relativePath = "\(snap.albumYear)/\(snap.albumMonth)/\(snap.albumDay)/\(snap.albumName)/\(snap.filename)"
                 let location = StorageLocation(volumeID: volumeID, relativePath: relativePath)
 
-                // Already tracked on this volume — skip
-                if image.storageLocations.contains(location) {
+                // Already tracked on this volume — skip (fast check, no I/O)
+                if snap.storageLocations.contains(location) {
                     deduplicatedCount += 1
                     processedImages += 1
                     continue
                 }
 
-                // File already exists on target — verify by hash
-                if FileManager.default.fileExists(atPath: destFile.path) {
-                    let existingHash = try? await hasher.sha256(of: destFile)
-                    if existingHash == image.sha256 {
-                        image.storageLocations.append(location)
-                        deduplicatedCount += 1
-                    } else {
-                        errors.append("Hash mismatch for \(image.filename) on \(volume.label)")
-                    }
-                    processedImages += 1
-                    continue
-                }
+                // Offload file I/O to background
+                let result = await Self.syncFileIO(
+                    snapshot: snap,
+                    destBase: destBase,
+                    destFile: destFile,
+                    sourceVolumePaths: sourceVolumePaths,
+                    hasher: hasher,
+                    b2Service: b2Service,
+                    b2Credentials: b2Credentials
+                )
 
-                // Find a source for the file on another volume
-                var sourceURL: URL?
-                for loc in image.storageLocations {
-                    if let (_, volURL) = sourceVolumes.first(where: { $0.0.volumeID == loc.volumeID }) {
-                        let candidate = volURL.appendingPathComponent(loc.relativePath)
-                        if FileManager.default.fileExists(atPath: candidate.path) {
-                            sourceURL = candidate
-                            break
-                        }
+                // Update SwiftData and progress on MainActor
+                switch result {
+                case .existsVerified:
+                    if let record = modelContext.model(for: snap.persistentModelID) as? ImageRecord {
+                        record.storageLocations.append(location)
                     }
-                }
-
-                if let source = sourceURL {
-                    // Copy from another volume
-                    do {
-                        try FileManager.default.createDirectory(at: destBase, withIntermediateDirectories: true)
-                        try FileManager.default.copyItem(at: source, to: destFile)
-                        image.storageLocations.append(location)
-                        copyPAR2(for: image, from: source.deletingLastPathComponent(), to: destBase)
-                        copiedCount += 1
-                    } catch {
-                        errors.append("Copy failed: \(image.filename) — \(error.localizedDescription)")
+                    deduplicatedCount += 1
+                case .hashMismatch(let msg):
+                    errors.append(msg)
+                case .copied:
+                    if let record = modelContext.model(for: snap.persistentModelID) as? ImageRecord {
+                        record.storageLocations.append(location)
                     }
-                } else if let b2 = b2Service, let creds = b2Credentials, image.b2FileId != nil {
-                    // Download from B2 as fallback
-                    let remotePath = "\(album.year)/\(album.month)/\(album.day)/\(album.name)/\(image.filename)"
-                    do {
-                        let data = try await b2.downloadFile(
-                            fileName: remotePath,
-                            bucketId: creds.bucketId,
-                            credentials: creds
-                        )
-                        try FileManager.default.createDirectory(at: destBase, withIntermediateDirectories: true)
-                        try data.write(to: destFile, options: .atomic)
-                        image.storageLocations.append(location)
-                        downloadedCount += 1
-                    } catch {
-                        errors.append("B2 download failed: \(image.filename) — \(error.localizedDescription)")
+                    copiedCount += 1
+                case .downloaded:
+                    if let record = modelContext.model(for: snap.persistentModelID) as? ImageRecord {
+                        record.storageLocations.append(location)
                     }
-                } else {
+                    downloadedCount += 1
+                case .skipped:
                     skippedCount += 1
+                case .error(let msg):
+                    errors.append(msg)
                 }
 
                 processedImages += 1
@@ -265,10 +260,78 @@ struct VolumeSyncSheet: View {
         }
     }
 
-    private func copyPAR2(for image: ImageRecord, from sourceDir: URL, to destDir: URL) {
-        guard !image.par2Filename.isEmpty else { return }
-        let par2Source = sourceDir.appendingPathComponent(image.par2Filename)
-        let par2Dest = destDir.appendingPathComponent(image.par2Filename)
+    /// Performs file I/O for a single image off the main thread.
+    /// Checks existence, verifies hashes, copies files, or downloads from B2.
+    nonisolated private static func syncFileIO(
+        snapshot: SyncImageSnapshot,
+        destBase: URL,
+        destFile: URL,
+        sourceVolumePaths: [(volumeID: String, url: URL)],
+        hasher: HasherService,
+        b2Service: B2Service?,
+        b2Credentials: B2Credentials?
+    ) async -> SyncFileResult {
+        let fm = FileManager.default
+
+        // File already exists on target — verify by hash
+        if fm.fileExists(atPath: destFile.path) {
+            let existingHash = try? await hasher.sha256(of: destFile)
+            if existingHash == snapshot.sha256 {
+                return .existsVerified
+            } else {
+                return .hashMismatch("Hash mismatch for \(snapshot.filename)")
+            }
+        }
+
+        // Find a source for the file on another volume
+        for loc in snapshot.storageLocations {
+            if let (_, volURL) = sourceVolumePaths.first(where: { $0.volumeID == loc.volumeID }) {
+                let candidate = volURL.appendingPathComponent(loc.relativePath)
+                if fm.fileExists(atPath: candidate.path) {
+                    do {
+                        try fm.createDirectory(at: destBase, withIntermediateDirectories: true)
+                        try fm.copyItem(at: candidate, to: destFile)
+                        copyPAR2Files(
+                            par2Filename: snapshot.par2Filename,
+                            from: candidate.deletingLastPathComponent(),
+                            to: destBase
+                        )
+                        return .copied
+                    } catch {
+                        return .error("Copy failed: \(snapshot.filename) — \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+
+        // Download from B2 as fallback
+        if let b2 = b2Service, let creds = b2Credentials, snapshot.b2FileId != nil {
+            let remotePath = "\(snapshot.albumYear)/\(snapshot.albumMonth)/\(snapshot.albumDay)/\(snapshot.albumName)/\(snapshot.filename)"
+            do {
+                let data = try await b2.downloadFile(
+                    fileName: remotePath,
+                    bucketId: creds.bucketId,
+                    credentials: creds
+                )
+                try fm.createDirectory(at: destBase, withIntermediateDirectories: true)
+                try data.write(to: destFile, options: .atomic)
+                return .downloaded
+            } catch {
+                return .error("B2 download failed: \(snapshot.filename) — \(error.localizedDescription)")
+            }
+        }
+
+        return .skipped
+    }
+
+    nonisolated private static func copyPAR2Files(
+        par2Filename: String,
+        from sourceDir: URL,
+        to destDir: URL
+    ) {
+        guard !par2Filename.isEmpty else { return }
+        let par2Source = sourceDir.appendingPathComponent(par2Filename)
+        let par2Dest = destDir.appendingPathComponent(par2Filename)
         if FileManager.default.fileExists(atPath: par2Source.path),
            !FileManager.default.fileExists(atPath: par2Dest.path) {
             try? FileManager.default.copyItem(at: par2Source, to: par2Dest)
@@ -280,6 +343,29 @@ struct VolumeSyncSheet: View {
     private enum SyncPhase {
         case ready, syncing, complete
     }
+
+    private enum SyncFileResult: Sendable {
+        case existsVerified
+        case hashMismatch(String)
+        case copied
+        case downloaded
+        case skipped
+        case error(String)
+    }
+}
+
+/// Sendable snapshot of ImageRecord data needed for background sync I/O.
+private struct SyncImageSnapshot: Sendable {
+    let persistentModelID: PersistentIdentifier
+    let sha256: String
+    let filename: String
+    let par2Filename: String
+    let b2FileId: String?
+    let storageLocations: [StorageLocation]
+    let albumYear: String
+    let albumMonth: String
+    let albumDay: String
+    let albumName: String
 }
 
 private struct SyncStat: View {

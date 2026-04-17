@@ -49,7 +49,8 @@ actor ThumbnailService {
     }
 
     func generateThumbnail(for fileURL: URL, sha256: String) throws {
-        guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else {
+        let sourceOptions: [CFString: Any] = [kCGImageSourceShouldAllowFloat: false]
+        guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, sourceOptions as CFDictionary) else {
             throw ThumbnailError.unreadableSource
         }
 
@@ -74,8 +75,9 @@ actor ThumbnailService {
                 throw ThumbnailError.writeFailed
             }
 
+            let opaqueImage = Self.strippingAlpha(cgImage) ?? cgImage
             let destOptions: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.65]
-            CGImageDestinationAddImage(dest, cgImage, destOptions as CFDictionary)
+            CGImageDestinationAddImage(dest, opaqueImage, destOptions as CFDictionary)
 
             guard CGImageDestinationFinalize(dest) else {
                 throw ThumbnailError.writeFailed
@@ -111,6 +113,20 @@ actor ThumbnailService {
             .appendingPathComponent("\(size.rawValue)", isDirectory: true)
             .appendingPathComponent(prefix, isDirectory: true)
             .appendingPathComponent("\(sha256).heic")
+    }
+
+    private static func strippingAlpha(_ source: CGImage) -> CGImage? {
+        guard let ctx = CGContext(
+            data: nil,
+            width: source.width,
+            height: source.height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else { return nil }
+        ctx.draw(source, in: CGRect(x: 0, y: 0, width: source.width, height: source.height))
+        return ctx.makeImage()
     }
 
     enum ThumbnailError: Error {

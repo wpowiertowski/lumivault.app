@@ -25,17 +25,30 @@ enum BookmarkResolver {
     /// Resolve and start accessing a security-scoped resource.
     /// Remember to call `url.stopAccessingSecurityScopedResource()` when done.
     nonisolated static func resolveAndAccess(_ bookmarkData: Data) throws -> URL {
-        let (url, isStale) = try resolve(bookmarkData)
-
-        if isStale {
-            throw BookmarkError.staleBookmark
-        }
+        let (url, _) = try resolve(bookmarkData)
 
         guard url.startAccessingSecurityScopedResource() else {
             throw BookmarkError.accessDenied
         }
 
         return url
+    }
+
+    /// Resolve, start accessing, and refresh the bookmark if stale.
+    /// Returns the accessed URL and refreshed bookmark data (nil if not stale).
+    nonisolated static func resolveAccessAndRefresh(_ bookmarkData: Data) throws -> (url: URL, refreshedBookmark: Data?) {
+        let (url, isStale) = try resolve(bookmarkData)
+
+        guard url.startAccessingSecurityScopedResource() else {
+            throw BookmarkError.accessDenied
+        }
+
+        if isStale {
+            let refreshed = try? createBookmark(for: url)
+            return (url, refreshed)
+        }
+
+        return (url, nil)
     }
 
     enum BookmarkError: Error {

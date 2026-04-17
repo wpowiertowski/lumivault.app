@@ -29,7 +29,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         self.encryptionService = encryptionService
     }
 
-    func importAlbum(
+    @MainActor func importAlbum(
         photosAlbumId: String,
         settings: ImportSettings,
         modelContext: ModelContext,
@@ -123,10 +123,12 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             let volumeDescriptor = FetchDescriptor<VolumeRecord>()
             let allVolumes = try modelContext.fetch(volumeDescriptor)
             for vol in allVolumes where settings.targetVolumeIDs.contains(vol.volumeID) {
-                if let url = try? BookmarkResolver.resolveAndAccess(vol.bookmarkData) {
+                do {
+                    let (url, refreshed) = try BookmarkResolver.resolveAccessAndRefresh(vol.bookmarkData)
+                    if let refreshed { vol.bookmarkData = refreshed }
                     resolvedVolumes.append((vol, url))
-                } else {
-                    progress.errors.append("Cannot access volume: \(vol.label)")
+                } catch {
+                    progress.errors.append("Cannot access volume: \(vol.label) — \(error.localizedDescription)")
                 }
             }
         }
@@ -774,17 +776,27 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
         switch format {
         case .jpeg:
-            outputData = bitmapRep.representation(
-                using: .jpeg,
-                properties: [.compressionFactor: quality]
-            )
+            let opaqueImage = bitmapRep.cgImage.flatMap(Self.strippingAlpha)
+            if let opaqueImage {
+                let data = NSMutableData()
+                if let dest = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) {
+                    let props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: quality]
+                    CGImageDestinationAddImage(dest, opaqueImage, props as CFDictionary)
+                    outputData = CGImageDestinationFinalize(dest) ? data as Data : nil
+                } else {
+                    outputData = nil
+                }
+            } else {
+                outputData = nil
+            }
             outputFilename = stem + ".jpg"
         case .heic:
-            if let cgImage = bitmapRep.cgImage {
+            let opaqueImage = bitmapRep.cgImage.flatMap(Self.strippingAlpha)
+            if let opaqueImage {
                 let data = NSMutableData()
                 if let dest = CGImageDestinationCreateWithData(data, "public.heic" as CFString, 1, nil) {
                     let props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: quality]
-                    CGImageDestinationAddImage(dest, cgImage, props as CFDictionary)
+                    CGImageDestinationAddImage(dest, opaqueImage, props as CFDictionary)
                     outputData = CGImageDestinationFinalize(dest) ? data as Data : nil
                 } else {
                     outputData = nil
@@ -813,5 +825,20 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         } catch {
             return asset
         }
+    }
+
+    /// Create a copy of a CGImage with alpha stripped (noneSkipLast).
+    private static func strippingAlpha(_ source: CGImage) -> CGImage? {
+        guard let ctx = CGContext(
+            data: nil,
+            width: source.width,
+            height: source.height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else { return nil }
+        ctx.draw(source, in: CGRect(x: 0, y: 0, width: source.width, height: source.height))
+        return ctx.makeImage()
     }
 }

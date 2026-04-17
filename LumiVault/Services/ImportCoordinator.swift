@@ -434,8 +434,13 @@ class ImportCoordinator {
             let allVolumes = try modelContext.fetch(volumeDescriptor)
 
             for volumeRecord in allVolumes where settings.targetVolumeIDs.contains(volumeRecord.volumeID) {
-                guard let volumeURL = try? BookmarkResolver.resolveAndAccess(volumeRecord.bookmarkData) else {
-                    progress.errors.append("Cannot access volume: \(volumeRecord.label)")
+                let volumeURL: URL
+                do {
+                    let (url, refreshed) = try BookmarkResolver.resolveAccessAndRefresh(volumeRecord.bookmarkData)
+                    if let refreshed { volumeRecord.bookmarkData = refreshed }
+                    volumeURL = url
+                } catch {
+                    progress.errors.append("Cannot access volume: \(volumeRecord.label) — \(error.localizedDescription)")
                     continue
                 }
                 defer { volumeURL.stopAccessingSecurityScopedResource() }
