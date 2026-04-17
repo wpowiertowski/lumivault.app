@@ -159,21 +159,6 @@ enum TestFixtures {
         }
     }
 
-    /// Builds SyncImageInput entries for VolumeService sync tests.
-    static func syncInputs(onVolume volumeID: String) -> [VolumeService.SyncImageInput] {
-        files.map { spec in
-            VolumeService.SyncImageInput(
-                sha256: spec.sha256,
-                filename: spec.name,
-                par2Filename: spec.par2Name,
-                albumPath: spec.albumPath,
-                existingLocations: [
-                    StorageLocation(volumeID: volumeID, relativePath: "\(spec.albumPath)/\(spec.name)")
-                ]
-            )
-        }
-    }
-
     // MARK: - Image Generation
 
     /// Creates a minimal valid JPEG file at the given URL with the specified dimensions.

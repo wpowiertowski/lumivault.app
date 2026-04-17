@@ -2,7 +2,7 @@
 
 ## Existing Automated Test Assessment
 
-### Summary: 125 tests across 23 suites
+### Summary: 106 tests across 19 suites
 
 | Rating | Suite | Tests | Assessment |
 | -------- | ------- | ------- | ------------ |
@@ -10,8 +10,6 @@
 | High Value | EncryptPAR2IntegrationTests | 2 | Full encrypt-PAR2-corrupt-repair-decrypt pipeline, uncorrupted encrypted file passes PAR2 verification |
 | High Value | EncryptionEdgeCaseTests | 4 | Empty data, ciphertext size = plaintext+16, 1MB large data round-trip, file-level encrypted size check |
 | High Value | RedundancyServiceTests | 11 | Core data-integrity logic. Covers PAR2 2.0 encode, verify, corrupt-and-repair round-trips, split file format, par2cmdline interop (verify + repair), edge cases. Irreplaceable. |
-| High Value | VolumeSyncToNewVolumeTests | 5 | End-to-end copy + hash verification, dedup detection, hash mismatch, PAR2 companion handling. Tests real file I/O. |
-| High Value | VolumeSyncAdditionalTests | 3 | Single-album sync, partial dedup with pre-placed files, already-tracked dedup skip |
 | High Value | CatalogServiceMergeTests | 5 | Union-by-SHA merge, timestamp precedence, dedup — exactly the logic that protects multi-device iCloud sync. |
 | High Value | CatalogRemovalTests | 3 | Album removal, empty container pruning, single-image removal — validates catalog mutation correctness. |
 | High Value | VolumeScanTests | 4 | Reconciliation scan: dangling locations, orphan detection, healthy pass, unmounted skip. Core integrity flow. |
@@ -21,10 +19,8 @@
 | Medium Value | ExportProgressTests | 5 | Fraction calculation for the pipelined import: empty state, import-phase progress, mid-pipeline progress, complete, and global multi-album progress. `filesDropped` counter tracks items silently lost in the pipeline (no snapshot or model lookup failure). |
 | Medium Value | CatalogBackupServiceTests | 5 | Volume backup write + decode, error on bad path, nil mount skip, file restore round-trip, missing catalog error |
 | Medium Value | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture hash verification |
-| Medium Value | DeduplicationServiceTests | 3 | Unique file detection, exact SHA-256 match, returned hash + size verification (using real JPEG fixtures) |
 | Medium Value | ImageConversionTests | 5 | JPEG conversion with extension change, valid output, dimension scaling, original format pass-through, below-max preservation. Tests exercise the shared `ImageConversionService.convertImage`. |
 | Medium Value | HasherServiceTests | 4 | Fixture hash verification is the trust anchor for the entire test suite. Empty file + consistency checks are useful but simple. |
-| Medium Value | IntegrityServiceTests | 4 | Verify pass/fail/missing and batch-size limit. Solid, but `batchSize` test just checks truncation. |
 | Medium Value | CatalogTests | 5 | Codable round-trip, optional fields, snake_case keys, file I/O. Necessary for CLI compatibility guarantee, but scenarios are basic. |
 | Medium Value | PerceptualHashComputeTests | 3 | dHash `compute()` returns 8 bytes, deterministic output for same image, rejects non-image files |
 | Low Value | PerceptualHashTests | 7 | All 7 tests exercise `hammingDistance` with synthetic byte arrays. Useful but does not test image hashing. |
@@ -34,8 +30,6 @@
 
 No truly redundant tests. Each test has a distinct scenario. Some suites have tests that are very close (e.g., `deleteRemovesFilesFromVolume` vs `deleteAllFixtureFilesFromVolume` differ only in batch size), but they serve as single-file vs bulk regression guards.
 
-IntegrityServiceTests duplicates fixture materialization inline instead of using `TestFixtures.materializeVolume()` — a maintenance concern, not a test-value issue.
-
 ### Coverage Status
 
 | Area | Risk | Status |
@@ -44,13 +38,11 @@ IntegrityServiceTests duplicates fixture materialization inline instead of using
 | B2Service (network layer) | High | **Partially covered** — 7 tests on pure helpers (SHA-1, HTTP response validation). Network methods require URLSession abstraction; covered by manual QA. |
 | PipelinedImportCoordinator | High | **Partially covered** — 5 tests on image conversion + 5 on ExportProgress. Pipeline uses AsyncChannel + backpressure; orchestration, cancellation teardown, and channel wiring are not unit-tested; covered by manual QA (TC-2, TC-4). |
 | CatalogBackupService | Medium | **Covered** — 6 tests: volume backup/restore round-trip, error reporting, missing catalog, happy path restore |
-| DeduplicationService | Medium | **Covered** — 3 tests: unique detection, exact match, SHA-256 + size verification with real JPEG fixtures |
-| Volume sync | Medium | **Covered** — 8 tests across 2 suites: full A-to-B sync, dedup, mismatch, PAR2 companion, single-album, partial dedup, already-tracked |
+| Volume sync (VolumeSyncSheet inline copy loop) | Medium | **Not unit-tested** — loop lives in a SwiftUI view. Hash-dedup + PAR2 companion behavior validated by manual QA (TC-8, TC-9). |
 | PerceptualHash | Medium | **Covered** — 10 tests across 2 suites: hammingDistance (7 pure math) + compute (3 with real images) |
 | SyncService / SyncCoordinator | Medium | **Not testable** — requires iCloud provisioning. Catalog merge logic covered by CatalogServiceMergeTests. |
 | ThumbnailService | Low | **Not tested** — ImageIO + NSCache. Visual correctness validated by manual QA. |
 | PhotosImportService | Low | **Not testable** — requires Photos.app sandbox entitlement. Covered by manual QA. |
-| VolumeService.mirrorAlbum | Low | **Not testable** — takes non-Sendable `AlbumRecord` + closure across actor boundary. Equivalent logic covered by syncToVolume tests. |
 
 ### Remaining Automated Test TODOs
 

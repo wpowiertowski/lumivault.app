@@ -59,14 +59,11 @@
           │ CatalogBackupService    │  ← distribute catalog to volumes + B2, restore
           │ PhotosImportService     │  ← PhotoKit album export
           │ ThumbnailService        │  ← generate, cache, LRU eviction (shared via Environment)
-          │ DeduplicationService    │  ← SHA-256 + perceptual hash index
           │ RedundancyService       │  ← Reed-Solomon ECC encode/verify/repair
           │ B2Service               │  ← B2 upload/download/list/delete
           │ SyncService             │  ← iCloud push/pull, conflict resolution
-          │ VolumeService           │  ← discover, bookmark, mirror, sync
           │ ReconciliationService   │  ← scan volumes + B2 for discrepancies
           │ DeletionService         │  ← remove files from volumes + B2
-          │ IntegrityService        │  ← scheduled verification sweeps
           │ EncryptionService       │  ← AES-256-GCM encrypt/decrypt, key derivation
           │ PipelinedImportCoord.   │  ← pipelined import (AsyncChannel between phases)
           └────────────┬────────────┘
@@ -395,15 +392,10 @@ bucket name). Settings UI includes a "Test Connection" button that calls
 
 **Multi-volume mirroring**:
 
-```
-VolumeService
-  .mirrorAlbum(album, to: [Volume]) → async throws
-
-For each target volume:
-  For each image in album:
-    if volume already has StorageLocation for this sha256 → skip
-    else → copy file + par2, record StorageLocation
-```
+Import writes each output file to every mounted mirror target inline in the
+`PipelinedImportCoordinator` store phase. For every image, each volume that already
+records a `StorageLocation` for this SHA-256 is skipped; otherwise the file + PAR2
+companion are copied and a new `StorageLocation` is appended.
 
 Each `VolumeRecord` stores a security-scoped bookmark (`NSURL.bookmarkData`) so the app
 can re-access external drives across launches without repeated permission prompts.
@@ -411,7 +403,7 @@ can re-access external drives across launches without repeated permission prompt
 **Sync existing catalog to new volume**:
 
 When a new volume is added via Settings > Volumes, the app offers to sync all existing
-catalog images to the new drive. `VolumeService.syncToVolume()` handles the sync with
+catalog images to the new drive. The sync loop lives inline in `VolumeSyncSheet` with
 dedup-by-hash: if a file already exists at the destination with the correct SHA-256, it
 adds a `StorageLocation` without copying. PAR2 companions are copied alongside images.
 
@@ -588,11 +580,8 @@ LumiVault/
 │   ├── ReconciliationService.swift      // Scan volumes + B2 for discrepancies
 │   ├── SyncService.swift                // iCloud coordination
 │   ├── ThumbnailService.swift           // Generate + cache thumbnails
-│   ├── DeduplicationService.swift       // SHA-256 + perceptual hash index
 │   ├── RedundancyService.swift          // Reed-Solomon ECC (PAR2 2.0, GF(2^16))
 │   ├── MetalPAR2Service.swift          // GPU-accelerated PAR2 via Metal compute shaders
-│   ├── VolumeService.swift              // Disk discovery, bookmarks, sync to volume
-│   ├── IntegrityService.swift           // Scheduled verification
 │   ├── EncryptionService.swift         // AES-256-GCM encrypt/decrypt, PBKDF2 key derivation
 │   └── HasherService.swift              // CryptoKit SHA-256 streaming
 │
@@ -636,7 +625,6 @@ LumiVault/
     ├── GaloisField16.swift              // GF(2^16) log/antilog tables for PAR2 Reed-Solomon
     ├── PerceptualHash.swift             // dHash via Core Image
     ├── Constants.swift                  // Design tokens, paths
-    ├── FileCoordination.swift           // NSFileCoordinator helpers
     └── BookmarkResolver.swift           // Security-scoped bookmark utilities
 ```
 
@@ -757,9 +745,10 @@ blocks, removing the GF(2^8) field limit of 255.
 
 ### Integrity Verification
 
-`IntegrityService` re-hashes files against stored SHA-256 digests in configurable
-batch sizes. Files are resolved via a caller-provided `sourceResolver` closure,
-allowing flexible source selection (volumes, staging directories).
+`ReconciliationService` re-hashes files against stored SHA-256 digests as part of the
+discrepancy scan. Hash mismatches are surfaced as `hashMismatch` discrepancies and can
+be auto-repaired by copying from a healthy volume or via PAR2 Reed-Solomon recovery.
+Per-album/per-image verification runs from the Integrity right-click context menu.
 
 ---
 

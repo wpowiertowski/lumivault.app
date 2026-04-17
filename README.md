@@ -70,14 +70,11 @@ Photos are organized into date-based albums, deduplicated across multiple extern
           │ CatalogBackupService    │  distribute catalog to volumes + B2, restore
           │ PhotosImportService     │  PhotoKit album export
           │ ThumbnailService        │  generate + NSCache (128 MB)
-          │ DeduplicationService    │  SHA-256 + perceptual hash index
           │ RedundancyService       │  Reed-Solomon ECC encode/verify/repair
           │ B2Service               │  B2 upload/download/list/delete
           │ SyncService             │  iCloud push/pull via NSFileCoordinator
-          │ VolumeService           │  disk discovery/bookmarks/sync
-          │ ReconciliationService   │  scan volumes + B2 for discrepancies
+          │ ReconciliationService   │  scan volumes + B2 for discrepancies, verify, auto-repair
           │ DeletionService         │  remove files from volumes + B2
-          │ IntegrityService        │  verification sweeps
           │ EncryptionService       │  AES-256-GCM encrypt/decrypt, key derivation
           │ PipelinedImportCoord.   │  pipelined async import (AsyncChannel)
           └────────────┬────────────┘
@@ -120,7 +117,7 @@ LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool
 
 ## Testing
 
-125 unit tests across 23 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
+106 unit tests across 19 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
 
 ```bash
 swift test                                    # Run all unit tests
@@ -138,20 +135,16 @@ xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultUITests -destinati
 | HasherServiceTests | 4 | Fixture hash verification, empty file, size tracking, consistency |
 | RedundancyServiceTests | 11 | PAR2 2.0 generate/verify, corrupt-and-repair round-trip, split file format, par2cmdline interop (verify + repair), edge cases |
 | PerceptualHashTests | 7 | Hamming distance, symmetry, thresholds, invalid input |
-| IntegrityServiceTests | 4 | Hash match/mismatch, missing files, batch size |
 | SwiftDataModelTests | 5 | Relationships, defaults, Codable support types |
 | ReconciliationDiffTests | 5 | B2 diff: matched, dangling, orphan, PAR2 skip, mixed scenario |
 | VolumeScanTests | 4 | Dangling location, orphan detection, file exists, unmounted skip |
-| VolumeSyncToNewVolumeTests | 5 | Full A-to-B sync, dedup by hash, mismatch, skip, PAR2 companion |
 | DeletionServiceTests | 4 | Volume file removal, PAR2 companion, unmounted skip, bulk delete |
 | EncryptionServiceTests | 14 | Key derivation, encrypt/decrypt round-trip (data + file), wrong key/AD rejection, nonce uniqueness |
 | B2ServiceHelperTests | 7 | SHA-1 known vectors, HTTP response validation (success + error codes) |
 | ExportProgressTests | 5 | Fraction calculation: empty, mid-phase, complete, PAR2 sub-progress, single phase |
 | CatalogBackupServiceTests | 5 | Volume backup/restore round-trip, error reporting, missing catalog |
-| DeduplicationServiceTests | 3 | Unique file detection, exact match, SHA-256 + size verification |
 | ImageConversionTests | 5 | JPEG conversion, dimension scaling, below-max preservation, no-op pass-through |
 | PerceptualHashComputeTests | 3 | dHash compute returns 8 bytes, deterministic output, non-image rejection |
-| VolumeSyncAdditionalTests | 3 | Single-album sync, partial dedup, already-tracked skip |
 | EncryptPAR2IntegrationTests | 2 | Encrypt→PAR2→corrupt→repair→decrypt round-trip, uncorrupted verification |
 | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture verification |
 | EncryptionEdgeCaseTests | 4 | Empty data, size = plaintext+16, 1MB large data, file size check |
