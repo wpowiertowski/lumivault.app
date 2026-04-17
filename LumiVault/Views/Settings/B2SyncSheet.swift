@@ -188,46 +188,35 @@ struct B2SyncSheet: View {
                     continue
                 }
 
-                var lastError: Error?
-                for attempt in 1...3 {
-                    do {
-                        let alreadyExists = try await b2Service.fileExists(
-                            fileName: remotePath,
+                do {
+                    let alreadyExists = try await b2Service.fileExists(
+                        fileName: remotePath,
+                        bucketId: credentials.bucketId,
+                        credentials: credentials
+                    )
+
+                    if alreadyExists {
+                        let listings = try await b2Service.listAllFiles(
                             bucketId: credentials.bucketId,
+                            credentials: credentials,
+                            prefix: remotePath
+                        )
+                        if let listing = listings.first(where: { $0.fileName == remotePath }) {
+                            image.b2FileId = listing.fileId
+                        }
+                        alreadyInB2Count += 1
+                    } else {
+                        let fileId = try await b2Service.uploadImage(
+                            fileURL: source,
+                            remotePath: remotePath,
+                            sha256: image.sha256,
                             credentials: credentials
                         )
-
-                        if alreadyExists {
-                            let listings = try await b2Service.listAllFiles(
-                                bucketId: credentials.bucketId,
-                                credentials: credentials,
-                                prefix: remotePath
-                            )
-                            if let listing = listings.first(where: { $0.fileName == remotePath }) {
-                                image.b2FileId = listing.fileId
-                            }
-                            alreadyInB2Count += 1
-                        } else {
-                            let fileId = try await b2Service.uploadImage(
-                                fileURL: source,
-                                remotePath: remotePath,
-                                sha256: image.sha256,
-                                credentials: credentials
-                            )
-                            image.b2FileId = fileId
-                            uploadedCount += 1
-                        }
-                        lastError = nil
-                        break
-                    } catch {
-                        lastError = error
-                        if attempt < 3 {
-                            try? await Task.sleep(for: .seconds(attempt))
-                        }
+                        image.b2FileId = fileId
+                        uploadedCount += 1
                     }
-                }
-                if let lastError {
-                    errors.append("\(image.filename): \(lastError.localizedDescription)")
+                } catch {
+                    errors.append(error.localizedDescription)
                     skippedCount += 1
                 }
 

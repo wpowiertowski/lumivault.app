@@ -6,8 +6,8 @@ actor B2Service {
     private var uploadURL: B2UploadURL?
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 120
+        config.timeoutIntervalForRequest = 90
+        config.timeoutIntervalForResource = 300
         return URLSession(configuration: config)
     }()
 
@@ -248,29 +248,46 @@ actor B2Service {
         sha256: String,
         credentials: B2Credentials
     ) async throws -> String {
-        let fileData = try Data(contentsOf: fileURL)
+        let fileData: Data
+        do {
+            fileData = try Data(contentsOf: fileURL)
+        } catch {
+            throw B2UploadError(
+                fileName: fileURL.lastPathComponent,
+                remotePath: remotePath,
+                reason: "Could not read file from disk: \(error.localizedDescription)"
+            )
+        }
         let sha1 = sha1Hash(of: fileData)
         let encodedPath = remotePath.addingPercentEncoding(withAllowedCharacters: Self.b2AllowedCharacters) ?? remotePath
 
-        return try await withRetry(credentials: credentials) {
-            if self.authorization == nil {
-                try await self.authorize(credentials: credentials)
-            }
-            try await self.getUploadURL(bucketId: credentials.bucketId)
+        do {
+            return try await withRetry(credentials: credentials) {
+                if self.authorization == nil {
+                    try await self.authorize(credentials: credentials)
+                }
+                try await self.getUploadURL(bucketId: credentials.bucketId)
 
-            let result = try await self.uploadFile(
-                fileData: fileData,
-                fileName: encodedPath,
-                sha1: sha1
+                let result = try await self.uploadFile(
+                    fileData: fileData,
+                    fileName: encodedPath,
+                    sha1: sha1
+                )
+                return result.fileId
+            }
+        } catch {
+            throw B2UploadError(
+                fileName: fileURL.lastPathComponent,
+                remotePath: remotePath,
+                reason: Self.userFacingDescription(for: error)
             )
-            return result.fileId
         }
     }
 
     // MARK: - Retry
 
     private func withRetry<T>(
-        maxAttempts: Int = 4,
+        maxAttempts: Int = 5,
         credentials: B2Credentials,
         operation: () async throws -> T
     ) async throws -> T {
@@ -278,7 +295,8 @@ actor B2Service {
 
         for attempt in 0..<maxAttempts {
             if attempt > 0 {
-                let delay = UInt64(min(pow(2.0, Double(attempt - 1)), 4)) * 500_000_000
+                // Exponential backoff: 1s, 2s, 4s, 8s
+                let delay = UInt64(min(pow(2.0, Double(attempt - 1)), 8)) * 1_000_000_000
                 try await Task.sleep(nanoseconds: delay)
             }
 
@@ -286,15 +304,16 @@ actor B2Service {
                 return try await operation()
             } catch let error as B2Error where error.isRetryable {
                 lastError = error
-                if case .httpError(statusCode: 401, _) = error {
-                    authorization = nil
-                }
-                // Re-authorize for next attempt
-                if authorization == nil {
-                    try? await authorize(credentials: credentials)
-                }
+                // Invalidate stale state so next attempt re-authorizes and gets a fresh upload URL
+                authorization = nil
+                uploadURL = nil
+                try? await authorize(credentials: credentials)
             } catch let error as URLError where error.isTransient {
                 lastError = error
+                // Network-level failure — upload URL is likely stale, force refresh on next attempt
+                authorization = nil
+                uploadURL = nil
+                try? await authorize(credentials: credentials)
             }
         }
 
@@ -328,6 +347,32 @@ actor B2Service {
                 message = json["message"] as? String ?? json["code"] as? String
             }
             throw B2Error.httpError(statusCode: http.statusCode, message: message)
+        }
+    }
+
+    // MARK: - User-Facing Descriptions
+
+    nonisolated static func userFacingDescription(for error: Error) -> String {
+        switch error {
+        case let urlError as URLError:
+            switch urlError.code {
+            case .timedOut:
+                "The upload timed out. The file may be too large for the current connection speed."
+            case .networkConnectionLost:
+                "The network connection was lost during upload."
+            case .notConnectedToInternet:
+                "No internet connection. Check your network and try again."
+            case .cannotConnectToHost:
+                "Could not connect to Backblaze B2. The service may be temporarily unavailable."
+            case .dnsLookupFailed:
+                "DNS lookup failed. Check your internet connection."
+            default:
+                "Network error: \(urlError.localizedDescription)"
+            }
+        case let b2Error as B2Error:
+            b2Error.errorDescription ?? b2Error.localizedDescription
+        default:
+            error.localizedDescription
         }
     }
 
@@ -368,14 +413,28 @@ actor B2Service {
                     "B2 access denied (403). Your application key may not have permission for this bucket."
                 case 404:
                     "B2 bucket not found (404). Verify the Bucket ID in Settings."
-                case 408, 429:
-                    "B2 request timed out or rate limited (\(statusCode)). Try again in a moment."
+                case 408:
+                    "B2 request timed out (408). Try again in a moment."
+                case 429:
+                    "B2 rate limited (429). Too many requests — try again shortly."
                 case 500...599:
                     "B2 server error (\(statusCode)). Backblaze may be experiencing issues. Try again later."
                 default:
                     "B2 error \(statusCode)\(message.map { ": \($0)" } ?? ""). Check your B2 settings and try again."
                 }
             }
+        }
+    }
+
+    /// Error surfaced to the user when an upload fails after all retries.
+    /// Includes the file name and a plain-language reason.
+    struct B2UploadError: Error, LocalizedError, Sendable {
+        let fileName: String
+        let remotePath: String
+        let reason: String
+
+        var errorDescription: String? {
+            "Upload failed for \"\(fileName)\": \(reason)"
         }
     }
 }

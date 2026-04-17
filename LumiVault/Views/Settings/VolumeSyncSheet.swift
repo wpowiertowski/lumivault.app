@@ -168,10 +168,12 @@ struct VolumeSyncSheet: View {
         let volumeID = volume.volumeID
 
         // Snapshot image data for background file I/O
+        // Build a lookup from sha256 -> live ImageRecord so we can update SwiftData on MainActor
+        var imagesBySHA: [String: ImageRecord] = [:]
         let snapshots: [SyncImageSnapshot] = images.compactMap { image in
             guard let album = image.album else { return nil }
+            imagesBySHA[image.sha256] = image
             return SyncImageSnapshot(
-                persistentModelID: image.persistentModelID,
                 sha256: image.sha256,
                 filename: image.filename,
                 par2Filename: image.par2Filename,
@@ -229,21 +231,15 @@ struct VolumeSyncSheet: View {
                 // Update SwiftData and progress on MainActor
                 switch result {
                 case .existsVerified:
-                    if let record = modelContext.model(for: snap.persistentModelID) as? ImageRecord {
-                        record.storageLocations.append(location)
-                    }
+                    imagesBySHA[snap.sha256]?.storageLocations.append(location)
                     deduplicatedCount += 1
                 case .hashMismatch(let msg):
                     errors.append(msg)
                 case .copied:
-                    if let record = modelContext.model(for: snap.persistentModelID) as? ImageRecord {
-                        record.storageLocations.append(location)
-                    }
+                    imagesBySHA[snap.sha256]?.storageLocations.append(location)
                     copiedCount += 1
                 case .downloaded:
-                    if let record = modelContext.model(for: snap.persistentModelID) as? ImageRecord {
-                        record.storageLocations.append(location)
-                    }
+                    imagesBySHA[snap.sha256]?.storageLocations.append(location)
                     downloadedCount += 1
                 case .skipped:
                     skippedCount += 1
@@ -356,7 +352,6 @@ struct VolumeSyncSheet: View {
 
 /// Sendable snapshot of ImageRecord data needed for background sync I/O.
 private struct SyncImageSnapshot: Sendable {
-    let persistentModelID: PersistentIdentifier
     let sha256: String
     let filename: String
     let par2Filename: String

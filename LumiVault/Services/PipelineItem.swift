@@ -1,10 +1,8 @@
 import Foundation
-import SwiftData
 
 /// Sendable snapshot of ImageRecord fields needed across pipeline phases.
 /// Created on @MainActor during the hashing phase once the record exists.
 struct ImageRecordSnapshot: Sendable {
-    let persistentModelID: PersistentIdentifier
     let sha256: String
     let filename: String
     let sizeBytes: Int64

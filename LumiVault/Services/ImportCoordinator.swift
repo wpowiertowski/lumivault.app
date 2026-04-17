@@ -558,7 +558,7 @@ class ImportCoordinator {
                         }
                     }
                 } catch {
-                    progress.errors.append("B2 upload failed: \(item.record.filename) — \(error.localizedDescription)")
+                    progress.errors.append(error.localizedDescription)
                 }
             }
         }

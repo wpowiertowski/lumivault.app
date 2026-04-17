@@ -15,6 +15,11 @@ struct ImportedAsset: Sendable {
     let creationDate: Date?
 }
 
+enum ImportResult: Sendable {
+    case success(ImportedAsset)
+    case failure(assetIndex: Int, error: String)
+}
+
 actor PhotosImportService {
 
     // MARK: - Authorization
@@ -166,6 +171,62 @@ actor PhotosImportService {
             counter += 1
         }
         return candidate
+    }
+
+    /// Stream-based import that yields each asset as soon as it's copied to the staging directory.
+    /// The returned stream produces results concurrently with consumption.
+    /// Failed assets are yielded as `.failure` so the pipeline can track them.
+    func importAlbumStreaming(
+        albumId: String,
+        to importDirectory: URL,
+        progress: @Sendable @escaping (Int, Int) -> Void
+    ) async throws -> AsyncStream<ImportResult> {
+        let fetchResult = PHAssetCollection.fetchAssetCollections(
+            withLocalIdentifiers: [albumId], options: nil
+        )
+        guard let collection = fetchResult.firstObject else {
+            throw PhotosImportError.albumNotFound
+        }
+
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
+        fetchOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+        let assets = PHAsset.fetchAssets(in: collection, options: fetchOptions)
+
+        let total = assets.count
+        try FileManager.default.createDirectory(at: importDirectory, withIntermediateDirectories: true)
+
+        // Snapshot asset references so the stream closure can capture them
+        var assetRefs: [PHAsset] = []
+        for i in 0..<total { assetRefs.append(assets.object(at: i)) }
+
+        let (stream, continuation) = AsyncStream.makeStream(of: ImportResult.self)
+
+        // Drive production from within the actor — no escaping capture issues
+        let importDir = importDirectory
+        let producerTask = Task {
+            for (index, asset) in assetRefs.enumerated() {
+                guard !Task.isCancelled else { break }
+                do {
+                    let result = try await self.importAsset(asset, to: importDir)
+                    continuation.yield(.success(result))
+                } catch is CancellationError {
+                    break
+                } catch {
+                    continuation.yield(.failure(
+                        assetIndex: index,
+                        error: error.localizedDescription
+                    ))
+                }
+                progress(index + 1, total)
+            }
+            continuation.finish()
+        }
+
+        // If the consumer drops the stream, stop the producer
+        continuation.onTermination = { _ in producerTask.cancel() }
+
+        return stream
     }
 
     // MARK: - Errors

@@ -10,6 +10,16 @@ private struct UnsafeSendable<T>: @unchecked Sendable {
     let value: T
 }
 
+/// Mutable dictionary wrapper that is @unchecked Sendable.
+/// All access must be on @MainActor.
+private final class RecordLookup: @unchecked Sendable {
+    var records: [String: ImageRecord] = [:]
+    subscript(sha256: String) -> ImageRecord? {
+        get { records[sha256] }
+        set { records[sha256] = newValue }
+    }
+}
+
 /// Import coordinator that pipelines images through phases so that
 /// already-converted images can hash while later images still convert, etc.
 ///
@@ -29,7 +39,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         self.encryptionService = encryptionService
     }
 
-    @MainActor func importAlbum(
+    func importAlbum(
         photosAlbumId: String,
         settings: ImportSettings,
         modelContext: ModelContext,
@@ -63,23 +73,6 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             progress.activePhases = phases
             progress.isPipelined = true
             progress.phase = .importing
-        }
-
-        // 1. Import from Photos
-        let imported = try await photosService.importAlbum(
-            albumId: photosAlbumId,
-            to: staging
-        ) { current, total in
-            Task { @MainActor in
-                progress.currentFile = current
-                progress.totalFiles = total
-            }
-        }
-        await MainActor.run { progress.totalFiles = imported.count }
-
-        if Task.isCancelled {
-            cancelFlag.withLock { $0 = true }
-            throw CancellationError()
         }
 
         // Create channels
@@ -143,18 +136,40 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             conversionCh, hashingCh, encryptionCh, par2Ch, copyCh, uploadCh, catalogCh
         ]
 
-        // MARK: - Feed
+        // 1. Import from Photos — stream assets directly into the pipeline
+        let assetStream = try await photosService.importAlbumStreaming(
+            albumId: photosAlbumId,
+            to: staging
+        ) { current, total in
+            Task { @MainActor in
+                progress.currentFile = current
+                progress.totalFiles = total
+            }
+        }
+
+        // Shared lookup from sha256 → live ImageRecord. Populated during hashing,
+        // used by all downstream stages instead of PersistentIdentifier lookups
+        // (which fail for unsaved/temporary records). All access is on @MainActor.
+        let recordsBySHA = RecordLookup()
+
+        // MARK: - Feed (streams from Photos import into the first pipeline channel)
         let firstChannel = needsConversion ? conversionCh : hashingCh
-        let feedTask = Task { @MainActor [imported, settings] in
-            for asset in imported {
+        let feedTask = Task { @MainActor [settings] in
+            for await result in assetStream {
                 guard !Task.isCancelled else { break }
-                let item = PipelineItem(
-                    albumName: settings.albumName,
-                    importDate: .now,
-                    fileURL: asset.fileURL,
-                    originalFilename: asset.originalFilename
-                )
-                await firstChannel.send(item)
+                switch result {
+                case .success(let asset):
+                    let item = PipelineItem(
+                        albumName: settings.albumName,
+                        importDate: .now,
+                        fileURL: asset.fileURL,
+                        originalFilename: asset.originalFilename
+                    )
+                    await firstChannel.send(item)
+                case .failure(_, let error):
+                    progress.errors.append("Photos export failed: \(error)")
+                    progress.filesDropped += 1
+                }
             }
             firstChannel.finish()
         }
@@ -214,66 +229,78 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                     mutableItem.sha256 = hash
                     mutableItem.sizeBytes = size
 
-                    let descriptor = FetchDescriptor<ImageRecord>(
-                        predicate: #Predicate { $0.sha256 == hash }
-                    )
-                    let existing = try modelContext.fetch(descriptor)
-
-                    if let existingRecord = existing.first {
+                    // Check our own batch first (pending inserts may not appear in fetch)
+                    if let batchRecord = recordsBySHA[hash] {
                         mutableItem.isDuplicate = true
                         mutableItem.snapshot = ImageRecordSnapshot(
-                            persistentModelID: existingRecord.persistentModelID,
                             sha256: hash,
-                            filename: existingRecord.filename,
-                            sizeBytes: existingRecord.sizeBytes,
+                            filename: batchRecord.filename,
+                            sizeBytes: batchRecord.sizeBytes,
                             isNew: false
                         )
                         progress.filesDeduplicated += 1
                     } else {
-                        let record = ImageRecord(
-                            sha256: hash,
-                            filename: item.activeFilename,
-                            sizeBytes: size
+                        let descriptor = FetchDescriptor<ImageRecord>(
+                            predicate: #Predicate { $0.sha256 == hash }
                         )
-                        try? await self.thumbnailService.generateThumbnail(for: fileToHash, sha256: hash)
-                        record.thumbnailState = .generated
+                        let existing = try modelContext.fetch(descriptor)
 
-                        if let pHash = try? PerceptualHash.compute(for: fileToHash) {
-                            record.perceptualHash = pHash
-                            mutableItem.perceptualHash = pHash
+                        if let existingRecord = existing.first {
+                            mutableItem.isDuplicate = true
+                            recordsBySHA[hash] = existingRecord
+                            mutableItem.snapshot = ImageRecordSnapshot(
+                                sha256: hash,
+                                filename: existingRecord.filename,
+                                sizeBytes: existingRecord.sizeBytes,
+                                isNew: false
+                            )
+                            progress.filesDeduplicated += 1
+                        } else {
+                            let record = ImageRecord(
+                                sha256: hash,
+                                filename: item.activeFilename,
+                                sizeBytes: size
+                            )
+                            try? await self.thumbnailService.generateThumbnail(for: fileToHash, sha256: hash)
+                            record.thumbnailState = .generated
 
-                            if settings.detectNearDuplicates {
-                                let originalFilename = item.originalFilename
-                                let candidates = candidatesLock.withLock { $0 }
-                                for candidate in candidates {
-                                    let distance = PerceptualHash.hammingDistance(pHash, candidate.hash)
-                                    if distance < 5 {
-                                        let match = NearDuplicateMatch(
-                                            newFilename: originalFilename,
-                                            newSha256: hash,
-                                            existingFilename: candidate.filename,
-                                            existingSha256: candidate.sha256,
-                                            hammingDistance: distance
-                                        )
-                                        progress.nearDuplicates.append(match)
-                                        progress.nearDuplicatesFound += 1
-                                        break
+                            if let pHash = try? PerceptualHash.compute(for: fileToHash) {
+                                record.perceptualHash = pHash
+                                mutableItem.perceptualHash = pHash
+
+                                if settings.detectNearDuplicates {
+                                    let originalFilename = item.originalFilename
+                                    let candidates = candidatesLock.withLock { $0 }
+                                    for candidate in candidates {
+                                        let distance = PerceptualHash.hammingDistance(pHash, candidate.hash)
+                                        if distance < 5 {
+                                            let match = NearDuplicateMatch(
+                                                newFilename: originalFilename,
+                                                newSha256: hash,
+                                                existingFilename: candidate.filename,
+                                                existingSha256: candidate.sha256,
+                                                hammingDistance: distance
+                                            )
+                                            progress.nearDuplicates.append(match)
+                                            progress.nearDuplicatesFound += 1
+                                            break
+                                        }
+                                    }
+                                    candidatesLock.withLock {
+                                        $0.append((hash, originalFilename, pHash))
                                     }
                                 }
-                                candidatesLock.withLock {
-                                    $0.append((hash, originalFilename, pHash))
-                                }
                             }
-                        }
 
-                        modelContext.insert(record)
-                        mutableItem.snapshot = ImageRecordSnapshot(
-                            persistentModelID: record.persistentModelID,
-                            sha256: hash,
-                            filename: item.activeFilename,
-                            sizeBytes: size,
-                            isNew: true
-                        )
+                            modelContext.insert(record)
+                            recordsBySHA[hash] = record
+                            mutableItem.snapshot = ImageRecordSnapshot(
+                                sha256: hash,
+                                filename: item.activeFilename,
+                                sizeBytes: size,
+                                isNew: true
+                            )
+                        }
                     }
                 } catch {
                     mutableItem.error = "Hash failed: \(item.originalFilename) — \(error.localizedDescription)"
@@ -292,8 +319,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         // MARK: - Encryption
         var encryptionTask: Task<Void, Never>?
         if needsEncryption, let key = encKey {
-            encryptionTask = Task { @MainActor [ctx] in
-                let modelContext = ctx.value
+            encryptionTask = Task { @MainActor in
                 progress.phase = .encrypting
                 progress.currentFile = 0
 
@@ -316,7 +342,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                         mutableItem.encryptionNonce = nonce
                         mutableItem.encryptedSize = encSize
 
-                        if let record = modelContext.model(for: snap.persistentModelID) as? ImageRecord {
+                        if let record = recordsBySHA[snap.sha256] {
                             record.isEncrypted = true
                             record.encryptionNonce = nonce
                             record.encryptionKeyId = encKeyId
@@ -339,8 +365,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         // MARK: - PAR2
         var par2Task: Task<Void, Never>?
         if needsPAR2 {
-            par2Task = Task { @MainActor [ctx] in
-                let modelContext = ctx.value
+            par2Task = Task { @MainActor in
                 progress.phase = .par2
                 progress.currentFile = 0
 
@@ -371,7 +396,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                         mutableItem.par2Filename = par2URL.lastPathComponent
                         mutableItem.par2URL = par2URL
 
-                        if let record = modelContext.model(for: snap.persistentModelID) as? ImageRecord {
+                        if let record = recordsBySHA[snap.sha256] {
                             record.par2Filename = par2URL.lastPathComponent
                         }
 
@@ -391,8 +416,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         // MARK: - Copy to Volumes
         var copyTask: Task<Void, Never>?
         if needsCopy {
-            copyTask = Task { @MainActor [ctx, vols, settings] in
-                let modelContext = ctx.value
+            copyTask = Task { @MainActor [vols, settings] in
                 let resolvedVolumes = vols.value
                 progress.phase = .copying
                 progress.currentFile = 0
@@ -429,7 +453,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                                 mutableItem.storageLocations.append(location)
                             }
 
-                            if let record = modelContext.model(for: snap.persistentModelID) as? ImageRecord {
+                            if let record = recordsBySHA[snap.sha256] {
                                 if !record.storageLocations.contains(location) {
                                     record.storageLocations.append(location)
                                 }
@@ -468,8 +492,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         // MARK: - B2 Upload
         var uploadTask: Task<Void, Never>?
         if needsUpload, let credentials = settings.b2Credentials {
-            uploadTask = Task { @MainActor [ctx] in
-                let modelContext = ctx.value
+            uploadTask = Task { @MainActor in
                 progress.phase = .uploading
                 progress.currentFile = 0
 
@@ -500,11 +523,11 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                                 credentials: credentials
                             )
                             mutableItem.b2FileId = fileId
-                            if let record = modelContext.model(for: snap.persistentModelID) as? ImageRecord {
+                            if let record = recordsBySHA[snap.sha256] {
                                 record.b2FileId = fileId
                             }
                         } else {
-                            if let record = modelContext.model(for: snap.persistentModelID) as? ImageRecord,
+                            if let record = recordsBySHA[snap.sha256],
                                record.b2FileId == nil {
                                 let listings = try await self.b2Service.listAllFiles(
                                     bucketId: credentials.bucketId,
@@ -545,7 +568,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                         progress.currentFile = progress.filesUploaded
                         progress.currentFilename = snap.filename
                     } catch {
-                        mutableItem.error = "B2 upload failed: \(snap.filename) — \(error.localizedDescription)"
+                        mutableItem.error = error.localizedDescription
                         progress.errors.append(mutableItem.error!)
                     }
 
@@ -646,11 +669,15 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                     encryptedSizes[snap.sha256] = encSize
                 }
 
-                if let record = modelContext.model(for: snap.persistentModelID) as? ImageRecord {
+                if let record = recordsBySHA[snap.sha256] {
+                    let isNewToAlbum: Bool
                     if record.album != albumRecord {
                         record.album = albumRecord
+                        isNewToAlbum = true
+                    } else {
+                        isNewToAlbum = !albumRecord.images.contains(record)
                     }
-                    if !albumRecord.images.contains(record) {
+                    if isNewToAlbum && !albumRecord.images.contains(record) {
                         albumRecord.images.append(record)
                     }
 
@@ -672,11 +699,16 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                         month: settings.month,
                         day: settings.day
                     )
-                    catalogItemCount += 1
+
+                    if isNewToAlbum {
+                        catalogItemCount += 1
+                    } else {
+                        progress.filesDeduplicated += 1
+                    }
                     progress.filesCataloged = catalogItemCount
                     progress.currentFilename = snap.filename
                 } else {
-                    // SwiftData model lookup failed — record was inserted but can't be retrieved
+                    // Record not found in lookup — should not happen
                     progress.filesDropped += 1
                     progress.errors.append("Import failed: \(snap.filename) — could not save to library")
                 }
