@@ -86,7 +86,7 @@ struct AlbumExportSheet: View {
             if !errors.isEmpty {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
-                        ForEach(errors, id: \.self) { error in
+                        ForEach(Array(errors.enumerated()), id: \.offset) { _, error in
                             Text(error)
                                 .font(Constants.Design.monoCaption)
                                 .foregroundStyle(.red)

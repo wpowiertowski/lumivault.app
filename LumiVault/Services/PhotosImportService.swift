@@ -1,5 +1,6 @@
 import Foundation
 import Photos
+import os
 
 struct PhotosAlbum: Identifiable, Sendable {
     let id: String
@@ -18,9 +19,25 @@ struct ImportedAsset: Sendable {
 enum ImportResult: Sendable {
     case success(ImportedAsset)
     case failure(assetIndex: Int, error: String)
+    case skipped(assetIndex: Int, filename: String, reason: String)
+}
+
+/// Coordinator hooks the pipeline into the service to surface non-error health status.
+struct PhotosImportCallbacks: Sendable {
+    /// Called when the current operation's health state changes (slow ↔ normal).
+    var health: @Sendable (PipelineHealth) -> Void = { _ in }
 }
 
 actor PhotosImportService {
+
+    // MARK: - Process-global concurrency gate
+    //
+    // `PHAssetResourceManager.default()` is a singleton shared across the
+    // entire process. Unbounded concurrent `requestData` calls have been
+    // observed to wedge assetsd (46104 "resource unavailable" XPC errors).
+    // Serializing every resource request keeps assetsd's per-client request
+    // budget healthy regardless of how many importers exist.
+    nonisolated static let gate = AsyncSemaphore(count: 1)
 
     // MARK: - Authorization
 
@@ -75,7 +92,7 @@ actor PhotosImportService {
         return albums
     }
 
-    // MARK: - Asset Import
+    // MARK: - Asset Import (legacy non-streaming, used by ImportCoordinator)
 
     func importAlbum(
         albumId: String,
@@ -102,7 +119,7 @@ actor PhotosImportService {
         for index in 0..<total {
             try Task.checkCancellation()
             let asset = assets.object(at: index)
-            let result = try await importAsset(asset, to: importDirectory)
+            let result = try await importAsset(asset, to: importDirectory, callbacks: PhotosImportCallbacks())
             imported.append(result)
             progress(index + 1, total)
         }
@@ -112,7 +129,11 @@ actor PhotosImportService {
 
     // MARK: - Single Asset Import
 
-    private func importAsset(_ asset: PHAsset, to directory: URL) async throws -> ImportedAsset {
+    private func importAsset(
+        _ asset: PHAsset,
+        to directory: URL,
+        callbacks: PhotosImportCallbacks
+    ) async throws -> ImportedAsset {
         let resources = PHAssetResource.assetResources(for: asset)
 
         // Prefer edited (fullSizePhoto) over unedited original (photo)
@@ -131,7 +152,7 @@ actor PhotosImportService {
         // Handle filename collisions
         let finalURL = uniqueURL(for: destURL)
 
-        try await writeResource(resource, to: finalURL)
+        try await writeResourceWithRetry(resource, to: finalURL, filename: filename, callbacks: callbacks)
 
         return ImportedAsset(
             fileURL: finalURL,
@@ -140,22 +161,146 @@ actor PhotosImportService {
         )
     }
 
-    private func writeResource(_ resource: PHAssetResource, to url: URL) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let options = PHAssetResourceRequestOptions()
-            options.isNetworkAccessAllowed = true
+    // MARK: - writeResource with retry + cancellable + two-tier watchdog
 
-            PHAssetResourceManager.default().writeData(
-                for: resource,
-                toFile: url,
-                options: options
-            ) { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
+    private func writeResourceWithRetry(
+        _ resource: PHAssetResource,
+        to url: URL,
+        filename: String,
+        callbacks: PhotosImportCallbacks
+    ) async throws {
+        let maxAttempts = 3
+        var lastError: Error?
+
+        for attempt in 0..<maxAttempts {
+            try Task.checkCancellation()
+
+            if attempt > 0 {
+                // Clean any partial file from the previous attempt
+                try? FileManager.default.removeItem(at: url)
+                // Backoff: 1s, 2s, 4s
+                let delay = UInt64(1 << (attempt - 1)) * 1_000_000_000
+                try await Task.sleep(nanoseconds: delay)
+                callbacks.health(.slow(.photosServiceDegraded))
             }
+
+            do {
+                try await writeResource(resource, to: url, filename: filename, callbacks: callbacks)
+                callbacks.health(.normal)
+                return
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as PhotosImportError {
+                throw error
+            } catch {
+                lastError = error
+                if !Self.isTransientPhotosError(error) {
+                    // Non-transient — don't waste retries
+                    throw error
+                }
+                // Otherwise loop and try again
+            }
+        }
+
+        throw lastError ?? PhotosImportError.exportFailed
+    }
+
+    /// Single attempt to stream the resource bytes into `url`. Uses the
+    /// cancellable `requestData` API so Task cancellation propagates to
+    /// assetsd via `cancelDataRequest(_:)` rather than leaving an orphan
+    /// request behind.
+    private func writeResource(
+        _ resource: PHAssetResource,
+        to url: URL,
+        filename: String,
+        callbacks: PhotosImportCallbacks
+    ) async throws {
+        // Serialize every resource request to protect assetsd's per-client budget.
+        await Self.gate.wait()
+
+        // `signal()` must happen regardless of success/failure/cancel.
+        // AsyncSemaphore is an actor, so release via a detached Task so the
+        // defer remains synchronous from the caller's perspective.
+        defer {
+            Task.detached { await Self.gate.signal() }
+        }
+
+        // Create the destination file up-front so FileHandle can write chunks.
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        guard let handle = try? FileHandle(forWritingTo: url) else {
+            throw PhotosImportError.exportFailed
+        }
+
+        let state = WriteState(filename: filename)
+
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let opts = PHAssetResourceRequestOptions()
+                opts.isNetworkAccessAllowed = true
+
+                let id = PHAssetResourceManager.default().requestData(
+                    for: resource,
+                    options: opts,
+                    dataReceivedHandler: { chunk in
+                        state.noteChunk()
+                        try? handle.write(contentsOf: chunk)
+                    },
+                    completionHandler: { error in
+                        try? handle.close()
+                        state.completeRequest()
+                        if state.claimResume() {
+                            if let error {
+                                continuation.resume(throwing: error)
+                            } else {
+                                continuation.resume()
+                            }
+                        }
+                    }
+                )
+                state.setRequestID(id)
+
+                // Watchdog: observe chunk activity, flip health state, and enforce
+                // a conservative hard floor so a single wedged asset doesn't block
+                // the whole pipeline forever.
+                let watchdog = Task.detached { [state, callbacks] in
+                    let softThreshold: TimeInterval = 15
+                    let hardThreshold: TimeInterval = 600  // 10 minutes of zero activity
+
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(2))
+                        if state.isComplete { break }
+
+                        let idleFor = Date().timeIntervalSince(state.lastActivity)
+
+                        if idleFor > hardThreshold {
+                            // Hard skip: this one asset is wedged. Cancel assetsd's
+                            // side of the request and surface a skip to the caller.
+                            if let rid = state.requestID {
+                                PHAssetResourceManager.default().cancelDataRequest(rid)
+                            }
+                            try? handle.close()
+                            if state.claimResume() {
+                                continuation.resume(throwing: PhotosImportError.exportTimedOut)
+                            }
+                            break
+                        } else if idleFor > softThreshold {
+                            callbacks.health(.slow(.photosDownload(filename: state.filename)))
+                        } else {
+                            callbacks.health(.normal)
+                        }
+                    }
+                }
+                state.setWatchdog(watchdog)
+            }
+        } onCancel: {
+            // Runs on the cancelling thread. Tell assetsd to abandon its work
+            // rather than letting the request orphan.
+            state.cancelWatchdog()
+            if let rid = state.requestID {
+                PHAssetResourceManager.default().cancelDataRequest(rid)
+            }
+            try? handle.close()
+            try? FileManager.default.removeItem(at: url)
         }
     }
 
@@ -175,10 +320,13 @@ actor PhotosImportService {
 
     /// Stream-based import that yields each asset as soon as it's copied to the staging directory.
     /// The returned stream produces results concurrently with consumption.
-    /// Failed assets are yielded as `.failure` so the pipeline can track them.
+    /// Failed assets are yielded as `.failure`; per-asset timeouts and post-retry
+    /// transient failures are yielded as `.skipped` so the UI can distinguish
+    /// recoverable soft failures from real errors.
     func importAlbumStreaming(
         albumId: String,
         to importDirectory: URL,
+        callbacks: PhotosImportCallbacks = PhotosImportCallbacks(),
         progress: @Sendable @escaping (Int, Int) -> Void
     ) async throws -> AsyncStream<ImportResult> {
         let fetchResult = PHAssetCollection.fetchAssetCollections(
@@ -202,24 +350,64 @@ actor PhotosImportService {
 
         let (stream, continuation) = AsyncStream.makeStream(of: ImportResult.self)
 
-        // Drive production from within the actor — no escaping capture issues
         let importDir = importDirectory
         let producerTask = Task {
+            // Circuit breaker: reserved for the case where assetsd is genuinely
+            // wedged (persistent XPC 46104). Slowness or single-asset failures
+            // do NOT trip it.
+            var consecutiveXPCFailures = 0
+            let circuitBreakerThreshold = 5
+
             for (index, asset) in assetRefs.enumerated() {
                 guard !Task.isCancelled else { break }
                 do {
-                    let result = try await self.importAsset(asset, to: importDir)
+                    let result = try await self.importAsset(
+                        asset,
+                        to: importDir,
+                        callbacks: callbacks
+                    )
+                    consecutiveXPCFailures = 0
                     continuation.yield(.success(result))
                 } catch is CancellationError {
                     break
-                } catch {
-                    continuation.yield(.failure(
+                } catch PhotosImportError.exportTimedOut {
+                    // Soft: this one asset is wedged at the iCloud layer.
+                    // Skip it and move on — not a user-facing error.
+                    let filename = asset.value(forKey: "filename") as? String ?? "asset \(index)"
+                    continuation.yield(.skipped(
                         assetIndex: index,
-                        error: error.localizedDescription
+                        filename: filename,
+                        reason: "iCloud download unavailable"
                     ))
+                } catch {
+                    if Self.isXPCServiceError(error) {
+                        consecutiveXPCFailures += 1
+                        if consecutiveXPCFailures >= circuitBreakerThreshold {
+                            // Hard terminate: daemon is genuinely broken. Emit one
+                            // clear, actionable error and stop hammering assetsd.
+                            continuation.yield(.failure(
+                                assetIndex: index,
+                                error: "Photos services unavailable — quit Photos.app, wait 30 seconds, and retry the import."
+                            ))
+                            break
+                        }
+                        let filename = asset.value(forKey: "filename") as? String ?? "asset \(index)"
+                        continuation.yield(.skipped(
+                            assetIndex: index,
+                            filename: filename,
+                            reason: "Photos service temporarily unavailable"
+                        ))
+                    } else {
+                        consecutiveXPCFailures = 0
+                        continuation.yield(.failure(
+                            assetIndex: index,
+                            error: error.localizedDescription
+                        ))
+                    }
                 }
                 progress(index + 1, total)
             }
+            callbacks.health(.normal)
             continuation.finish()
         }
 
@@ -229,11 +417,102 @@ actor PhotosImportService {
         return stream
     }
 
+    // MARK: - Error classification
+
+    /// A transient Photos/XPC error worth retrying. Covers assetsd XPC
+    /// availability blips, account daemon hiccups, and the opaque Cocoa -1
+    /// that the Photos framework uses to surface downstream failures.
+    nonisolated static func isTransientPhotosError(_ error: Error) -> Bool {
+        let ns = error as NSError
+        if ns.domain == "com.apple.photos.error" { return true }
+        if ns.domain == "com.apple.accounts" { return true }
+        if ns.domain == NSCocoaErrorDomain && ns.code == -1 { return true }
+        return false
+    }
+
+    /// Narrower: specifically the XPC/availability signal from assetsd.
+    /// This is what trips the circuit breaker when it repeats.
+    nonisolated static func isXPCServiceError(_ error: Error) -> Bool {
+        let ns = error as NSError
+        if ns.domain == "com.apple.photos.error" && ns.code == 46104 { return true }
+        if ns.domain == "com.apple.accounts" { return true }
+        return false
+    }
+
     // MARK: - Errors
 
     enum PhotosImportError: Error {
         case albumNotFound
         case noResourceFound
         case exportFailed
+        case exportTimedOut
+    }
+}
+
+// MARK: - WriteState
+
+/// Per-request state shared between the watchdog, data handler, completion
+/// handler, and cancellation path. All access is thread-safe via an unfair
+/// lock; the class is nonisolated so it can be touched from the PHAssetResourceManager
+/// callback threads as well as the detached watchdog task.
+nonisolated private final class WriteState: @unchecked Sendable {
+    let filename: String
+    private let lock = OSAllocatedUnfairLock<Storage>(initialState: Storage())
+
+    private struct Storage {
+        var lastActivity: Date = .init()
+        var requestID: PHAssetResourceDataRequestID?
+        var watchdog: Task<Void, Never>?
+        var complete: Bool = false
+        var resumed: Bool = false
+    }
+
+    init(filename: String) {
+        self.filename = filename
+    }
+
+    var lastActivity: Date { lock.withLock { $0.lastActivity } }
+    var requestID: PHAssetResourceDataRequestID? { lock.withLock { $0.requestID } }
+    var isComplete: Bool { lock.withLock { $0.complete } }
+
+    func noteChunk() {
+        lock.withLock { $0.lastActivity = .init() }
+    }
+
+    func setRequestID(_ id: PHAssetResourceDataRequestID) {
+        lock.withLock { $0.requestID = id }
+    }
+
+    func setWatchdog(_ task: Task<Void, Never>) {
+        lock.withLock { $0.watchdog = task }
+    }
+
+    func cancelWatchdog() {
+        let task = lock.withLock { state -> Task<Void, Never>? in
+            let t = state.watchdog
+            state.watchdog = nil
+            return t
+        }
+        task?.cancel()
+    }
+
+    func completeRequest() {
+        let task = lock.withLock { state -> Task<Void, Never>? in
+            state.complete = true
+            let t = state.watchdog
+            state.watchdog = nil
+            return t
+        }
+        task?.cancel()
+    }
+
+    /// Returns true if this caller wins the race to resume the continuation.
+    /// The continuation must resume exactly once.
+    func claimResume() -> Bool {
+        lock.withLock { state in
+            guard !state.resumed else { return false }
+            state.resumed = true
+            return true
+        }
     }
 }

@@ -137,9 +137,15 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         ]
 
         // 1. Import from Photos — stream assets directly into the pipeline
+        let healthCallback: @Sendable (PipelineHealth) -> Void = { health in
+            Task { @MainActor in
+                progress.health = health
+            }
+        }
         let assetStream = try await photosService.importAlbumStreaming(
             albumId: photosAlbumId,
-            to: staging
+            to: staging,
+            callbacks: PhotosImportCallbacks(health: healthCallback)
         ) { current, total in
             Task { @MainActor in
                 progress.currentFile = current
@@ -155,6 +161,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         // MARK: - Feed (streams from Photos import into the first pipeline channel)
         let firstChannel = needsConversion ? conversionCh : hashingCh
         let feedTask = Task { @MainActor [settings] in
+            defer { firstChannel.finish() }
             for await result in assetStream {
                 guard !Task.isCancelled else { break }
                 switch result {
@@ -169,15 +176,18 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 case .failure(_, let error):
                     progress.errors.append("Photos export failed: \(error)")
                     progress.filesDropped += 1
+                case .skipped(_, _, let reason):
+                    progress.filesSkipped += 1
+                    progress.skipReasons[reason, default: 0] += 1
                 }
             }
-            firstChannel.finish()
         }
 
         // MARK: - Conversion
         var conversionTask: Task<Void, Never>?
         if needsConversion {
             conversionTask = Task { @MainActor [settings] in
+                defer { postConversion.finish() }
                 progress.phase = .converting
 
                 for await item in conversionCh.stream {
@@ -206,7 +216,6 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
                     await postConversion.send(mutableItem)
                 }
-                postConversion.finish()
             }
         }
 
@@ -214,6 +223,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         let candidatesLock = OSAllocatedUnfairLock(initialState: nearDuplicateCandidates)
 
         let hashTask = Task { @MainActor [ctx, settings] in
+            defer { postHashing.finish() }
             let modelContext = ctx.value
             progress.phase = .hashing
             progress.currentFile = 0
@@ -313,13 +323,13 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
                 await postHashing.send(mutableItem)
             }
-            postHashing.finish()
         }
 
         // MARK: - Encryption
         var encryptionTask: Task<Void, Never>?
         if needsEncryption, let key = encKey {
             encryptionTask = Task { @MainActor in
+                defer { postEncryption.finish() }
                 progress.phase = .encrypting
                 progress.currentFile = 0
 
@@ -358,7 +368,6 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
                     await postEncryption.send(mutableItem)
                 }
-                postEncryption.finish()
             }
         }
 
@@ -366,6 +375,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         var par2Task: Task<Void, Never>?
         if needsPAR2 {
             par2Task = Task { @MainActor in
+                defer { postPAR2.finish() }
                 progress.phase = .par2
                 progress.currentFile = 0
 
@@ -409,7 +419,6 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                     progress.currentFile += 1
                     await postPAR2.send(mutableItem)
                 }
-                postPAR2.finish()
             }
         }
 
@@ -417,6 +426,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         var copyTask: Task<Void, Never>?
         if needsCopy {
             copyTask = Task { @MainActor [vols, settings] in
+                defer { postCopy.finish() }
                 let resolvedVolumes = vols.value
                 progress.phase = .copying
                 progress.currentFile = 0
@@ -485,7 +495,6 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                     volRecord.lastSyncedAt = .now
                     volURL.stopAccessingSecurityScopedResource()
                 }
-                postCopy.finish()
             }
         }
 
@@ -493,6 +502,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         var uploadTask: Task<Void, Never>?
         if needsUpload, let credentials = settings.b2Credentials {
             uploadTask = Task { @MainActor in
+                defer { postUpload.finish() }
                 progress.phase = .uploading
                 progress.currentFile = 0
 
@@ -516,11 +526,21 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                         )
 
                         if !alreadyExists {
+                            let uploadOnAttempt: @Sendable (Int) -> Void = { attempt in
+                                Task { @MainActor in
+                                    if attempt == 0 {
+                                        progress.health = .normal
+                                    } else {
+                                        progress.health = .slow(.b2Retrying(attempt: attempt))
+                                    }
+                                }
+                            }
                             let fileId = try await self.b2Service.uploadImage(
                                 fileURL: item.activeFileURL,
                                 remotePath: remotePath,
                                 sha256: snap.sha256,
-                                credentials: credentials
+                                credentials: credentials,
+                                onAttempt: uploadOnAttempt
                             )
                             mutableItem.b2FileId = fileId
                             if let record = recordsBySHA[snap.sha256] {
@@ -574,7 +594,6 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
                     await postUpload.send(mutableItem)
                 }
-                postUpload.finish()
             }
         }
 

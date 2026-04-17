@@ -42,6 +42,31 @@ struct ImportSettings: Sendable {
     var maxDimension: MaxDimension = .original
 }
 
+enum PipelineHealth: Sendable, Equatable {
+    case normal
+    case slow(SlowReason)
+
+    enum SlowReason: Sendable, Equatable {
+        case photosDownload(filename: String)
+        case b2Retrying(attempt: Int)
+        case b2Upload(filename: String)
+        case photosServiceDegraded
+
+        var message: String {
+            switch self {
+            case .photosDownload(let filename):
+                "Waiting on iCloud download for \(filename) — this may take a moment."
+            case .b2Retrying(let attempt):
+                "B2 upload is slow — retrying (attempt \(attempt))."
+            case .b2Upload(let filename):
+                "Uploading \(filename) is taking longer than usual."
+            case .photosServiceDegraded:
+                "Photos services are responding slowly — import will continue."
+            }
+        }
+    }
+}
+
 @Observable
 final class PhotosImportProgress: @unchecked Sendable {
     var phase: ImportPhase = .importing
@@ -59,8 +84,12 @@ final class PhotosImportProgress: @unchecked Sendable {
     var par2FileFraction: Double = 0
     var filesCataloged: Int = 0
     var filesDropped: Int = 0
+    var filesSkipped: Int = 0
+    var skipReasons: [String: Int] = [:]
     var errors: [String] = []
     var nearDuplicates: [NearDuplicateMatch] = []
+
+    var health: PipelineHealth = .normal
 
     /// Active phases in order, set at import start based on settings
     var activePhases: [ImportPhase] = [.importing, .hashing, .par2, .cataloging]

@@ -247,10 +247,21 @@ struct PhotosImportSheet: View {
             }
             .font(Constants.Design.monoCaption)
 
+            if case .slow(let reason) = progress.health {
+                HStack(spacing: 6) {
+                    Image(systemName: "hourglass")
+                    Text(reason.message)
+                        .lineLimit(2)
+                }
+                .font(Constants.Design.monoCaption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+            }
+
             if !progress.errors.isEmpty {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
-                        ForEach(progress.errors, id: \.self) { error in
+                        ForEach(Array(progress.errors.enumerated()), id: \.offset) { _, error in
                             Text(error)
                                 .font(Constants.Design.monoCaption)
                                 .foregroundStyle(.red)
@@ -337,6 +348,25 @@ struct PhotosImportSheet: View {
                 .frame(maxHeight: 120)
             }
 
+            if !progress.skipReasons.isEmpty {
+                Divider()
+                    .padding(.vertical, 4)
+
+                Text("\(progress.filesSkipped) skipped")
+                    .font(Constants.Design.monoCaption)
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(progress.skipReasons.sorted(by: { $0.key < $1.key }).enumerated()), id: \.offset) { _, entry in
+                        Text("\(entry.value) × \(entry.key)")
+                            .font(Constants.Design.monoCaption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+            }
+
             if !progress.errors.isEmpty {
                 Divider()
                     .padding(.vertical, 4)
@@ -347,7 +377,7 @@ struct PhotosImportSheet: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
-                        ForEach(progress.errors, id: \.self) { error in
+                        ForEach(Array(progress.errors.enumerated()), id: \.offset) { _, error in
                             Text(error)
                                 .font(Constants.Design.monoCaption)
                                 .foregroundStyle(.secondary)

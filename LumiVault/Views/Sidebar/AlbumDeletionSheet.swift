@@ -17,7 +17,7 @@ struct AlbumDeletionSheet: View {
                 if !progress.errors.isEmpty {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 4) {
-                            ForEach(progress.errors, id: \.self) { error in
+                            ForEach(Array(progress.errors.enumerated()), id: \.offset) { _, error in
                                 Text(error)
                                     .font(Constants.Design.monoCaption)
                                     .foregroundStyle(.red)

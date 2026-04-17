@@ -246,7 +246,8 @@ actor B2Service {
         fileURL: URL,
         remotePath: String,
         sha256: String,
-        credentials: B2Credentials
+        credentials: B2Credentials,
+        onAttempt: (@Sendable (Int) -> Void)? = nil
     ) async throws -> String {
         let fileData: Data
         do {
@@ -262,7 +263,7 @@ actor B2Service {
         let encodedPath = remotePath.addingPercentEncoding(withAllowedCharacters: Self.b2AllowedCharacters) ?? remotePath
 
         do {
-            return try await withRetry(credentials: credentials) {
+            return try await withRetry(credentials: credentials, onAttempt: onAttempt) {
                 if self.authorization == nil {
                     try await self.authorize(credentials: credentials)
                 }
@@ -289,6 +290,7 @@ actor B2Service {
     private func withRetry<T>(
         maxAttempts: Int = 5,
         credentials: B2Credentials,
+        onAttempt: (@Sendable (Int) -> Void)? = nil,
         operation: () async throws -> T
     ) async throws -> T {
         var lastError: Error?
@@ -298,10 +300,13 @@ actor B2Service {
                 // Exponential backoff: 1s, 2s, 4s, 8s
                 let delay = UInt64(min(pow(2.0, Double(attempt - 1)), 8)) * 1_000_000_000
                 try await Task.sleep(nanoseconds: delay)
+                onAttempt?(attempt)
             }
 
             do {
-                return try await operation()
+                let result = try await operation()
+                if attempt > 0 { onAttempt?(0) }  // signal recovery
+                return result
             } catch let error as B2Error where error.isRetryable {
                 lastError = error
                 // Invalidate stale state so next attempt re-authorizes and gets a fresh upload URL
