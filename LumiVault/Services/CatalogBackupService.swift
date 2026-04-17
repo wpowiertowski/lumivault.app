@@ -1,11 +1,11 @@
 import Foundation
-import CryptoKit
 
 /// Distributes catalog.json to all external volumes and optionally to B2.
 actor CatalogBackupService {
     private let b2Service = B2Service()
 
     /// Save catalog.json, its SHA-256 checksum, and PAR2 recovery data to all mounted external volumes.
+    /// Uses the top-level `VolumeSnapshot` (from ReconciliationTypes) — mountURL is non-optional.
     func backupToVolumes(catalog: Catalog, volumes: [VolumeSnapshot]) async -> [String] {
         var errors: [String] = []
 
@@ -38,10 +38,7 @@ actor CatalogBackupService {
         }()
 
         for volume in volumes {
-            guard let mountURL = volume.mountURL else {
-                continue
-            }
-
+            let mountURL = volume.mountURL
             let destURL = mountURL.appendingPathComponent("catalog.json")
             let checksumURL = mountURL.appendingPathComponent("catalog.json.sha256")
             do {
@@ -80,7 +77,7 @@ actor CatalogBackupService {
             try await b2Service.authorize(credentials: credentials)
             try await b2Service.getUploadURL(bucketId: credentials.bucketId)
 
-            let sha1 = sha1Hash(of: data)
+            let sha1 = B2Service.sha1Hash(of: data)
             _ = try await b2Service.uploadFile(
                 fileData: data,
                 fileName: "catalog.json",
@@ -91,7 +88,7 @@ actor CatalogBackupService {
             // Upload SHA-256 checksum sidecar
             let checksum = Catalog.sha256Hex(of: data)
             let checksumData = Data(checksum.utf8)
-            let checksumSha1 = sha1Hash(of: checksumData)
+            let checksumSha1 = B2Service.sha1Hash(of: checksumData)
             try await b2Service.getUploadURL(bucketId: credentials.bucketId)
             _ = try await b2Service.uploadFile(
                 fileData: checksumData,
@@ -113,7 +110,7 @@ actor CatalogBackupService {
             )
             for par2File in par2Files {
                 let par2Data = try Data(contentsOf: par2File)
-                let fileSha1 = sha1Hash(of: par2Data)
+                let fileSha1 = B2Service.sha1Hash(of: par2Data)
                 try await b2Service.getUploadURL(bucketId: credentials.bucketId)
                 _ = try await b2Service.uploadFile(
                     fileData: par2Data,
@@ -169,18 +166,6 @@ actor CatalogBackupService {
     }
 
     // MARK: - Helpers
-
-    nonisolated private func sha1Hash(of data: Data) -> String {
-        let digest = Insecure.SHA1.hash(data: data)
-        return digest.map { String(format: "%02x", $0) }.joined()
-    }
-
-    /// Snapshot of a volume for cross-isolation use.
-    struct VolumeSnapshot: Sendable {
-        let volumeID: String
-        let label: String
-        let mountURL: URL?
-    }
 
     enum RestoreError: Error, LocalizedError {
         case catalogNotFound(source: String)

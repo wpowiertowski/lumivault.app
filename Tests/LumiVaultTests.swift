@@ -1509,22 +1509,19 @@ struct EncryptionServiceTests {
 
 @Suite
 struct B2ServiceHelperTests {
-    @Test func sha1HashKnownValue() async {
-        let service = B2Service()
-        let hash = await service.sha1Hash(of: Data("hello".utf8))
+    @Test func sha1HashKnownValue() {
+        let hash = B2Service.sha1Hash(of: Data("hello".utf8))
         #expect(hash == "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d")
     }
 
-    @Test func sha1HashEmptyData() async {
-        let service = B2Service()
-        let hash = await service.sha1Hash(of: Data())
+    @Test func sha1HashEmptyData() {
+        let hash = B2Service.sha1Hash(of: Data())
         #expect(hash == "da39a3ee5e6b4b0d3255bfef95601890afd80709")
     }
 
-    @Test func sha1HashFixtureContent() async {
-        let service = B2Service()
+    @Test func sha1HashFixtureContent() {
         let content = Data("LumiVault B2 test fixture".utf8)
-        let hash = await service.sha1Hash(of: content)
+        let hash = B2Service.sha1Hash(of: content)
         #expect(hash.count == 40)
         #expect(hash.allSatisfy { $0.isHexDigit })
     }
@@ -1655,7 +1652,7 @@ struct CatalogBackupServiceTests {
 
         let catalog = TestFixtures.catalog()
         let service = CatalogBackupService()
-        let volume = CatalogBackupService.VolumeSnapshot(volumeID: "vol-test", label: "TestVol", mountURL: tmpDir)
+        let volume = VolumeSnapshot(volumeID: "vol-test", label: "TestVol", mountURL: tmpDir)
 
         let errors = await service.backupToVolumes(catalog: catalog, volumes: [volume])
         #expect(errors.isEmpty)
@@ -1680,19 +1677,10 @@ struct CatalogBackupServiceTests {
         let service = CatalogBackupService()
         let catalog = TestFixtures.catalog()
         let badURL = URL(fileURLWithPath: "/nonexistent/path/\(UUID().uuidString)")
-        let volume = CatalogBackupService.VolumeSnapshot(volumeID: "vol-bad", label: "BadVol", mountURL: badURL)
+        let volume = VolumeSnapshot(volumeID: "vol-bad", label: "BadVol", mountURL: badURL)
 
         let errors = await service.backupToVolumes(catalog: catalog, volumes: [volume])
         #expect(!errors.isEmpty)
-    }
-
-    @Test func backupSkipsVolumeWithNilMountURL() async {
-        let service = CatalogBackupService()
-        let catalog = TestFixtures.catalog()
-        let volume = CatalogBackupService.VolumeSnapshot(volumeID: "vol-nil", label: "NilVol", mountURL: nil)
-
-        let errors = await service.backupToVolumes(catalog: catalog, volumes: [volume])
-        #expect(errors.isEmpty) // Should skip gracefully, not error
     }
 
     @Test func restoreFromFileRoundTrip() async throws {

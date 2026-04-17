@@ -273,7 +273,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                                     let candidates = candidatesLock.withLock { $0 }
                                     for candidate in candidates {
                                         let distance = PerceptualHash.hammingDistance(pHash, candidate.hash)
-                                        if distance < 5 {
+                                        if distance < Constants.Dedup.nearDuplicateThreshold {
                                             let match = NearDuplicateMatch(
                                                 newFilename: originalFilename,
                                                 newSha256: hash,

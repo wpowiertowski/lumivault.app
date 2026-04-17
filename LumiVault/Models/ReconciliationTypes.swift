@@ -100,12 +100,3 @@ struct RepairResult: Sendable {
 
     let outcome: Outcome
 }
-
-enum ResolutionStrategy: Sendable {
-    case copyFromVolume(sourceVolumeID: String, sourceURL: URL)
-    case downloadFromB2(fileId: String)
-    case uploadToB2
-    case removeDanglingLocation
-    case updateB2FileId(fileId: String)
-    case ignore
-}

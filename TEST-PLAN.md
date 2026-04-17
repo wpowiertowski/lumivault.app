@@ -2,7 +2,7 @@
 
 ## Existing Automated Test Assessment
 
-### Summary: 106 tests across 19 suites
+### Summary: 105 tests across 19 suites
 
 | Rating | Suite | Tests | Assessment |
 | -------- | ------- | ------- | ------------ |
@@ -17,7 +17,7 @@
 | High Value | ReconciliationDiffTests | 5 | B2 diff logic: matched, dangling B2 IDs, orphans, PAR2 skip, mixed scenarios. Pure logic, well-structured. |
 | Medium Value | B2ServiceHelperTests | 7 | SHA-1 known test vectors, HTTP response validation for success (200, 299) and error (401, 500) status codes |
 | Medium Value | ExportProgressTests | 5 | Fraction calculation for the pipelined import: empty state, import-phase progress, mid-pipeline progress, complete, and global multi-album progress. `filesDropped` counter tracks items silently lost in the pipeline (no snapshot or model lookup failure). |
-| Medium Value | CatalogBackupServiceTests | 5 | Volume backup write + decode, error on bad path, nil mount skip, file restore round-trip, missing catalog error |
+| Medium Value | CatalogBackupServiceTests | 4 | Volume backup write + decode, error on bad path, file restore round-trip, missing catalog error |
 | Medium Value | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture hash verification |
 | Medium Value | ImageConversionTests | 5 | JPEG conversion with extension change, valid output, dimension scaling, original format pass-through, below-max preservation. Tests exercise the shared `ImageConversionService.convertImage`. |
 | Medium Value | HasherServiceTests | 4 | Fixture hash verification is the trust anchor for the entire test suite. Empty file + consistency checks are useful but simple. |

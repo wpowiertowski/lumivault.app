@@ -97,14 +97,6 @@ actor ThumbnailService {
         }
     }
 
-    // MARK: - Warm Up
-
-    func warmUp(hashes: [(sha256: String, url: URL)]) {
-        for item in hashes {
-            try? self.generateThumbnail(for: item.url, sha256: item.sha256)
-        }
-    }
-
     // MARK: - Private
 
     private func cacheURL(for sha256: String, size: ThumbnailSize) -> URL {

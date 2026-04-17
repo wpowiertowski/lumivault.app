@@ -19,9 +19,8 @@ enum Constants {
 
     // MARK: - Paths
     enum Paths {
-        static let defaultCatalog = "~/.lumivault/catalog.json"
+        nonisolated static let defaultCatalog = "~/.lumivault/catalog.json"
         nonisolated static let iCloudContainer = "iCloud.app.lumivault"
-        nonisolated static let debugSyncFallback = "~/.lumivault/catalog.json"
     }
 
     // MARK: - Thumbnails
@@ -38,9 +37,4 @@ enum Constants {
         static let nearDuplicateThreshold = 5 // Hamming distance
     }
 
-    // MARK: - App
-    enum App {
-        static let name = "LumiVault"
-        static let catalogVersion = 1
-    }
 }

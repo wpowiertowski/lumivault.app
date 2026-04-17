@@ -259,7 +259,7 @@ actor B2Service {
                 reason: "Could not read file from disk: \(error.localizedDescription)"
             )
         }
-        let sha1 = sha1Hash(of: fileData)
+        let sha1 = Self.sha1Hash(of: fileData)
         let encodedPath = remotePath.addingPercentEncoding(withAllowedCharacters: Self.b2AllowedCharacters) ?? remotePath
 
         do {
@@ -336,7 +336,7 @@ actor B2Service {
         return cs
     }()
 
-    nonisolated func sha1Hash(of data: Data) -> String {
+    nonisolated static func sha1Hash(of data: Data) -> String {
         let digest = Insecure.SHA1.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
     }

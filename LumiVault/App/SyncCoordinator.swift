@@ -220,16 +220,16 @@ final class SyncCoordinator: @unchecked Sendable {
 
     // MARK: - Helpers
 
-    /// Resolve all VolumeRecord bookmarks into CatalogBackupService.VolumeSnapshot values.
+    /// Resolve all VolumeRecord bookmarks into VolumeSnapshot values.
     /// Must be called on MainActor (accesses SwiftData).
-    private func resolveVolumeSnapshots() -> [CatalogBackupService.VolumeSnapshot] {
+    private func resolveVolumeSnapshots() -> [VolumeSnapshot] {
         guard let container = modelContainer else { return [] }
         let context = ModelContext(container)
         guard let volumes = try? context.fetch(FetchDescriptor<VolumeRecord>()) else { return [] }
 
         return volumes.compactMap { volume in
             guard let url = try? BookmarkResolver.resolveAndAccess(volume.bookmarkData) else { return nil }
-            return CatalogBackupService.VolumeSnapshot(
+            return VolumeSnapshot(
                 volumeID: volume.volumeID,
                 label: volume.label,
                 mountURL: url

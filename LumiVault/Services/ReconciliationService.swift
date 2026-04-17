@@ -405,40 +405,4 @@ actor ReconciliationService {
 
         return results
     }
-
-    // MARK: - Resolution
-
-    func resolve(
-        discrepancy: Discrepancy,
-        strategy: ResolutionStrategy,
-        b2Credentials: B2Credentials?
-    ) async throws -> Bool {
-        switch strategy {
-        case .copyFromVolume(_, let sourceURL):
-            // Copy is handled by the caller on MainActor (needs ModelContext for StorageLocation update)
-            // This method returns the source data for the caller to write
-            return FileManager.default.fileExists(atPath: sourceURL.path)
-
-        case .downloadFromB2(let fileId):
-            guard let credentials = b2Credentials else { return false }
-            let data = try await b2Service.downloadFile(fileId: fileId, credentials: credentials)
-            return !data.isEmpty
-
-        case .uploadToB2:
-            // Handled by caller — needs file URL and credentials
-            return true
-
-        case .removeDanglingLocation, .updateB2FileId, .ignore:
-            // These are metadata-only changes handled by the caller on MainActor
-            return true
-        }
-    }
-
-    func downloadFromB2(fileId: String, credentials: B2Credentials) async throws -> Data {
-        try await b2Service.downloadFile(fileId: fileId, credentials: credentials)
-    }
-
-    func uploadToB2(fileURL: URL, remotePath: String, sha256: String, credentials: B2Credentials) async throws -> String {
-        try await b2Service.uploadImage(fileURL: fileURL, remotePath: remotePath, sha256: sha256, credentials: credentials)
-    }
 }

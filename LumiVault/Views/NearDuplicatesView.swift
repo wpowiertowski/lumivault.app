@@ -7,8 +7,6 @@ struct NearDuplicatesView: View {
     @State private var isScanning = false
     @State private var scanComplete = false
 
-    private static let threshold = 5
-
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -23,7 +21,7 @@ struct NearDuplicatesView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Near-Duplicate Detection")
                     .font(Constants.Design.monoHeadline)
-                Text("Images with perceptual hash distance < \(Self.threshold)")
+                Text("Images with perceptual hash distance < \(Constants.Dedup.nearDuplicateThreshold)")
                     .font(Constants.Design.monoCaption)
                     .foregroundStyle(.secondary)
             }
@@ -112,7 +110,7 @@ struct NearDuplicatesView: View {
                 if grouped.contains(imageB.sha256) { continue }
 
                 let distance = PerceptualHash.hammingDistance(hashA, hashB)
-                if distance < Self.threshold {
+                if distance < Constants.Dedup.nearDuplicateThreshold {
                     if members.isEmpty {
                         members.append(NearDuplicateGroup.Member(
                             sha256: imageA.sha256,
