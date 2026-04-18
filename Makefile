@@ -1,4 +1,4 @@
-.PHONY: xcode test clean
+.PHONY: xcode test clean prune-branches
 
 xcode:
 	xcodegen generate
@@ -15,3 +15,18 @@ clean:
 	rm -rf ~/Library/Developer/Xcode/DerivedData/LumiVault-*
 	swift package clean
 	defaults delete app.lumivault hasSeenWelcome 2>/dev/null || true
+
+prune-branches:
+	@git fetch --prune origin
+	@current=$$(git branch --show-current); \
+	merged=$$(gh pr list --state merged --limit 200 --json headRefName --jq '.[].headRefName' | sort -u); \
+	deleted=0; \
+	for branch in $$(git for-each-ref --format='%(refname:short)' refs/heads/); do \
+		case "$$branch" in main|master) continue ;; esac; \
+		if [ "$$branch" = "$$current" ]; then continue; fi; \
+		if printf '%s\n' "$$merged" | grep -qx "$$branch"; then \
+			git branch -D "$$branch"; \
+			deleted=$$((deleted + 1)); \
+		fi; \
+	done; \
+	echo "Pruned $$deleted merged branch(es)."
