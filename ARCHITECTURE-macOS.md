@@ -300,11 +300,15 @@ resolves the effective file URL (encrypted → converted → original). An `Imag
 captures the `PersistentIdentifier` so downstream phases can look up the SwiftData record
 without passing non-Sendable `@Model` objects across isolation boundaries.
 
-Each `PHAsset` is exported via `PHAssetResourceManager.writeData(for:toFile:)` with
-`isNetworkAccessAllowed = true` to handle iCloud-originals transparently. The export
-prefers the `.fullSizePhoto` resource (edited version with all Photos adjustments) over
-the `.photo` resource (unmodified original), while using the original resource's filename
-to avoid generic names like `FullSizeRender.jpeg`.
+Each `PHAsset` is exported via `PHAssetResourceManager.requestData(for:options:dataReceivedHandler:completionHandler:)`
+with `isNetworkAccessAllowed = true` to handle iCloud-originals transparently, streaming
+chunks directly to a `FileHandle`. The export prefers the `.fullSizePhoto` resource
+(edited version with all Photos adjustments) over the `.photo` resource (unmodified
+original), while using the original resource's filename to avoid generic names like
+`FullSizeRender.jpeg`. A per-request watchdog enforces an exponential stall threshold
+(1, 2, 4, … up to 512 seconds across 10 attempts): if chunk delivery goes idle past the
+current threshold, the request is cancelled via `cancelDataRequest(_:)` and a fresh
+request is started. The UI reports retry progress via the `photosDownload` health state.
 
 **Multi-album import**: Users can select multiple albums in the picker. Each album is
 imported sequentially through the same pipeline, with per-album settings derived from
