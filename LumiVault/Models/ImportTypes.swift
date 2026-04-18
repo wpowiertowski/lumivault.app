@@ -133,7 +133,7 @@ struct NearDuplicateMatch: Identifiable, Sendable {
 enum ImportPhase: String, Sendable {
     case importing = "Importing from Photos"
     case converting = "Converting images"
-    case hashing = "Hashing & deduplicating"
+    case hashing = "Hashing & finding duplicates"
     case encrypting = "Encrypting files"
     case par2 = "Generating PAR2 recovery data"
     case copying = "Copying to external volumes"

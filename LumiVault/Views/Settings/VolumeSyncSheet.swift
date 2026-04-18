@@ -93,7 +93,7 @@ struct VolumeSyncSheet: View {
                 if downloadedCount > 0 {
                     SyncStat(label: "From B2", value: downloadedCount)
                 }
-                SyncStat(label: "Deduped", value: deduplicatedCount)
+                SyncStat(label: "Duplicates", value: deduplicatedCount)
                 SyncStat(label: "Skipped", value: skippedCount)
             }
             Spacer()
@@ -113,7 +113,7 @@ struct VolumeSyncSheet: View {
                 if downloadedCount > 0 {
                     SyncStat(label: "From B2", value: downloadedCount)
                 }
-                SyncStat(label: "Deduped", value: deduplicatedCount)
+                SyncStat(label: "Duplicates", value: deduplicatedCount)
                 SyncStat(label: "Skipped", value: skippedCount)
             }
             if !errors.isEmpty {

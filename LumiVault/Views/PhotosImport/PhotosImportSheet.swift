@@ -234,7 +234,7 @@ struct PhotosImportSheet: View {
                     ImportStat(label: "Converted", value: progress.filesConverted)
                 }
                 ImportStat(label: "Hashed", value: progress.filesHashed)
-                ImportStat(label: "Deduped", value: progress.filesDeduplicated)
+                ImportStat(label: "Duplicates", value: progress.filesDeduplicated)
                 if progress.nearDuplicatesFound > 0 {
                     ImportStat(label: "Near-dupes", value: progress.nearDuplicatesFound)
                 }

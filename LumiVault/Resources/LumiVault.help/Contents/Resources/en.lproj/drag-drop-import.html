@@ -53,8 +53,8 @@
 
     <h2>What Happens During Import</h2>
     <ul>
-        <li><strong>Hashing</strong> &mdash; each file is hashed with SHA-256 for deduplication and integrity tracking.</li>
-        <li><strong>Deduplication</strong> &mdash; files already in the catalog (by hash) are skipped.</li>
+        <li><strong>Hashing</strong> &mdash; each file is hashed with SHA-256 for duplicate detection and integrity tracking.</li>
+        <li><strong>Duplicates</strong> &mdash; files already in the catalog (by hash) are skipped.</li>
         <li><strong>Cataloging</strong> &mdash; new files are added to the album's catalog entry.</li>
         <li><strong>Copying</strong> &mdash; files are written to configured external volumes.</li>
     </ul>
