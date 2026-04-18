@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="description" content="SHA-256 and perceptual hash deduplication in LumiVault.">
-    <meta name="keywords" content="deduplication, sha256, hash, near-duplicate, perceptual">
-    <title>Deduplication</title>
+    <meta name="description" content="SHA-256 and perceptual hash duplicate detection in LumiVault.">
+    <meta name="keywords" content="duplicates, sha256, hash, near-duplicate, perceptual">
+    <title>Duplicates</title>
     <style>
         :root { color-scheme: light dark; }
         body {
@@ -36,11 +36,11 @@
 </head>
 <body>
     <a href="index.html" class="back">&larr; LumiVault Help</a>
-    <h1>Deduplication</h1>
+    <h1>Duplicates</h1>
 
     <p>LumiVault prevents wasted storage by detecting exact duplicates and near-duplicates before archiving.</p>
 
-    <h2>Exact Deduplication (SHA-256)</h2>
+    <h2>Exact Duplicates (SHA-256)</h2>
     <p>Every imported file is hashed with SHA-256. If a file with the same hash already exists in the catalog, it is skipped. This catches byte-for-byte identical files regardless of filename.</p>
 
     <h2>Near-Duplicate Detection</h2>

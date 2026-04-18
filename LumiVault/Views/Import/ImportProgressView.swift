@@ -13,7 +13,7 @@ struct ImportProgressView: View {
             HStack(spacing: 16) {
                 StatLabel(label: "Processed", value: "\(progress.completed)/\(progress.total)")
                 if progress.deduplicated > 0 {
-                    StatLabel(label: "Deduplicated", value: "\(progress.deduplicated)")
+                    StatLabel(label: "Duplicates", value: "\(progress.deduplicated)")
                 }
                 if progress.failed > 0 {
                     StatLabel(label: "Failed", value: "\(progress.failed)")

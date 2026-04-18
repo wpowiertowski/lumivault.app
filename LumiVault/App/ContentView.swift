@@ -156,7 +156,7 @@ private struct FirstLaunchView: View {
                     welcomeSection(
                         icon: "archivebox",
                         title: "What LumiVault Does",
-                        body: "LumiVault archives albums from your Photos library onto external drives and Backblaze B2 cloud storage. Every file is deduplicated via SHA-256 and protected with PAR2 error correction so your photos survive bit rot and storage failures."
+                        body: "LumiVault archives albums from your Photos library onto external drives and Backblaze B2 cloud storage. Every file is checked for duplicates via SHA-256 and protected with PAR2 error correction so your photos survive bit rot and storage failures."
                     )
 
                     welcomeSection(

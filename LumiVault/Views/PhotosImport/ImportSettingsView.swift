@@ -81,7 +81,7 @@ struct ImportSettingsView: View {
                     .accessibilityIdentifier("importSettings.par2")
             }
 
-            Section("Deduplication") {
+            Section("Duplicates") {
                 Toggle("Detect near-duplicate images", isOn: $settings.detectNearDuplicates)
                     .accessibilityIdentifier("importSettings.nearDupe")
                 Text("Uses perceptual hashing to flag visually similar images during import.")
