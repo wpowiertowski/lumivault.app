@@ -43,15 +43,15 @@ enum PipelineHealth: Sendable, Equatable {
     case slow(SlowReason)
 
     enum SlowReason: Sendable, Equatable {
-        case photosDownload(filename: String)
+        case photosDownload(filename: String, attempt: Int, maxAttempts: Int, secondsUntilRetry: Int)
         case b2Retrying(attempt: Int)
         case b2Upload(filename: String)
         case photosServiceDegraded
 
         var message: String {
             switch self {
-            case .photosDownload(let filename):
-                "Waiting on iCloud download for \(filename) — this may take a moment."
+            case .photosDownload(let filename, let attempt, let maxAttempts, let secondsUntilRetry):
+                "Waiting on iCloud download for \(filename) — attempt \(attempt + 1)/\(maxAttempts), retry in \(secondsUntilRetry)s."
             case .b2Retrying(let attempt):
                 "B2 upload is slow — retrying (attempt \(attempt))."
             case .b2Upload(let filename):

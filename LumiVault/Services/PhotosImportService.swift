@@ -126,7 +126,9 @@ actor PhotosImportService {
         )
     }
 
-    // MARK: - writeResource with retry + cancellable + two-tier watchdog
+    // MARK: - writeResource with retry + cancellable + exponential watchdog
+
+    static let maxStallAttempts = 10
 
     private func writeResourceWithRetry(
         _ resource: PHAssetResource,
@@ -134,27 +136,32 @@ actor PhotosImportService {
         filename: String,
         callbacks: PhotosImportCallbacks
     ) async throws {
-        let maxAttempts = 3
         var lastError: Error?
 
-        for attempt in 0..<maxAttempts {
+        for attempt in 0..<Self.maxStallAttempts {
             try Task.checkCancellation()
 
             if attempt > 0 {
                 // Clean any partial file from the previous attempt
                 try? FileManager.default.removeItem(at: url)
-                // Backoff: 1s, 2s, 4s
-                let delay = UInt64(1 << (attempt - 1)) * 1_000_000_000
-                try await Task.sleep(nanoseconds: delay)
-                callbacks.health(.slow(.photosServiceDegraded))
             }
 
             do {
-                try await writeResource(resource, to: url, filename: filename, callbacks: callbacks)
+                try await writeResource(
+                    resource,
+                    to: url,
+                    filename: filename,
+                    attempt: attempt,
+                    callbacks: callbacks
+                )
                 callbacks.health(.normal)
                 return
             } catch is CancellationError {
                 throw CancellationError()
+            } catch PhotosImportError.stalled {
+                // The watchdog tripped — doubled threshold applies on the next attempt.
+                lastError = PhotosImportError.stalled
+                continue
             } catch let error as PhotosImportError {
                 throw error
             } catch {
@@ -163,10 +170,14 @@ actor PhotosImportService {
                     // Non-transient — don't waste retries
                     throw error
                 }
-                // Otherwise loop and try again
+                // Transient framework error — brief pause before next attempt
+                try await Task.sleep(for: .milliseconds(500))
             }
         }
 
+        if let err = lastError as? PhotosImportError, err == .stalled {
+            throw PhotosImportError.exportTimedOut
+        }
         throw lastError ?? PhotosImportError.exportFailed
     }
 
@@ -178,6 +189,7 @@ actor PhotosImportService {
         _ resource: PHAssetResource,
         to url: URL,
         filename: String,
+        attempt: Int,
         callbacks: PhotosImportCallbacks
     ) async throws {
         // Serialize every resource request to protect assetsd's per-client budget.
@@ -224,32 +236,38 @@ actor PhotosImportService {
                 )
                 state.setRequestID(id)
 
-                // Watchdog: observe chunk activity, flip health state, and enforce
-                // a conservative hard floor so a single wedged asset doesn't block
-                // the whole pipeline forever.
+                // Watchdog: observe chunk activity. When the stream goes idle
+                // longer than the per-attempt threshold (1, 2, 4, 8 … seconds,
+                // doubling each retry), cancel the request and surface a stall
+                // so the outer retry loop restarts with a fresh requestData.
+                let stallThreshold = TimeInterval(1 << attempt)
+                let maxAttempts = Self.maxStallAttempts
                 let watchdog = Task.detached { [state, callbacks] in
-                    let softThreshold: TimeInterval = 15
-                    let hardThreshold: TimeInterval = 600  // 10 minutes of zero activity
+                    let tickInterval: TimeInterval = 0.5
 
                     while !Task.isCancelled {
-                        try? await Task.sleep(for: .seconds(2))
+                        try? await Task.sleep(for: .seconds(tickInterval))
                         if state.isComplete { break }
 
                         let idleFor = Date().timeIntervalSince(state.lastActivity)
 
-                        if idleFor > hardThreshold {
-                            // Hard skip: this one asset is wedged. Cancel assetsd's
-                            // side of the request and surface a skip to the caller.
+                        if idleFor >= stallThreshold {
                             if let rid = state.requestID {
                                 PHAssetResourceManager.default().cancelDataRequest(rid)
                             }
                             try? handle.close()
                             if state.claimResume() {
-                                continuation.resume(throwing: PhotosImportError.exportTimedOut)
+                                continuation.resume(throwing: PhotosImportError.stalled)
                             }
                             break
-                        } else if idleFor > softThreshold {
-                            callbacks.health(.slow(.photosDownload(filename: state.filename)))
+                        } else if idleFor > stallThreshold / 2 {
+                            let secondsUntilRetry = max(0, Int(ceil(stallThreshold - idleFor)))
+                            callbacks.health(.slow(.photosDownload(
+                                filename: state.filename,
+                                attempt: attempt,
+                                maxAttempts: maxAttempts,
+                                secondsUntilRetry: secondsUntilRetry
+                            )))
                         } else {
                             callbacks.health(.normal)
                         }
@@ -406,11 +424,12 @@ actor PhotosImportService {
 
     // MARK: - Errors
 
-    enum PhotosImportError: Error {
+    enum PhotosImportError: Error, Equatable {
         case albumNotFound
         case noResourceFound
         case exportFailed
         case exportTimedOut
+        case stalled
     }
 }
 

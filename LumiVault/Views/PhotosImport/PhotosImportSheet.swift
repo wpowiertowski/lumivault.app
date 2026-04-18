@@ -460,6 +460,7 @@ struct PhotosImportSheet: View {
                     progress.currentFile = 0
                     progress.totalFiles = 0
                     progress.currentFilename = ""
+                    progress.filesCataloged = 0
 
                     do {
                         try await coordinator.importAlbum(
