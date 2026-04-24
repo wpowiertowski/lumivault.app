@@ -5,6 +5,7 @@ struct NearDuplicatesView: View {
     @Query private var allImages: [ImageRecord]
     @Query private var volumes: [VolumeRecord]
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @Environment(\.thumbnailService) private var thumbnailService
 
@@ -62,6 +63,9 @@ struct NearDuplicatesView: View {
 
             Button("Scan Library") { scan() }
                 .disabled(isScanning)
+
+            Button("Done") { dismiss() }
+                .keyboardShortcut(.defaultAction)
         }
         .padding()
     }
