@@ -13,6 +13,18 @@ struct ImportFromPhotosCommands: Commands {
     }
 }
 
+struct PhotosSyncCommands: Commands {
+    let photosMonitor: PhotosLibraryMonitor
+
+    var body: some Commands {
+        CommandGroup(after: .importExport) {
+            Button("Check Photos for Updates") {
+                Task { await photosMonitor.recheckAll() }
+            }
+        }
+    }
+}
+
 extension Notification.Name {
     static let showPhotosImport = Notification.Name("showPhotosImport")
 }

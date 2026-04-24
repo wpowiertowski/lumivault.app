@@ -6,6 +6,7 @@ struct ImportDefaultsSettingsView: View {
     @AppStorage("importMaxDimension") private var maxDimensionRaw = 0 // 0 = original
     @AppStorage("importGeneratePAR2") private var generatePAR2 = true
     @AppStorage("importDetectNearDuplicates") private var detectNearDuplicates = true
+    @AppStorage("importNearDuplicateThreshold") private var nearDuplicateThreshold = Constants.Dedup.nearDuplicateThreshold
 
     private var format: Binding<ImageFormat> {
         Binding(
@@ -68,6 +69,17 @@ struct ImportDefaultsSettingsView: View {
                     .accessibilityIdentifier("importDefaults.par2")
                 Toggle("Detect near-duplicate images", isOn: $detectNearDuplicates)
                     .accessibilityIdentifier("importDefaults.nearDupe")
+                Stepper(
+                    "Near-duplicate threshold: \(nearDuplicateThreshold) bits",
+                    value: $nearDuplicateThreshold,
+                    in: 2...10
+                )
+                .disabled(!detectNearDuplicates)
+                .font(Constants.Design.monoBody)
+                .accessibilityIdentifier("importDefaults.nearDupeThreshold")
+                Text("Lower = stricter; higher = catch more variants.")
+                    .font(Constants.Design.monoCaption)
+                    .foregroundStyle(.tertiary)
             }
         }
         .formStyle(.grouped)

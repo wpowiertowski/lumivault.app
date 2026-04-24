@@ -14,6 +14,14 @@ struct ImportedAsset: Sendable {
     let fileURL: URL
     let originalFilename: String
     let creationDate: Date?
+    let phAssetLocalIdentifier: String?
+
+    nonisolated init(fileURL: URL, originalFilename: String, creationDate: Date?, phAssetLocalIdentifier: String? = nil) {
+        self.fileURL = fileURL
+        self.originalFilename = originalFilename
+        self.creationDate = creationDate
+        self.phAssetLocalIdentifier = phAssetLocalIdentifier
+    }
 }
 
 enum ImportResult: Sendable {
@@ -92,6 +100,28 @@ actor PhotosImportService {
         return albums
     }
 
+    // MARK: - Album Asset Diff
+
+    /// Returns the current image PHAssets in the named album, or `nil` if the
+    /// album is no longer present (e.g. the user deleted it in Photos).
+    func fetchAssets(in albumLocalIdentifier: String) -> [PHAsset]? {
+        let fetchResult = PHAssetCollection.fetchAssetCollections(
+            withLocalIdentifiers: [albumLocalIdentifier], options: nil
+        )
+        guard let collection = fetchResult.firstObject else { return nil }
+
+        let opts = PHFetchOptions()
+        opts.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+        let assets = PHAsset.fetchAssets(in: collection, options: opts)
+
+        var refs: [PHAsset] = []
+        refs.reserveCapacity(assets.count)
+        for i in 0..<assets.count {
+            refs.append(assets.object(at: i))
+        }
+        return refs
+    }
+
     // MARK: - Single Asset Import
 
     private func importAsset(
@@ -122,7 +152,8 @@ actor PhotosImportService {
         return ImportedAsset(
             fileURL: finalURL,
             originalFilename: filename,
-            creationDate: asset.creationDate
+            creationDate: asset.creationDate,
+            phAssetLocalIdentifier: asset.localIdentifier
         )
     }
 
@@ -324,12 +355,30 @@ actor PhotosImportService {
         fetchOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
         let assets = PHAsset.fetchAssets(in: collection, options: fetchOptions)
 
-        let total = assets.count
-        try FileManager.default.createDirectory(at: importDirectory, withIntermediateDirectories: true)
-
         // Snapshot asset references so the stream closure can capture them
         var assetRefs: [PHAsset] = []
-        for i in 0..<total { assetRefs.append(assets.object(at: i)) }
+        assetRefs.reserveCapacity(assets.count)
+        for i in 0..<assets.count { assetRefs.append(assets.object(at: i)) }
+
+        return try importAssetsStreaming(
+            assets: assetRefs,
+            to: importDirectory,
+            callbacks: callbacks,
+            progress: progress
+        )
+    }
+
+    /// Same as `importAlbumStreaming`, but takes an explicit list of `PHAsset`s
+    /// instead of resolving them from an album. Used by re-sync flows where the
+    /// caller has already computed the precise delta.
+    func importAssetsStreaming(
+        assets assetRefs: [PHAsset],
+        to importDirectory: URL,
+        callbacks: PhotosImportCallbacks = PhotosImportCallbacks(),
+        progress: @Sendable @escaping (Int, Int) -> Void
+    ) throws -> AsyncStream<ImportResult> {
+        let total = assetRefs.count
+        try FileManager.default.createDirectory(at: importDirectory, withIntermediateDirectories: true)
 
         let (stream, continuation) = AsyncStream.makeStream(of: ImportResult.self)
 

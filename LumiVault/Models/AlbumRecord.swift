@@ -8,6 +8,7 @@ final class AlbumRecord {
     var month: String
     var day: String
     var addedAt: Date
+    var photosAlbumLocalIdentifier: String?
 
     @Relationship(deleteRule: .cascade, inverse: \ImageRecord.album)
     var images: [ImageRecord]
@@ -18,6 +19,7 @@ final class AlbumRecord {
         month: String,
         day: String,
         addedAt: Date = .now,
+        photosAlbumLocalIdentifier: String? = nil,
         images: [ImageRecord] = []
     ) {
         self.name = name
@@ -25,6 +27,7 @@ final class AlbumRecord {
         self.month = month
         self.day = day
         self.addedAt = addedAt
+        self.photosAlbumLocalIdentifier = photosAlbumLocalIdentifier
         self.images = images
     }
 

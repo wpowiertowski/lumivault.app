@@ -12,7 +12,6 @@ Source: ARCHITECTURE-macOS.md Section 11
 
 - [ ] iOS / iPadOS companion app (catalog viewable via iCloud, no native app yet)
 - [ ] Video file support
-- [ ] Perceptual hash near-duplicate threshold tuning (fixed at Hamming distance < 5; adjustable threshold deferred)
 
 ---
 
@@ -21,13 +20,13 @@ Source: ARCHITECTURE-macOS.md Section 11
 ### Bulk Album Import & Auto-Sync
 
 - [x] **Bulk album import** — allow selecting and importing multiple Photos albums in a single operation instead of one at a time. Queue albums and run them sequentially through the export pipeline with a combined progress/completion summary.
-- [ ] **Automated album sync** — detect when a previously imported album has changed in Apple Photos (new images added, images removed, edits applied) and offer to re-sync. Could use `PHChange` observation or a periodic poll comparing Photos asset count/modification dates against the catalog. Should support both manual "check for updates" and optional background monitoring.
+- [x] **Automated album sync** — detect when a previously imported album has changed in Apple Photos (new images added, images removed, edits applied) and offer to re-sync. Could use `PHChange` observation or a periodic poll comparing Photos asset count/modification dates against the catalog. Should support both manual "check for updates" and optional background monitoring.
 
 ### Near-Duplicate Handling
 
-- [ ] **Actionable near-duplicate UI** — the current NearDuplicatesView detects and displays near-duplicate pairs but offers no actions. Add per-pair resolution actions: keep both, delete one (choose which), merge (replace one with the other). Deletion should flow through DeletionService to clean up volumes and B2.
-- [ ] **Near-duplicate resolution during import** — currently near-duplicates are only reported in the completion screen after the fact. Allow pausing the pipeline to prompt the user when a near-duplicate is detected, or provide a post-import review step where flagged pairs can be resolved before finalizing.
-- [ ] **Near-duplicate threshold tuning** — expose the Hamming distance threshold (currently hardcoded at <5) as a user-configurable setting in Export Defaults. Lower values = stricter matching, higher values = more aggressive flagging.
+- [x] **Actionable near-duplicate UI** — the current NearDuplicatesView detects and displays near-duplicate pairs but offers no actions. Add per-pair resolution actions: keep both, delete one (choose which), merge (replace one with the other). Deletion should flow through DeletionService to clean up volumes and B2.
+- [x] **Near-duplicate resolution during import** — currently near-duplicates are only reported in the completion screen after the fact. Allow pausing the pipeline to prompt the user when a near-duplicate is detected, or provide a post-import review step where flagged pairs can be resolved before finalizing.
+- [x] **Near-duplicate threshold tuning** — expose the Hamming distance threshold (currently hardcoded at <5) as a user-configurable setting in Export Defaults. Lower values = stricter matching, higher values = more aggressive flagging.
 
 ---
 

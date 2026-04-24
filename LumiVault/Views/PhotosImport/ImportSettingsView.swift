@@ -13,6 +13,7 @@ struct ImportSettingsView: View {
     @AppStorage("importMaxDimension") private var defaultMaxDimension = 0
     @AppStorage("importGeneratePAR2") private var defaultGeneratePAR2 = true
     @AppStorage("importDetectNearDuplicates") private var defaultDetectNearDuplicates = true
+    @AppStorage("importNearDuplicateThreshold") private var defaultNearDuplicateThreshold = Constants.Dedup.nearDuplicateThreshold
 
     private var encryptionKeyAvailable: Bool {
         encryptionEnabled && EncryptionService.storedKeyId() != nil
@@ -156,6 +157,7 @@ struct ImportSettingsView: View {
         settings.maxDimension = defaultMaxDimension == 0 ? .original : .capped(defaultMaxDimension)
         settings.generatePAR2 = defaultGeneratePAR2
         settings.detectNearDuplicates = defaultDetectNearDuplicates
+        settings.nearDuplicateThreshold = defaultNearDuplicateThreshold
 
         // Pre-select all configured volumes
         if settings.targetVolumeIDs.isEmpty && !volumes.isEmpty {

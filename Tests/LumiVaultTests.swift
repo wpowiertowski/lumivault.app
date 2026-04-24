@@ -2085,3 +2085,140 @@ struct EncryptionEdgeCaseTests {
         #expect(encryptedSize == Int64(4096 + 16))
     }
 }
+
+// MARK: - Import Settings Tests
+
+@Suite
+@MainActor
+struct ImportSettingsTests {
+    @Test func nearDuplicateThresholdDefaultMatchesConstant() {
+        let settings = ImportSettings(albumName: "x", year: "2025", month: "01", day: "01")
+        #expect(settings.nearDuplicateThreshold == Constants.Dedup.nearDuplicateThreshold)
+    }
+}
+
+// MARK: - Photos Library Monitor Diff Tests
+
+@Suite
+@MainActor
+struct PhotosLibraryMonitorDiffTests {
+    private func makeImage(sha: String, phId: String?) -> ImageRecord {
+        ImageRecord(
+            sha256: sha,
+            filename: "\(sha).jpg",
+            sizeBytes: 1,
+            phAssetLocalIdentifier: phId
+        )
+    }
+
+    @Test func diffDetectsAdditionsAndRemovals() {
+        let kept = makeImage(sha: "k", phId: "id-keep")
+        let removed = makeImage(sha: "r", phId: "id-gone")
+        let photoIds: Set<String> = ["id-keep", "id-new1", "id-new2"]
+
+        let parts = PhotosLibraryMonitor.computeDeltaParts(
+            photoIds: photoIds,
+            catalogImages: [kept, removed]
+        )
+
+        #expect(parts.addedIds == ["id-new1", "id-new2"])
+        #expect(parts.removed.map(\.sha256) == ["r"])
+        #expect(parts.untrackable.isEmpty)
+    }
+
+    @Test func diffExcludesNilIdImagesFromRemoval() {
+        let legacy = makeImage(sha: "legacy", phId: nil)
+        let tracked = makeImage(sha: "tracked", phId: "id-1")
+
+        let parts = PhotosLibraryMonitor.computeDeltaParts(
+            photoIds: ["id-1"],
+            catalogImages: [legacy, tracked]
+        )
+
+        #expect(parts.addedIds.isEmpty)
+        #expect(parts.removed.isEmpty)
+        #expect(parts.untrackable.map(\.sha256) == ["legacy"])
+    }
+
+    @Test func diffWithEmptyPhotoLibraryRemovesAllTracked() {
+        let a = makeImage(sha: "a", phId: "id-a")
+        let b = makeImage(sha: "b", phId: "id-b")
+        let legacy = makeImage(sha: "legacy", phId: nil)
+
+        let parts = PhotosLibraryMonitor.computeDeltaParts(
+            photoIds: [],
+            catalogImages: [a, b, legacy]
+        )
+
+        #expect(parts.addedIds.isEmpty)
+        #expect(Set(parts.removed.map(\.sha256)) == ["a", "b"])
+        #expect(parts.untrackable.map(\.sha256) == ["legacy"])
+    }
+
+    @Test func diffNoChanges() {
+        let a = makeImage(sha: "a", phId: "id-a")
+        let parts = PhotosLibraryMonitor.computeDeltaParts(
+            photoIds: ["id-a"],
+            catalogImages: [a]
+        )
+        #expect(parts.addedIds.isEmpty)
+        #expect(parts.removed.isEmpty)
+        #expect(parts.untrackable.isEmpty)
+    }
+}
+
+// MARK: - SwiftData Schema Migration Smoke Test
+
+@Suite
+@MainActor
+struct PhotosSyncSchemaTests {
+    @Test func newNullableFieldsDefaultToNil() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(
+            for: ImageRecord.self, AlbumRecord.self, VolumeRecord.self,
+            configurations: config
+        )
+        let context = container.mainContext
+
+        let album = AlbumRecord(name: "Test", year: "2025", month: "07", day: "15")
+        context.insert(album)
+
+        let image = ImageRecord(sha256: "deadbeef", filename: "x.jpg", sizeBytes: 1)
+        image.album = album
+        context.insert(image)
+        try context.save()
+
+        #expect(album.photosAlbumLocalIdentifier == nil)
+        #expect(image.phAssetLocalIdentifier == nil)
+    }
+
+    @Test func explicitIdentifiersPersist() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(
+            for: ImageRecord.self, AlbumRecord.self, VolumeRecord.self,
+            configurations: config
+        )
+        let context = container.mainContext
+
+        let album = AlbumRecord(
+            name: "Test",
+            year: "2025",
+            month: "07",
+            day: "15",
+            photosAlbumLocalIdentifier: "PH-album-1"
+        )
+        context.insert(album)
+        let image = ImageRecord(
+            sha256: "deadbeef",
+            filename: "x.jpg",
+            sizeBytes: 1,
+            phAssetLocalIdentifier: "PH-asset-1"
+        )
+        image.album = album
+        context.insert(image)
+        try context.save()
+
+        #expect(album.photosAlbumLocalIdentifier == "PH-album-1")
+        #expect(image.phAssetLocalIdentifier == "PH-asset-1")
+    }
+}

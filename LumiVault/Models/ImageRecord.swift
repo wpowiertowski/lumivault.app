@@ -28,6 +28,7 @@ final class ImageRecord {
     var isEncrypted: Bool = false
     var encryptionKeyId: String?
     var encryptionNonce: Data?
+    var phAssetLocalIdentifier: String?
 
     init(
         sha256: String,
@@ -43,7 +44,8 @@ final class ImageRecord {
         lastVerifiedAt: Date? = nil,
         isEncrypted: Bool = false,
         encryptionKeyId: String? = nil,
-        encryptionNonce: Data? = nil
+        encryptionNonce: Data? = nil,
+        phAssetLocalIdentifier: String? = nil
     ) {
         self.sha256 = sha256
         self.filename = filename
@@ -59,5 +61,6 @@ final class ImageRecord {
         self.isEncrypted = isEncrypted
         self.encryptionKeyId = encryptionKeyId
         self.encryptionNonce = encryptionNonce
+        self.phAssetLocalIdentifier = phAssetLocalIdentifier
     }
 }
