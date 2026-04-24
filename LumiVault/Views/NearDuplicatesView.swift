@@ -3,9 +3,26 @@ import SwiftData
 
 struct NearDuplicatesView: View {
     @Query private var allImages: [ImageRecord]
+    @Query private var volumes: [VolumeRecord]
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Environment(SyncCoordinator.self) private var syncCoordinator
+    @Environment(\.thumbnailService) private var thumbnailService
+
     @State private var groups: [NearDuplicateGroup] = []
     @State private var isScanning = false
     @State private var scanComplete = false
+
+    @State private var pendingDelete: PendingDelete?
+    @State private var showingDeleteConfirmation = false
+    @State private var showingDeletionProgress = false
+    @State private var deletionProgress = DeletionProgress()
+
+    private struct PendingDelete: Equatable {
+        let groupID: NearDuplicateGroup.ID
+        let sha256: String
+        let filename: String
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,6 +31,17 @@ struct NearDuplicatesView: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .alert("Delete Photo", isPresented: $showingDeleteConfirmation) {
+            Button("Delete", role: .destructive) { deleteImage() }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: {
+            if let pending = pendingDelete {
+                Text("Delete \"\(pending.filename)\"? The file will be removed from all external volumes and B2.")
+            }
+        }
+        .sheet(isPresented: $showingDeletionProgress) {
+            AlbumDeletionSheet(progress: deletionProgress)
+        }
     }
 
     private var header: some View {
@@ -35,6 +63,9 @@ struct NearDuplicatesView: View {
 
             Button("Scan Library") { scan() }
                 .disabled(isScanning)
+
+            Button("Done") { dismiss() }
+                .keyboardShortcut(.defaultAction)
         }
         .padding()
     }
@@ -67,7 +98,20 @@ struct NearDuplicatesView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(groups) { group in
-                        NearDuplicateGroupRow(group: group)
+                        NearDuplicateGroupRow(
+                            group: group,
+                            onDelete: { member in
+                                pendingDelete = PendingDelete(
+                                    groupID: group.id,
+                                    sha256: member.sha256,
+                                    filename: member.filename
+                                )
+                                showingDeleteConfirmation = true
+                            },
+                            onDismiss: {
+                                groups.removeAll { $0.id == group.id }
+                            }
+                        )
                     }
                 }
                 .padding()
@@ -85,6 +129,87 @@ struct NearDuplicatesView: View {
             groups = result
             scanComplete = true
             isScanning = false
+        }
+    }
+
+    private func deleteImage() {
+        guard let pending = pendingDelete,
+              let image = allImages.first(where: { $0.sha256 == pending.sha256 }),
+              let album = image.album else {
+            pendingDelete = nil
+            return
+        }
+
+        let progress = DeletionProgress()
+        self.deletionProgress = progress
+        showingDeletionProgress = true
+
+        let input = DeletionService.ImageDeletionInput(
+            sha256: image.sha256,
+            filename: image.filename,
+            par2Filename: image.par2Filename,
+            b2FileId: image.b2FileId,
+            storageLocations: image.storageLocations,
+            albumPath: "\(album.year)/\(album.month)/\(album.day)/\(album.name)"
+        )
+
+        let albumName = album.name
+        let year = album.year
+        let month = album.month
+        let day = album.day
+        let sha256 = image.sha256
+        let groupID = pending.groupID
+
+        var b2Credentials: B2Credentials?
+        if let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
+           let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) {
+            b2Credentials = creds
+        }
+
+        var mountedVolumes: [(volumeID: String, mountURL: URL)] = []
+        for vol in volumes {
+            if let url = try? BookmarkResolver.resolveAndAccess(vol.bookmarkData) {
+                mountedVolumes.append((vol.volumeID, url))
+            }
+        }
+
+        Task {
+            let service = DeletionService()
+            let result = await service.deleteImageFiles(
+                images: [input],
+                mountedVolumes: mountedVolumes,
+                b2Credentials: b2Credentials,
+                progress: progress,
+                entireAlbum: false
+            )
+
+            for (_, url) in mountedVolumes {
+                url.stopAccessingSecurityScopedResource()
+            }
+
+            await MainActor.run { progress.phase = .updatingCatalog }
+            await syncCoordinator.removeImageFromCatalog(sha256: sha256, albumName: albumName, year: year, month: month, day: day)
+
+            await thumbnailService.removeThumbnails(for: sha256)
+
+            modelContext.delete(image)
+            try? modelContext.save()
+
+            if let idx = groups.firstIndex(where: { $0.id == groupID }) {
+                groups[idx].members.removeAll { $0.sha256 == sha256 }
+                if groups[idx].members.count < 2 {
+                    groups.remove(at: idx)
+                }
+            }
+
+            await MainActor.run {
+                progress.phase = .complete
+                progress.errors = result.errors
+            }
+
+            pendingDelete = nil
+
+            await syncCoordinator.pushAfterLocalChange(reloadFromDisk: false)
         }
     }
 
@@ -145,7 +270,7 @@ struct NearDuplicatesView: View {
 
 struct NearDuplicateGroup: Identifiable {
     let id = UUID()
-    let members: [Member]
+    var members: [Member]
 
     struct Member: Identifiable {
         let id = UUID()
@@ -161,17 +286,29 @@ struct NearDuplicateGroup: Identifiable {
 
 private struct NearDuplicateGroupRow: View {
     let group: NearDuplicateGroup
+    let onDelete: (NearDuplicateGroup.Member) -> Void
+    let onDismiss: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("\(group.members.count) similar images")
-                .font(Constants.Design.monoCaption)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
+            HStack {
+                Text("\(group.members.count) similar images")
+                    .font(Constants.Design.monoCaption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Dismiss") { onDismiss() }
+                    .buttonStyle(.plain)
+                    .font(Constants.Design.monoCaption)
+                    .foregroundStyle(.secondary)
+            }
 
             HStack(spacing: 8) {
                 ForEach(group.members) { member in
-                    NearDuplicateMemberCard(member: member)
+                    NearDuplicateMemberCard(
+                        member: member,
+                        onDelete: { onDelete(member) }
+                    )
                 }
             }
 
@@ -182,28 +319,45 @@ private struct NearDuplicateGroupRow: View {
 
 private struct NearDuplicateMemberCard: View {
     let member: NearDuplicateGroup.Member
+    let onDelete: () -> Void
     @Environment(\.thumbnailService) private var thumbnailService
     @State private var thumbnail: NSImage?
+    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ZStack {
-                if let thumbnail {
-                    Image(nsImage: thumbnail)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } else {
-                    Rectangle()
-                        .fill(.quaternary)
-                        .overlay {
-                            Image(systemName: "photo")
-                                .font(.title3)
-                                .foregroundStyle(.tertiary)
-                        }
+            ZStack(alignment: .topTrailing) {
+                Group {
+                    if let thumbnail {
+                        Image(nsImage: thumbnail)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else {
+                        Rectangle()
+                            .fill(.quaternary)
+                            .overlay {
+                                Image(systemName: "photo")
+                                    .font(.title3)
+                                    .foregroundStyle(.tertiary)
+                            }
+                    }
+                }
+                .frame(width: 120, height: 120)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                if isHovered {
+                    Button(action: onDelete) {
+                        Image(systemName: "trash.circle.fill")
+                            .font(.title2)
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, .red)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(6)
+                    .help("Delete this photo from all volumes and B2")
                 }
             }
             .frame(width: 120, height: 120)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
 
             Text(member.filename)
                 .font(Constants.Design.monoCaption)
@@ -225,6 +379,7 @@ private struct NearDuplicateMemberCard: View {
                 .foregroundStyle(.tertiary)
         }
         .frame(width: 120)
+        .onHover { isHovered = $0 }
         .task {
             thumbnail = await thumbnailService.thumbnail(for: member.sha256, size: .grid)
         }
