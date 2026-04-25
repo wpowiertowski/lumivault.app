@@ -3,9 +3,11 @@ import Photos
 import SwiftData
 
 /// What a per-album diff against the Apple Photos library looks like.
-/// Not Sendable: holds `ImageRecord` (a SwiftData @Model). Lives only on
-/// MainActor in practice, same constraint as `DuplicateResult`.
-struct AlbumDelta {
+/// `@unchecked Sendable` because it holds `ImageRecord` (a SwiftData @Model).
+/// All access happens on MainActor in practice — the unchecked conformance
+/// matches the pattern used elsewhere in the project (DuplicateResult,
+/// PipelinedImportCoordinator, etc.).
+struct AlbumDelta: @unchecked Sendable {
     /// Assets present in Photos that we have not yet imported.
     let added: [PHAsset]
     /// Catalog images whose source PHAsset is no longer in the album.

@@ -214,7 +214,7 @@ struct AlbumResyncSheet: View {
             untrackable: delta.untrackable,
             albumMissing: delta.albumMissing
         )
-        let resolvedAlbum = album
+        nonisolated(unsafe) let resolvedAlbum = album
 
         // Resolve volumes and B2 credentials for removals.
         var mountedVolumes: [(volumeID: String, mountURL: URL)] = []

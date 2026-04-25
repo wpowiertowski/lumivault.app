@@ -18,6 +18,13 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Pin the Xcode version so CI matches Xcode Cloud and local dev. Bump in
+# lockstep with Xcode Cloud's "Xcode Version" setting (App Store Connect →
+# Xcode Cloud → Workflow). To find which versions are available on the
+# runner, see https://github.com/actions/runner-images/blob/main/images/macos/macos-26-Readme.md
+env:
+  XCODE_VERSION: "26.4.1"
+
 permissions:
   contents: read
 
@@ -41,18 +48,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-swiftpm-
 
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
+        run: sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
+
       - name: Show Xcode version
         run: xcodebuild -version
-
-      - name: Verify Xcode 26+
-        shell: bash
-        run: |
-          set -euo pipefail
-          XCODE_MAJOR="$(xcodebuild -version | awk '/Xcode/ { split($2, parts, "."); print parts[1] }')"
-          if [[ "${XCODE_MAJOR}" -lt 26 ]]; then
-            echo "Xcode 26+ is required to build macOS 26 targets. Found Xcode ${XCODE_MAJOR}."
-            exit 1
-          fi
 
       - name: Build macOS target
         run: |
@@ -81,6 +81,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-swiftpm-test-
             ${{ runner.os }}-swiftpm-
+
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
+        run: sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
+
+      - name: Show Xcode version
+        run: xcodebuild -version
 
       - name: Run tests
         run: swift test
