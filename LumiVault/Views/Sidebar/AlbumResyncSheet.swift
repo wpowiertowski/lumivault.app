@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import Photos
+import os
 
 struct AlbumResyncSheet: View {
     let album: AlbumRecord
@@ -309,17 +310,31 @@ private struct PHAssetThumbnail: View {
     }
 
     private func loadThumbnail() async -> NSImage? {
-        await withCheckedContinuation { continuation in
+        // PHImageManager.requestImage may invoke its handler multiple times
+        // (degraded preview, iCloud progress, then final). The continuation
+        // must resume exactly once — pick the first non-degraded delivery.
+        await withCheckedContinuation { (continuation: CheckedContinuation<NSImage?, Never>) in
+            let resumed = OSAllocatedUnfairLock(initialState: false)
             let opts = PHImageRequestOptions()
-            opts.deliveryMode = .opportunistic
+            opts.deliveryMode = .highQualityFormat
             opts.isNetworkAccessAllowed = true
+            opts.isSynchronous = false
             PHImageManager.default().requestImage(
                 for: asset,
                 targetSize: CGSize(width: 112, height: 112),
                 contentMode: .aspectFill,
                 options: opts
-            ) { img, _ in
-                continuation.resume(returning: img)
+            ) { img, info in
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if isDegraded { return }
+                let shouldResume = resumed.withLock { state -> Bool in
+                    guard !state else { return false }
+                    state = true
+                    return true
+                }
+                if shouldResume {
+                    continuation.resume(returning: img)
+                }
             }
         }
     }
