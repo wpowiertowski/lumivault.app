@@ -22,7 +22,8 @@ let package = Package(
                 .copy("Resources/LumiVault.help")
             ],
             swiftSettings: [
-                .defaultIsolation(MainActor.self)
+                .defaultIsolation(MainActor.self),
+                .treatAllWarnings(as: .error)
             ]
         ),
         .testTarget(
