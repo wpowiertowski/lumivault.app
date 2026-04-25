@@ -30,6 +30,7 @@
 		501A35F756977D30D428B869 /* PipelinedImportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DAAFF78DFC668D556C45BE3 /* PipelinedImportCoordinator.swift */; };
 		501A9A0B01E7CDE2D560E609 /* PhotosAlbumPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA85E7129726352A8ABA7D14 /* PhotosAlbumPicker.swift */; };
 		50D5C5A6BA309A0BCAB0CC64 /* VolumeListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0099C37B5592C7B2AACD467B /* VolumeListView.swift */; };
+		53B2C5DA24018B4D6611F9AF /* AlbumResyncSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 170A85D45BB0A8CB5F310DEC /* AlbumResyncSheet.swift */; };
 		55092B1FB5D744B323FDDFCE /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8DDEE614B4A6D6FE85E9906 /* EmptyStateView.swift */; };
 		576927D602EDB37C9C821BEF /* GeneralSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F4EAD4EE81E22BA1863819 /* GeneralSettingsView.swift */; };
 		582ECC00817146472B6B1B4F /* ThumbnailService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1C282CA4BBA78763E15C190 /* ThumbnailService.swift */; };
@@ -63,6 +64,7 @@
 		D614E72A43BEE42BDCD6896F /* GaloisField16.swift in Sources */ = {isa = PBXBuildFile; fileRef = A705C358860AAE79B6C774A6 /* GaloisField16.swift */; };
 		D667D68E0E1F064E5955284C /* RedundancyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0933DB339B93FFE9258AEA7 /* RedundancyService.swift */; };
 		DCA7881A48055EE6FC8BC7A6 /* ImportTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEDAF6545E18E7FAB1A8EC7A /* ImportTypes.swift */; };
+		DF0CB08509FAC67DEB85224F /* PhotosLibraryMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E69F5FC018A6F4282FD4B52D /* PhotosLibraryMonitor.swift */; };
 		E5AD622448575773B6865BB8 /* EncryptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2227CE0EBFDA45BA03F75D10 /* EncryptionService.swift */; };
 		E7503627D9380F2FA62D1C7C /* IntegritySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78323BB35DE5C1DE3D74C325 /* IntegritySheet.swift */; };
 		E9CC0D815365176B7AC4CA64 /* LumiVaultUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C8416D7A7C9047F26714AD /* LumiVaultUITests.swift */; };
@@ -106,6 +108,7 @@
 		12F4EAD4EE81E22BA1863819 /* GeneralSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsView.swift; sourceTree = "<group>"; };
 		12F99517836AFD89561B41EE /* PerceptualHash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerceptualHash.swift; sourceTree = "<group>"; };
 		15ADD1B31F649B6D4AE4E55D /* NearDuplicatesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearDuplicatesView.swift; sourceTree = "<group>"; };
+		170A85D45BB0A8CB5F310DEC /* AlbumResyncSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumResyncSheet.swift; sourceTree = "<group>"; };
 		1DAAFF78DFC668D556C45BE3 /* PipelinedImportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelinedImportCoordinator.swift; sourceTree = "<group>"; };
 		1E605ECCBCE62C39786BEF19 /* ImageRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageRecord.swift; sourceTree = "<group>"; };
 		1E7AF86B7699D2920ED076EB /* MetalPAR2Service.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalPAR2Service.swift; sourceTree = "<group>"; };
@@ -159,6 +162,7 @@
 		E1B876E2BEAD4C3EBF5E1688 /* LumiVault.help */ = {isa = PBXFileReference; lastKnownFileType = folder; name = LumiVault.help; path = LumiVault/Resources/LumiVault.help; sourceTree = SOURCE_ROOT; };
 		E6826A2A2F1B0541A700F497 /* EXIFData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EXIFData.swift; sourceTree = "<group>"; };
 		E68790766AAC0D4983E632CB /* B2SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = B2SettingsView.swift; sourceTree = "<group>"; };
+		E69F5FC018A6F4282FD4B52D /* PhotosLibraryMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosLibraryMonitor.swift; sourceTree = "<group>"; };
 		E7C8416D7A7C9047F26714AD /* LumiVaultUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumiVaultUITests.swift; sourceTree = "<group>"; };
 		F90BF32093AC2357CD61747D /* Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalog.swift; sourceTree = "<group>"; };
 		FC1982FE3C2E560E783753AF /* PhotosImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosImportService.swift; sourceTree = "<group>"; };
@@ -239,6 +243,7 @@
 			children = (
 				795EC7A08A0ABF43F828C239 /* AlbumDeletionSheet.swift */,
 				C2BF78C573AEB3723FAA6B52 /* AlbumExportSheet.swift */,
+				170A85D45BB0A8CB5F310DEC /* AlbumResyncSheet.swift */,
 				013C39B57D0BACCC51619D46 /* SidebarView.swift */,
 				0099C37B5592C7B2AACD467B /* VolumeListView.swift */,
 			);
@@ -297,6 +302,7 @@
 				BFA740881D64DEF9AAD992E7 /* ImageConversionService.swift */,
 				1E7AF86B7699D2920ED076EB /* MetalPAR2Service.swift */,
 				FC1982FE3C2E560E783753AF /* PhotosImportService.swift */,
+				E69F5FC018A6F4282FD4B52D /* PhotosLibraryMonitor.swift */,
 				1DAAFF78DFC668D556C45BE3 /* PipelinedImportCoordinator.swift */,
 				3ACCA96E297825FB7AD6A91E /* PipelineItem.swift */,
 				93F0123F93F18FC16E95D05C /* ReconciliationService.swift */,
@@ -504,6 +510,7 @@
 				92A8BF69B17C32CBBA801C36 /* AlbumDeletionSheet.swift in Sources */,
 				93AB452DC206E0A2C5C02909 /* AlbumExportSheet.swift in Sources */,
 				7623A3D396C608719188049B /* AlbumRecord.swift in Sources */,
+				53B2C5DA24018B4D6611F9AF /* AlbumResyncSheet.swift in Sources */,
 				C3CF5E268A47CFFAD589C4DD /* AsyncChannel.swift in Sources */,
 				CDFE6E5E0536944B2630D0C1 /* AsyncSemaphore.swift in Sources */,
 				03E6665EF681AB03B992359C /* B2Credentials.swift in Sources */,
@@ -545,6 +552,7 @@
 				501A9A0B01E7CDE2D560E609 /* PhotosAlbumPicker.swift in Sources */,
 				B6087FD659F665B3227E6778 /* PhotosImportService.swift in Sources */,
 				6BE9B8EC4FBAFD4CC89C300A /* PhotosImportSheet.swift in Sources */,
+				DF0CB08509FAC67DEB85224F /* PhotosLibraryMonitor.swift in Sources */,
 				F9138AD9D6AFD57B9F8F789D /* PipelineItem.swift in Sources */,
 				501A35F756977D30D428B869 /* PipelinedImportCoordinator.swift in Sources */,
 				6780E2492025225BB83B874D /* ReconciliationService.swift in Sources */,

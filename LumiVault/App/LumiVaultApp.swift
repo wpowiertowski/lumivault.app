@@ -16,17 +16,20 @@ struct LumiVaultApp: App {
     let thumbnailService = ThumbnailService()
     @NSApplicationDelegateAdaptor(AppActivationDelegate.self) private var appDelegate
     @State private var syncCoordinator = SyncCoordinator()
+    @State private var photosMonitor = PhotosLibraryMonitor()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .tint(Constants.Design.accentColor)
                 .environment(syncCoordinator)
+                .environment(photosMonitor)
                 .environment(\.encryptionService, encryptionService)
                 .environment(\.thumbnailService, thumbnailService)
                 .task {
                     syncCoordinator.modelContainer = container
                     await syncCoordinator.setup()
+                    photosMonitor.start(modelContext: container.mainContext)
                 }
         }
         .modelContainer(container)
@@ -34,11 +37,13 @@ struct LumiVaultApp: App {
         .windowResizability(.contentMinSize)
         .commands {
             ImportFromPhotosCommands()
+            PhotosSyncCommands(photosMonitor: photosMonitor)
         }
 
         Settings {
             SettingsView()
                 .environment(syncCoordinator)
+                .environment(photosMonitor)
                 .environment(\.encryptionService, encryptionService)
                 .environment(\.thumbnailService, thumbnailService)
         }

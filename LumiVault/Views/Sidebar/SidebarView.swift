@@ -17,7 +17,10 @@ struct SidebarView: View {
     @State private var exportDestination: URL?
     @State private var showingExportSheet = false
     @Environment(SyncCoordinator.self) private var syncCoordinator
+    @Environment(PhotosLibraryMonitor.self) private var photosMonitor
     @Environment(\.thumbnailService) private var thumbnailService
+    @State private var albumToResync: AlbumRecord?
+    @State private var resyncDelta: AlbumDelta?
 
     private var filteredAlbums: [AlbumRecord] {
         if searchText.isEmpty { return albums }
@@ -64,7 +67,11 @@ struct SidebarView: View {
                         Section(year) {
                             ForEach(sortedAlbums(for: year), id: \.persistentModelID) { album in
                                 NavigationLink(value: album) {
-                                    AlbumRow(album: album)
+                                    AlbumRow(
+                                        album: album,
+                                        hasPendingSync: photosMonitor.deltas[album.persistentModelID]?.isEmpty == false,
+                                        onBadgeTap: { openResync(for: album) }
+                                    )
                                 }
                                 .accessibilityIdentifier("sidebar.album.\(album.name)")
                                 .contextMenu {
@@ -78,6 +85,13 @@ struct SidebarView: View {
                                         showingIntegritySheet = true
                                     } label: {
                                         Label("Verify & Repair", systemImage: "checkmark.shield")
+                                    }
+                                    if album.photosAlbumLocalIdentifier != nil {
+                                        Button {
+                                            checkAndOpenResync(for: album)
+                                        } label: {
+                                            Label("Check for Updates", systemImage: "arrow.triangle.2.circlepath")
+                                        }
                                     }
                                     Divider()
                                     Button(role: .destructive) {
@@ -125,6 +139,28 @@ struct SidebarView: View {
                 albumToExport = nil
                 exportDestination = nil
             }
+        }
+        .sheet(item: $albumToResync) { album in
+            if let delta = resyncDelta {
+                AlbumResyncSheet(album: album, delta: delta)
+            }
+        }
+        .onChange(of: albumToResync) { _, new in
+            if new == nil { resyncDelta = nil }
+        }
+    }
+
+    private func openResync(for album: AlbumRecord) {
+        guard let delta = photosMonitor.deltas[album.persistentModelID] else { return }
+        resyncDelta = delta
+        albumToResync = album
+    }
+
+    private func checkAndOpenResync(for album: AlbumRecord) {
+        Task {
+            let delta = await photosMonitor.recheck(album: album)
+            resyncDelta = delta
+            albumToResync = album
         }
     }
 
@@ -226,15 +262,30 @@ struct SidebarView: View {
 
 private struct AlbumRow: View {
     let album: AlbumRecord
+    var hasPendingSync: Bool = false
+    var onBadgeTap: () -> Void = {}
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(album.name)
-                .font(Constants.Design.monoBody)
-                .lineLimit(1)
-            Text("\(album.dateLabel) — \(album.images.count) photos")
-                .font(Constants.Design.monoCaption)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(album.name)
+                    .font(Constants.Design.monoBody)
+                    .lineLimit(1)
+                Text("\(album.dateLabel) — \(album.images.count) photos")
+                    .font(Constants.Design.monoCaption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            if hasPendingSync {
+                Button(action: onBadgeTap) {
+                    Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, .yellow)
+                        .imageScale(.medium)
+                }
+                .buttonStyle(.plain)
+                .help("Photos album has updates — click to review")
+            }
         }
         .padding(.vertical, 2)
     }

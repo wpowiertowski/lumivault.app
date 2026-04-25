@@ -18,6 +18,7 @@ struct PipelineItem: Sendable {
     let importDate: Date
     let fileURL: URL
     let originalFilename: String
+    let phAssetLocalIdentifier: String?
 
     // Phase outputs
     var convertedURL: URL?

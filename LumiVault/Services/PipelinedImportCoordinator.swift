@@ -45,13 +45,49 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         modelContext: ModelContext,
         progress: PhotosImportProgress
     ) async throws {
-        let cancelFlag = OSAllocatedUnfairLock(initialState: false)
+        let staging = try makeStagingDirectory()
+        defer { try? FileManager.default.removeItem(at: staging) }
 
-        // Staging directory
+        let healthCallback: @Sendable (PipelineHealth) -> Void = { health in
+            Task { @MainActor in progress.health = health }
+        }
+        let assetStream = try await photosService.importAlbumStreaming(
+            albumId: photosAlbumId,
+            to: staging,
+            callbacks: PhotosImportCallbacks(health: healthCallback)
+        ) { current, total in
+            Task { @MainActor in
+                progress.currentFile = current
+                progress.totalFiles = total
+            }
+        }
+
+        try await runImportPipeline(
+            assetStream: assetStream,
+            staging: staging,
+            photosAlbumId: photosAlbumId,
+            settings: settings,
+            modelContext: modelContext,
+            progress: progress
+        )
+    }
+
+    private func makeStagingDirectory() throws -> URL {
         let staging = FileManager.default.temporaryDirectory
             .appendingPathComponent("lumivault-import-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: staging) }
+        return staging
+    }
+
+    private func runImportPipeline(
+        assetStream: AsyncStream<ImportResult>,
+        staging: URL,
+        photosAlbumId: String,
+        settings: ImportSettings,
+        modelContext: ModelContext,
+        progress: PhotosImportProgress
+    ) async throws {
+        let cancelFlag = OSAllocatedUnfairLock(initialState: false)
 
         // Determine active phases
         let needsConversion = settings.imageFormat != .original || settings.maxDimension != .original
@@ -126,23 +162,6 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             conversionCh, hashingCh, encryptionCh, par2Ch, copyCh, uploadCh, catalogCh
         ]
 
-        // 1. Import from Photos — stream assets directly into the pipeline
-        let healthCallback: @Sendable (PipelineHealth) -> Void = { health in
-            Task { @MainActor in
-                progress.health = health
-            }
-        }
-        let assetStream = try await photosService.importAlbumStreaming(
-            albumId: photosAlbumId,
-            to: staging,
-            callbacks: PhotosImportCallbacks(health: healthCallback)
-        ) { current, total in
-            Task { @MainActor in
-                progress.currentFile = current
-                progress.totalFiles = total
-            }
-        }
-
         // Shared lookup from sha256 → live ImageRecord. Populated during hashing,
         // used by all downstream stages instead of PersistentIdentifier lookups
         // (which fail for unsaved/temporary records). All access is on @MainActor.
@@ -160,7 +179,8 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                         albumName: settings.albumName,
                         importDate: .now,
                         fileURL: asset.fileURL,
-                        originalFilename: asset.originalFilename
+                        originalFilename: asset.originalFilename,
+                        phAssetLocalIdentifier: asset.phAssetLocalIdentifier
                     )
                     await firstChannel.send(item)
                 case .failure(_, let error):
@@ -231,6 +251,10 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
                     // Check our own batch first (pending inserts may not appear in fetch)
                     if let batchRecord = recordsBySHA[hash] {
+                        if batchRecord.phAssetLocalIdentifier == nil,
+                           let id = item.phAssetLocalIdentifier {
+                            batchRecord.phAssetLocalIdentifier = id
+                        }
                         mutableItem.isDuplicate = true
                         mutableItem.snapshot = ImageRecordSnapshot(
                             sha256: hash,
@@ -246,6 +270,10 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                         let existing = try modelContext.fetch(descriptor)
 
                         if let existingRecord = existing.first {
+                            if existingRecord.phAssetLocalIdentifier == nil,
+                               let id = item.phAssetLocalIdentifier {
+                                existingRecord.phAssetLocalIdentifier = id
+                            }
                             mutableItem.isDuplicate = true
                             recordsBySHA[hash] = existingRecord
                             mutableItem.snapshot = ImageRecordSnapshot(
@@ -259,7 +287,8 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                             let record = ImageRecord(
                                 sha256: hash,
                                 filename: item.activeFilename,
-                                sizeBytes: size
+                                sizeBytes: size,
+                                phAssetLocalIdentifier: item.phAssetLocalIdentifier
                             )
                             try? await self.thumbnailService.generateThumbnail(for: fileToHash, sha256: hash)
                             record.thumbnailState = .generated
@@ -273,7 +302,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                                     let candidates = candidatesLock.withLock { $0 }
                                     for candidate in candidates {
                                         let distance = PerceptualHash.hammingDistance(pHash, candidate.hash)
-                                        if distance < Constants.Dedup.nearDuplicateThreshold {
+                                        if distance < settings.nearDuplicateThreshold {
                                             let match = NearDuplicateMatch(
                                                 newFilename: originalFilename,
                                                 newSha256: hash,
@@ -646,10 +675,15 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                     name: settings.albumName,
                     year: settings.year,
                     month: settings.month,
-                    day: settings.day
+                    day: settings.day,
+                    photosAlbumLocalIdentifier: photosAlbumId
                 )
                 modelContext.insert(albumRecord)
                 isNewAlbum = true
+            }
+            // Backfill identifier on legacy albums on re-import.
+            if albumRecord.photosAlbumLocalIdentifier == nil {
+                albumRecord.photosAlbumLocalIdentifier = photosAlbumId
             }
 
             var encryptedSizes: [String: Int64] = [:]
@@ -750,6 +784,106 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
         if Task.isCancelled && catalogItemCount == 0 {
             throw CancellationError()
+        }
+    }
+
+    /// Apply a precomputed Photos delta to an album: remove catalog images
+    /// whose source PHAssets are gone, then import the new PHAssets.
+    ///
+    /// `mountedVolumes` and `b2Credentials` are required only for removals;
+    /// pass empty / nil if the delta has no removals or you don't want to
+    /// touch external storage for them.
+    func resyncAlbum(
+        albumRecord: AlbumRecord,
+        delta: AlbumDelta,
+        settings: ImportSettings,
+        modelContext: ModelContext,
+        progress: PhotosImportProgress,
+        mountedVolumes: [(volumeID: String, mountURL: URL)] = [],
+        b2Credentials: B2Credentials? = nil
+    ) async throws {
+        // Inherit album coordinates so the catalog sink updates the existing
+        // AlbumRecord rather than creating a new one.
+        var albumSettings = settings
+        albumSettings.albumName = albumRecord.name
+        albumSettings.year = albumRecord.year
+        albumSettings.month = albumRecord.month
+        albumSettings.day = albumRecord.day
+
+        // 1. Removals (best-effort — collect errors, continue to additions).
+        if !delta.removed.isEmpty {
+            let albumPath = "\(albumRecord.year)/\(albumRecord.month)/\(albumRecord.day)/\(albumRecord.name)"
+            let inputs = delta.removed.map { image in
+                DeletionService.ImageDeletionInput(
+                    sha256: image.sha256,
+                    filename: image.filename,
+                    par2Filename: image.par2Filename,
+                    b2FileId: image.b2FileId,
+                    storageLocations: image.storageLocations,
+                    albumPath: albumPath
+                )
+            }
+
+            let delService = DeletionService()
+            let delProgress = DeletionProgress()
+            let result = await delService.deleteImageFiles(
+                images: inputs,
+                mountedVolumes: mountedVolumes,
+                b2Credentials: b2Credentials,
+                progress: delProgress,
+                entireAlbum: false
+            )
+
+            for err in result.errors {
+                progress.errors.append(err)
+            }
+
+            // Catalog + SwiftData cleanup
+            for image in delta.removed {
+                await catalogService.removeImage(
+                    sha256: image.sha256,
+                    fromAlbum: albumRecord.name,
+                    year: albumRecord.year,
+                    month: albumRecord.month,
+                    day: albumRecord.day
+                )
+                await thumbnailService.removeThumbnails(for: image.sha256)
+                modelContext.delete(image)
+            }
+            try? modelContext.save()
+        }
+
+        // 2. Additions through the standard pipeline.
+        if !delta.added.isEmpty {
+            let staging = try makeStagingDirectory()
+            defer { try? FileManager.default.removeItem(at: staging) }
+
+            let healthCallback: @Sendable (PipelineHealth) -> Void = { health in
+                Task { @MainActor in progress.health = health }
+            }
+            let assetStream = try await photosService.importAssetsStreaming(
+                assets: delta.added,
+                to: staging,
+                callbacks: PhotosImportCallbacks(health: healthCallback)
+            ) { current, total in
+                Task { @MainActor in
+                    progress.currentFile = current
+                    progress.totalFiles = total
+                }
+            }
+
+            try await runImportPipeline(
+                assetStream: assetStream,
+                staging: staging,
+                photosAlbumId: albumRecord.photosAlbumLocalIdentifier ?? "",
+                settings: albumSettings,
+                modelContext: modelContext,
+                progress: progress
+            )
+        } else {
+            // No additions — make sure the catalog reflects any deletions we made.
+            try? await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
+            await MainActor.run { progress.phase = .complete }
         }
     }
 

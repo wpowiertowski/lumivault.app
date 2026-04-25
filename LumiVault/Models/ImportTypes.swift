@@ -29,6 +29,7 @@ struct ImportSettings: Sendable {
     var day: String
     var generatePAR2: Bool = true
     var detectNearDuplicates: Bool = true
+    var nearDuplicateThreshold: Int = Constants.Dedup.nearDuplicateThreshold
     var encryptFiles: Bool = false
     var uploadToB2: Bool = false
     var targetVolumeIDs: [String] = []
