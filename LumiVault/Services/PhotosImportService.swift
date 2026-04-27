@@ -165,6 +165,10 @@ actor PhotosImportService {
     /// stall on attempt 0 that resolves on attempt 1 produces a sub-second
     /// flicker of the message.
     static let slowMessageDelay: TimeInterval = 5
+    /// Once the slow message is shown, keep it visible for at least this long
+    /// even if the underlying stall resolves immediately. Prevents the message
+    /// from appearing and disappearing within the same animation frame.
+    static let slowMessageMinDisplay: TimeInterval = 2
 
     private func writeResourceWithRetry(
         _ resource: PHAssetResource,
@@ -395,6 +399,17 @@ actor PhotosImportService {
         let total = assetRefs.count
         try FileManager.default.createDirectory(at: importDirectory, withIntermediateDirectories: true)
 
+        // Gate the health callback so a .slow message stays visible for at
+        // least `slowMessageMinDisplay` seconds. The gate persists for the
+        // duration of the import, so it spans all assets in the album.
+        let gate = HealthGate(
+            minDisplay: Self.slowMessageMinDisplay,
+            upstream: callbacks.health
+        )
+        let gatedCallbacks = PhotosImportCallbacks(health: { @Sendable health in
+            gate.report(health)
+        })
+
         let (stream, continuation) = AsyncStream.makeStream(of: ImportResult.self)
 
         let importDir = importDirectory
@@ -411,7 +426,7 @@ actor PhotosImportService {
                     let result = try await self.importAsset(
                         asset,
                         to: importDir,
-                        callbacks: callbacks
+                        callbacks: gatedCallbacks
                     )
                     consecutiveXPCFailures = 0
                     continuation.yield(.success(result))
@@ -454,7 +469,7 @@ actor PhotosImportService {
                 }
                 progress(index + 1, total)
             }
-            callbacks.health(.normal)
+            gatedCallbacks.health(.normal)
             continuation.finish()
         }
 
@@ -561,6 +576,78 @@ nonisolated private final class WriteState: @unchecked Sendable {
             guard !state.resumed else { return false }
             state.resumed = true
             return true
+        }
+    }
+}
+
+// MARK: - HealthGate
+
+/// Wraps a `PipelineHealth` callback so a `.slow` event remains visible to the
+/// user for at least `minDisplay` seconds. A `.normal` arriving inside that
+/// window is deferred via a sleeping Task; a subsequent `.slow` cancels the
+/// pending clear and resets the timer.
+nonisolated private final class HealthGate: @unchecked Sendable {
+    private let upstream: @Sendable (PipelineHealth) -> Void
+    private let minDisplay: TimeInterval
+    private let lock = OSAllocatedUnfairLock<State>(initialState: State())
+
+    private struct State {
+        var lastSlowAt: Date?
+        var pendingClear: Task<Void, Never>?
+    }
+
+    init(minDisplay: TimeInterval, upstream: @escaping @Sendable (PipelineHealth) -> Void) {
+        self.minDisplay = minDisplay
+        self.upstream = upstream
+    }
+
+    func report(_ health: PipelineHealth) {
+        switch health {
+        case .slow:
+            let pending: Task<Void, Never>? = lock.withLock { state in
+                let p = state.pendingClear
+                state.pendingClear = nil
+                state.lastSlowAt = Date()
+                return p
+            }
+            pending?.cancel()
+            upstream(health)
+
+        case .normal:
+            // Decide under the lock so a concurrent .slow can't slip between
+            // the elapsed check and scheduling the deferred clear.
+            var emitNow = false
+            lock.withLock { state in
+                guard let lastSlow = state.lastSlowAt else {
+                    emitNow = true
+                    return
+                }
+                let elapsed = Date().timeIntervalSince(lastSlow)
+                if elapsed >= minDisplay {
+                    state.pendingClear?.cancel()
+                    state.pendingClear = nil
+                    state.lastSlowAt = nil
+                    emitNow = true
+                    return
+                }
+                if state.pendingClear != nil { return }
+                let delay = minDisplay - elapsed
+                // Strong self: the sleeping Task keeps the gate alive long
+                // enough to deliver the clear even if the producer task has
+                // already exited. The cycle breaks when the closure releases.
+                state.pendingClear = Task {
+                    try? await Task.sleep(for: .seconds(delay))
+                    if Task.isCancelled { return }
+                    let shouldEmit: Bool = self.lock.withLock { state in
+                        guard state.pendingClear != nil else { return false }
+                        state.pendingClear = nil
+                        state.lastSlowAt = nil
+                        return true
+                    }
+                    if shouldEmit { self.upstream(.normal) }
+                }
+            }
+            if emitNow { upstream(.normal) }
         }
     }
 }
