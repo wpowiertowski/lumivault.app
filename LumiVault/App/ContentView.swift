@@ -14,97 +14,105 @@ struct ContentView: View {
     @State private var showingVolumes = false
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(selectedAlbum: $selectedAlbum)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
-                .accessibilityIdentifier("nav.sidebar")
-        } content: {
-            if let album = selectedAlbum {
-                PhotoGridView(album: album, selectedImage: $selectedImage)
-            } else if albums.isEmpty {
-                WelcomeView(sidebarVisible: columnVisibility == .all)
-            } else {
-                EmptyStateView(message: "Select an album")
+        GeometryReader { proxy in
+            let sidebarIdeal: CGFloat = 240
+            let halfWidth = max(200, (proxy.size.width - sidebarIdeal) / 2)
+
+            NavigationSplitView(columnVisibility: $columnVisibility) {
+                SidebarView(selectedAlbum: $selectedAlbum)
+                    .navigationSplitViewColumnWidth(min: 200, ideal: sidebarIdeal, max: 320)
+                    .accessibilityIdentifier("nav.sidebar")
+            } content: {
+                Group {
+                    if let album = selectedAlbum {
+                        PhotoGridView(album: album, selectedImage: $selectedImage)
+                    } else if albums.isEmpty {
+                        WelcomeView(sidebarVisible: columnVisibility == .all)
+                    } else {
+                        EmptyStateView(message: "Select an album")
+                    }
+                }
+                .navigationSplitViewColumnWidth(min: 200, ideal: halfWidth)
+            } detail: {
+                if let image = selectedImage {
+                    PhotoDetailView(image: image)
+                } else {
+                    EmptyStateView(message: "Select a photo to view details")
+                }
             }
-        } detail: {
-            if let image = selectedImage {
-                PhotoDetailView(image: image)
-            } else {
-                EmptyStateView(message: "Select a photo to view details")
+            .navigationSplitViewStyle(.balanced)
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        showingPhotosImport = true
+                    } label: {
+                        Label("Import from Photos", systemImage: "photo.badge.arrow.down")
+                    }
+                    .accessibilityIdentifier("toolbar.importPhotos")
+                }
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        showingNearDuplicates = true
+                    } label: {
+                        Label("Near-Duplicates", systemImage: "square.on.square.badge.person.crop")
+                    }
+                    .accessibilityIdentifier("toolbar.nearDuplicates")
+                }
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        showingVolumes.toggle()
+                    } label: {
+                        Label("Volumes", systemImage: "externaldrive")
+                    }
+                    .accessibilityIdentifier("sidebar.volumeStatus")
+                    .popover(isPresented: $showingVolumes, arrowEdge: .bottom) {
+                        VolumeListView()
+                            .frame(width: 280, height: 300)
+                    }
+                }
+            }
+            .sheet(isPresented: $showingPhotosImport) {
+                PhotosImportSheet()
+            }
+            .sheet(isPresented: $showingNearDuplicates) {
+                NearDuplicatesView()
+                    .frame(width: 700, height: 500)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .showPhotosImport)) { _ in
+                showingPhotosImport = true
+            }
+            .onChange(of: selectedAlbum) {
+                selectedImage = nil
+            }
+            .onChange(of: syncCoordinator.catalogIntegrity) {
+                switch syncCoordinator.catalogIntegrity {
+                case .corrupt:
+                    showingIntegrityAlert = true
+                case .repaired:
+                    showingRepairNotice = true
+                default:
+                    break
+                }
+            }
+            .alert("Catalog Integrity Warning", isPresented: $showingIntegrityAlert) {
+                Button("Restore from Backup...") {
+                    // Navigate to welcome/restore flow
+                }
+                Button("Continue Anyway", role: .cancel) { }
+            } message: {
+                if case .corrupt(let expected, let actual) = syncCoordinator.catalogIntegrity {
+                    Text("The catalog file is corrupted and PAR2 repair failed.\n\nExpected: \(String(expected.prefix(16)))...\nActual: \(String(actual.prefix(16)))...\n\nRestore from an external volume or B2 backup.")
+                } else {
+                    Text("The catalog file may be corrupted.")
+                }
+            }
+            .alert("Catalog Repaired", isPresented: $showingRepairNotice) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Corruption was detected in catalog.json and automatically repaired using PAR2 error correction data.")
             }
         }
         .frame(minWidth: 820, minHeight: 500)
-        .navigationSplitViewStyle(.prominentDetail)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    showingPhotosImport = true
-                } label: {
-                    Label("Import from Photos", systemImage: "photo.badge.arrow.down")
-                }
-                .accessibilityIdentifier("toolbar.importPhotos")
-            }
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    showingNearDuplicates = true
-                } label: {
-                    Label("Near-Duplicates", systemImage: "square.on.square.badge.person.crop")
-                }
-                .accessibilityIdentifier("toolbar.nearDuplicates")
-            }
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    showingVolumes.toggle()
-                } label: {
-                    Label("Volumes", systemImage: "externaldrive")
-                }
-                .accessibilityIdentifier("sidebar.volumeStatus")
-                .popover(isPresented: $showingVolumes, arrowEdge: .bottom) {
-                    VolumeListView()
-                        .frame(width: 280, height: 300)
-                }
-            }
-        }
-        .sheet(isPresented: $showingPhotosImport) {
-            PhotosImportSheet()
-        }
-        .sheet(isPresented: $showingNearDuplicates) {
-            NearDuplicatesView()
-                .frame(width: 700, height: 500)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .showPhotosImport)) { _ in
-            showingPhotosImport = true
-        }
-        .onChange(of: selectedAlbum) {
-            selectedImage = nil
-        }
-        .onChange(of: syncCoordinator.catalogIntegrity) {
-            switch syncCoordinator.catalogIntegrity {
-            case .corrupt:
-                showingIntegrityAlert = true
-            case .repaired:
-                showingRepairNotice = true
-            default:
-                break
-            }
-        }
-        .alert("Catalog Integrity Warning", isPresented: $showingIntegrityAlert) {
-            Button("Restore from Backup...") {
-                // Navigate to welcome/restore flow
-            }
-            Button("Continue Anyway", role: .cancel) { }
-        } message: {
-            if case .corrupt(let expected, let actual) = syncCoordinator.catalogIntegrity {
-                Text("The catalog file is corrupted and PAR2 repair failed.\n\nExpected: \(String(expected.prefix(16)))...\nActual: \(String(actual.prefix(16)))...\n\nRestore from an external volume or B2 backup.")
-            } else {
-                Text("The catalog file may be corrupted.")
-            }
-        }
-        .alert("Catalog Repaired", isPresented: $showingRepairNotice) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("Corruption was detected in catalog.json and automatically repaired using PAR2 error correction data.")
-        }
     }
 }
 
