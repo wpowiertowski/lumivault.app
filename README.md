@@ -117,7 +117,7 @@ LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool
 
 ## Testing
 
-105 unit tests across 19 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
+112 unit tests across 22 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
 
 ```bash
 swift test                                    # Run all unit tests
@@ -138,16 +138,19 @@ xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultUITests -destinati
 | SwiftDataModelTests | 5 | Relationships, defaults, Codable support types |
 | ReconciliationDiffTests | 5 | B2 diff: matched, dangling, orphan, PAR2 skip, mixed scenario |
 | VolumeScanTests | 4 | Dangling location, orphan detection, file exists, unmounted skip |
-| DeletionServiceTests | 4 | Volume file removal, PAR2 companion, unmounted skip, bulk delete |
-| EncryptionServiceTests | 14 | Key derivation, encrypt/decrypt round-trip (data + file), wrong key/AD rejection, nonce uniqueness |
+| DeletionServiceTests | 7 | Volume file removal, PAR2 companion, unmounted skip, bulk delete, edge cases |
+| EncryptionServiceTests | 17 | Key derivation, encrypt/decrypt round-trip (data + file), wrong key/AD rejection, nonce uniqueness, static method interop |
 | B2ServiceHelperTests | 7 | SHA-1 known vectors, HTTP response validation (success + error codes) |
-| ExportProgressTests | 5 | Fraction calculation: empty, mid-phase, complete, PAR2 sub-progress, single phase |
+| PhotosImportProgressTests | 6 | Pipelined import progress: empty, mid-phase, complete, PAR2 sub-progress, multi-album, dropped-files counter |
 | CatalogBackupServiceTests | 4 | Volume backup/restore round-trip, error reporting, missing catalog |
 | ImageConversionTests | 5 | JPEG conversion, dimension scaling, below-max preservation, no-op pass-through |
 | PerceptualHashComputeTests | 3 | dHash compute returns 8 bytes, deterministic output, non-image rejection |
 | EncryptPAR2IntegrationTests | 2 | Encrypt→PAR2→corrupt→repair→decrypt round-trip, uncorrupted verification |
 | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture verification |
 | EncryptionEdgeCaseTests | 4 | Empty data, size = plaintext+16, 1MB large data, file size check |
+| ImportSettingsTests | 1 | Default near-duplicate threshold value matches `Constants.Dedup` |
+| PhotosLibraryMonitorDiffTests | 4 | Album diff: additions, removals, mixed delta, no-change pass-through |
+| PhotosSyncSchemaTests | 2 | Lightweight migration smoke tests for `phAssetLocalIdentifier` / `photosAlbumLocalIdentifier` |
 | **LumiVaultUITests** | **12** | **XCUIAutomation (local only): welcome screen, navigation, settings tabs, import flow, deletion context menu** |
 
 ## Requirements

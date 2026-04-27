@@ -81,6 +81,20 @@
         <strong>Tip:</strong> Originals in your Photos library are never modified. LumiVault imports the current edited state and works with copies.
     </div>
 
+    <h2>Keeping Albums in Sync</h2>
+    <p>Once an album is imported, LumiVault tracks it against your Photos library and detects when it changes (photos added, photos removed). When a tracked album has pending changes:</p>
+    <ul>
+        <li>A <strong>badge</strong> appears next to the album in the sidebar.</li>
+        <li>Click the badge (or right-click the album and choose <strong>Check for Updates</strong>) to open the resync sheet.</li>
+        <li>The sheet lists additions and removals separately. You can opt out of either side before applying.</li>
+        <li>Additions run through the same import pipeline (hash, dedup, PAR2, copy, B2). Removals run through the deletion service to clean up volumes, B2, thumbnails, and the catalog.</li>
+    </ul>
+    <p>To trigger a manual recheck of every tracked album, choose <strong>File &gt; Check Photos for Updates</strong>.</p>
+
+    <div class="note">
+        <strong>Legacy albums:</strong> Albums imported before automated sync was added do not have a Photos library identifier stored. They cannot detect deletions until you re-import them once. The resync sheet flags this clearly when it applies.
+    </div>
+
     <h2>Photos Library Access</h2>
     <p>LumiVault requires Photos library access. On first use, macOS will prompt you to grant permission. If denied, go to <strong>System Settings &gt; Privacy &amp; Security &gt; Photos</strong> to enable it.</p>
 </body>

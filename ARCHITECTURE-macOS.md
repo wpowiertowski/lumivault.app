@@ -229,18 +229,19 @@ Original file
 **Cache layout**:
 
 ```
-~/Library/Caches/com.lumivault/thumbnails/
+<Application Support>/Thumbnails/
   ├─ 256/
   │   └─ {sha256-prefix-2}/{sha256}.heic
   └─ 64/
       └─ {sha256-prefix-2}/{sha256}.heic
 ```
 
+- Stored alongside the SwiftData store in the sandbox's `Application Support` directory so thumbnails survive macOS cache sweeps under disk pressure.
 - 2-character prefix subdirectories prevent filesystem slowdown on large collections.
 - SHA-256 keying means identical images share one thumbnail regardless of filename.
 - `NSCache` + in-memory LRU (128 MB cap) for display-ready `CGImage` instances.
 - Background `TaskGroup` processes imports in parallel (concurrency = `ProcessInfo.activeProcessorCount`).
-- Cache eviction: LRU by access date, triggered when cache exceeds 2 GB.
+- On a cache miss for a thumbnail we have no on-disk copy of, `ThumbnailService` regenerates from the original on any mounted source volume (decrypting in-actor when needed) and writes it back to disk.
 
 ### 5.3 Apple Photos Import
 
@@ -389,8 +390,12 @@ bucket name). Settings UI includes a "Test Connection" button that calls
      → Log dedup event (saved N bytes)
 4. If no exact match:
      → Compute perceptual hash (dHash, 64-bit)
-     → Query: Hamming distance < 5 from any existing perceptualHash
-     → If near-match: prompt user — "Similar image found, keep both?"
+     → Query: Hamming distance ≤ threshold from any existing perceptualHash
+       (threshold is user-configurable in Settings > Import Defaults,
+        range 2..10, default in Constants.Dedup.nearDuplicateThreshold)
+     → If near-match: surface in NearDuplicatesView for post-import review
+       (per-card delete via DeletionService, or session-level group dismiss
+        for false positives)
 5. Proceed with PAR2 generation + copy to target volume(s)
 ```
 
@@ -576,6 +581,7 @@ LumiVault/
 │   ├── CatalogService.swift             // Load/save/merge/remove catalog.json
 │   ├── CatalogBackupService.swift       // Distribute catalog to volumes + B2, restore
 │   ├── PhotosImportService.swift        // PhotoKit album enumeration + export
+│   ├── PhotosLibraryMonitor.swift       // PHPhotoLibraryChangeObserver, per-album diffs, deltas[] for sidebar badges
 │   ├── B2Service.swift                  // B2 REST API (upload/download/list/delete)
 │   ├── PipelinedImportCoordinator.swift  // Pipelined async import
 │   ├── PipelineItem.swift               // Sendable item + ImageRecordSnapshot
@@ -591,9 +597,10 @@ LumiVault/
 │
 ├── Views/
 │   ├── Sidebar/
-│   │   ├── SidebarView.swift            // Year-grouped album list (descending) + context menus (verify, delete)
+│   │   ├── SidebarView.swift            // Year-grouped album list (descending) + context menus (verify, delete, check for updates) + pending-sync badge
 │   │   ├── AlbumDeletionSheet.swift     // Deletion progress sheet
 │   │   ├── AlbumExportSheet.swift       // Album export to folder
+│   │   ├── AlbumResyncSheet.swift       // Apply Photos additions/removals to a tracked album (per-side opt-out)
 │   │   └── VolumeListView.swift         // Connected volumes status
 │   ├── Grid/
 │   │   ├── PhotoGridView.swift          // LazyVGrid with context menus (verify, delete)
@@ -778,7 +785,6 @@ remains fully functional alongside the macOS app.
 - AI-based tagging or face detection
 - Photo editing or RAW development
 - Video file support
-- Perceptual hash near-duplicate threshold tuning (fixed at Hamming distance < 5; adjustable threshold deferred)
 
 ---
 
@@ -787,6 +793,6 @@ remains fully functional alongside the macOS app.
 | # | Question | Status |
 | --- | --- | --- |
 | 1 | ~~Should the app also manage B2 uploads natively?~~ | Resolved: Yes, via URLSession + B2 REST API (upload, download, list, delete) |
-| 2 | ~~Perceptual hash threshold for "near duplicate"~~ | Deferred: moved to future development; dHash infrastructure remains but threshold tuning is not a v1 priority |
+| 2 | ~~Perceptual hash threshold for "near duplicate"~~ | Resolved: user-configurable Stepper (Hamming distance, range 2..10) in Settings > Import Defaults; default in `Constants.Dedup.nearDuplicateThreshold` |
 | 3 | ~~iCloud container type~~ | Resolved: App container (hidden) — catalog syncs via the app's iCloud container, not user-visible Documents |
 | 4 | ~~Redundancy format~~ | Resolved: Standard PAR2 2.0 format with GF(2^16) Vandermonde matrix, fully interoperable with par2cmdline |

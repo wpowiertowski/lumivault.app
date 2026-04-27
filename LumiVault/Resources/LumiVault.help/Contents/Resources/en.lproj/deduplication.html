@@ -50,19 +50,27 @@
     <ol>
         <li>LumiVault computes a perceptual hash (pHash) for each image &mdash; a compact fingerprint of the visual content.</li>
         <li>Perceptual hashes are compared using Hamming distance (number of differing bits).</li>
-        <li>Pairs with a Hamming distance below the threshold are flagged as near-duplicates.</li>
+        <li>Pairs with a Hamming distance at or below the threshold are flagged as near-duplicates.</li>
     </ol>
 
-    <h3>Reviewing Near-Duplicates</h3>
-    <p>After import, the completion screen shows near-duplicate pairs with:</p>
+    <h3>Adjusting the Threshold</h3>
+    <p>The Hamming distance threshold is configurable in <strong>Settings &gt; Import Defaults &gt; Near-duplicate threshold</strong> (range 2&ndash;10 bits).</p>
     <ul>
-        <li>Side-by-side thumbnail previews.</li>
-        <li>Hamming distance score (lower = more similar).</li>
+        <li><strong>Lower values (2&ndash;3)</strong> &mdash; stricter matching. Only flags very close visual matches. Fewer false positives but may miss heavier crops or edits.</li>
+        <li><strong>Higher values (7&ndash;10)</strong> &mdash; more aggressive flagging. Catches more variants (different crops, re-exports, color tweaks) at the cost of more false positives.</li>
     </ul>
-    <p>You can also review near-duplicates later via the <strong>Near-Duplicates</strong> toolbar button.</p>
+
+    <h3>Reviewing Near-Duplicates</h3>
+    <p>After import, the completion screen shows near-duplicate pairs with side-by-side thumbnail previews and a Hamming distance score (lower = more similar).</p>
+    <p>You can also review near-duplicates at any time via the <strong>Near-Duplicates</strong> toolbar button. From this view you can:</p>
+    <ul>
+        <li><strong>Delete a member</strong> &mdash; hover any image card and click the trash button. Deletion runs through the full pipeline (volumes + B2 + thumbnail + catalog) just like deleting from the photo grid.</li>
+        <li><strong>Dismiss a group</strong> &mdash; mark a group as a false positive for the rest of the session. Re-scanning brings it back.</li>
+    </ul>
+    <p>When a group has fewer than two remaining members, it disappears from the list automatically.</p>
 
     <div class="note">
-        <strong>Note:</strong> Near-duplicate detection is informational. LumiVault flags potential duplicates but does not automatically skip them. You decide which to keep.
+        <strong>Note:</strong> Near-duplicate detection is informational. LumiVault flags potential duplicates but does not automatically skip or delete them &mdash; you decide which to keep.
     </div>
 </body>
 </html>
