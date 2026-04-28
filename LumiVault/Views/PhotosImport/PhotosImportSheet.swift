@@ -19,6 +19,8 @@ struct PhotosImportSheet: View {
     @State private var currentImportAlbumIndex: Int = 0
     @State private var totalImportAlbums: Int = 0
     @State private var currentImportAlbumName: String = ""
+    @State private var showGamesOffer = false
+    @State private var showingGames = false
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @Environment(\.encryptionService) private var encryptionService
     @Query private var volumes: [VolumeRecord]
@@ -65,7 +67,13 @@ struct PhotosImportSheet: View {
                     case .configure:
                         configureStep
                     case .importing:
-                        importingStep
+                        if showingGames {
+                            GameStepView(progress: progress) {
+                                showingGames = false
+                            }
+                        } else {
+                            importingStep
+                        }
                     case .complete:
                         completeStep
                     }
@@ -117,6 +125,16 @@ struct PhotosImportSheet: View {
         .frame(width: 600, height: 500)
         .task {
             catalogAlbumCounts = await syncCoordinator.catalogAlbumCounts()
+        }
+        .task(id: step) {
+            // Watchdog: if the import has been running for 2 minutes and progress is
+            // still under 10%, surface the easter-egg games offer.
+            guard step == .importing else { return }
+            try? await Task.sleep(for: .seconds(120))
+            guard !Task.isCancelled, step == .importing else { return }
+            if progress.fraction < 0.10 && !showingGames {
+                withAnimation { showGamesOffer = true }
+            }
         }
     }
 
@@ -171,6 +189,10 @@ struct PhotosImportSheet: View {
 
     private var importingStep: some View {
         VStack(spacing: 16) {
+            if showGamesOffer {
+                gamesOfferBanner
+            }
+
             if totalImportAlbums > 1 {
                 Text("Album \(currentImportAlbumIndex) of \(totalImportAlbums): \(currentImportAlbumName)")
                     .font(Constants.Design.monoCaption)
@@ -273,6 +295,36 @@ struct PhotosImportSheet: View {
             }
         }
         .padding()
+    }
+
+    private var gamesOfferBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "gamecontroller.fill")
+                .foregroundStyle(Constants.Design.accentColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("This is going to take a while.")
+                    .font(Constants.Design.monoCaption)
+                Text("Want to play a game while you wait?")
+                    .font(Constants.Design.monoCaption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Play") { showingGames = true }
+                .controlSize(.small)
+                .accessibilityIdentifier("import.games.play")
+            Button {
+                showGamesOffer = false
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Constants.Design.accentColor.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .padding(.horizontal)
     }
 
     private var completeStep: some View {
@@ -422,6 +474,8 @@ struct PhotosImportSheet: View {
 
     private func startImport() {
         guard !selectedAlbumIds.isEmpty else { return }
+        showGamesOffer = false
+        showingGames = false
         step = .importing
         isImporting = true
 
