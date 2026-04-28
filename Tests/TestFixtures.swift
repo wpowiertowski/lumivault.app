@@ -84,14 +84,14 @@ enum TestFixtures {
     }
 
     /// Materializes fixture files AND generates PAR2 companions via RedundancyService.
-    static func materializeVolumeWithPAR2(label: String = "TestVolume") async throws -> URL {
+    static func materializeVolumeWithPAR2(label: String = "TestVolume") throws -> URL {
         let root = try materializeVolume(label: label)
         let redundancy = RedundancyService()
 
         for spec in files {
             let dir = root.appendingPathComponent(spec.albumPath, isDirectory: true)
             let fileURL = dir.appendingPathComponent(spec.name)
-            _ = try await redundancy.generatePAR2(for: fileURL, outputDirectory: dir)
+            _ = try redundancy.generatePAR2(for: fileURL, outputDirectory: dir)
         }
 
         return root
