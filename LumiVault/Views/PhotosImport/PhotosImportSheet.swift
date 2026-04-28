@@ -21,6 +21,7 @@ struct PhotosImportSheet: View {
     @State private var currentImportAlbumName: String = ""
     @State private var showGamesOffer = false
     @State private var showingGames = false
+    @State private var gameProgress = GameProgressMirror()
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @Environment(\.encryptionService) private var encryptionService
     @Query private var volumes: [VolumeRecord]
@@ -68,7 +69,7 @@ struct PhotosImportSheet: View {
                         configureStep
                     case .importing:
                         if showingGames {
-                            GameStepView(progress: progress) {
+                            GameStepView(progress: gameProgress) {
                                 showingGames = false
                             }
                         } else {
@@ -127,13 +128,27 @@ struct PhotosImportSheet: View {
             catalogAlbumCounts = await syncCoordinator.catalogAlbumCounts()
         }
         .task(id: step) {
-            // Watchdog: if the import has been running for 2 minutes and progress is
-            // still under 10%, surface the easter-egg games offer.
+            // Watchdog: if the import has been running for 1 minute and progress is
+            // still under 40%, surface the easter-egg games offer.
             guard step == .importing else { return }
-            try? await Task.sleep(for: .seconds(120))
+            try? await Task.sleep(for: .seconds(60))
             guard !Task.isCancelled, step == .importing else { return }
-            if progress.fraction < 0.10 && !showingGames {
+            if progress.fraction < 0.40 && !showingGames {
                 withAnimation { showGamesOffer = true }
+            }
+        }
+        .task(id: showingGames) {
+            // While a game is on screen, coalesce live progress mutations into a
+            // 30 Hz mirror so SwiftUI re-renders ~30×/sec instead of every mutation.
+            // That gives the MainActor-paced game tick room to fire on schedule.
+            guard showingGames else { return }
+            while !Task.isCancelled {
+                gameProgress.fraction = progress.fraction
+                gameProgress.phaseLabel = progress.phase.rawValue
+                gameProgress.currentFilename = progress.currentFilename
+                gameProgress.totalFiles = progress.totalFiles
+                gameProgress.currentFile = progress.currentFile
+                try? await Task.sleep(for: .milliseconds(33))
             }
         }
     }

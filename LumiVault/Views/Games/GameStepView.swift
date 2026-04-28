@@ -6,8 +6,22 @@ enum RetroGame: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// Coalesced snapshot of `PhotosImportProgress` fields used by the game step.
+/// The import pipeline mutates `PhotosImportProgress` at full speed; while the
+/// games are on screen, a 30 Hz task copies into this mirror so the SwiftUI
+/// view tree re-renders at most ~30×/sec. That leaves MainActor with enough
+/// slack for the game tick task to fire on schedule.
+@Observable
+final class GameProgressMirror {
+    var fraction: Double = 0
+    var phaseLabel: String = ""
+    var currentFilename: String = ""
+    var totalFiles: Int = 0
+    var currentFile: Int = 0
+}
+
 struct GameStepView: View {
-    let progress: PhotosImportProgress
+    let progress: GameProgressMirror
     let onExit: () -> Void
 
     @State private var game: RetroGame = .snake
@@ -24,7 +38,7 @@ struct GameStepView: View {
                         .frame(width: 32, alignment: .trailing)
                 }
                 HStack(spacing: 6) {
-                    Text(progress.phase.rawValue)
+                    Text(progress.phaseLabel)
                         .foregroundStyle(.secondary)
                     if !progress.currentFilename.isEmpty {
                         Text("·")
