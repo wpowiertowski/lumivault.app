@@ -616,21 +616,18 @@ nonisolated private final class HealthGate: @unchecked Sendable {
         case .normal:
             // Decide under the lock so a concurrent .slow can't slip between
             // the elapsed check and scheduling the deferred clear.
-            var emitNow = false
-            lock.withLock { state in
+            let emitNow: Bool = lock.withLock { state in
                 guard let lastSlow = state.lastSlowAt else {
-                    emitNow = true
-                    return
+                    return true
                 }
                 let elapsed = Date().timeIntervalSince(lastSlow)
                 if elapsed >= minDisplay {
                     state.pendingClear?.cancel()
                     state.pendingClear = nil
                     state.lastSlowAt = nil
-                    emitNow = true
-                    return
+                    return true
                 }
-                if state.pendingClear != nil { return }
+                if state.pendingClear != nil { return false }
                 let delay = minDisplay - elapsed
                 // Strong self: the sleeping Task keeps the gate alive long
                 // enough to deliver the clear even if the producer task has
@@ -646,6 +643,7 @@ nonisolated private final class HealthGate: @unchecked Sendable {
                     }
                     if shouldEmit { self.upstream(.normal) }
                 }
+                return false
             }
             if emitNow { upstream(.normal) }
         }
