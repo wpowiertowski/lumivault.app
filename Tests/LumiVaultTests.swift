@@ -321,12 +321,12 @@ struct RedundancyServiceTests {
             let dir = root.appendingPathComponent(spec.albumPath)
             let fileURL = dir.appendingPathComponent(spec.name)
 
-            let par2URL = try await service.generatePAR2(for: fileURL, outputDirectory: dir)
+            let par2URL = try service.generatePAR2(for: fileURL, outputDirectory: dir)
 
             #expect(FileManager.default.fileExists(atPath: par2URL.path))
             #expect(par2URL.lastPathComponent == spec.par2Name)
 
-            let isValid = try await service.verify(par2URL: par2URL, originalFileURL: fileURL)
+            let isValid = try service.verify(par2URL: par2URL, originalFileURL: fileURL)
             #expect(isValid, "PAR2 verification failed for \(spec.name)")
         }
     }
@@ -339,7 +339,7 @@ struct RedundancyServiceTests {
 
         let dir = root.appendingPathComponent(spec.albumPath)
         let fileURL = dir.appendingPathComponent(spec.name)
-        let par2URL = try await service.generatePAR2(for: fileURL, outputDirectory: dir)
+        let par2URL = try service.generatePAR2(for: fileURL, outputDirectory: dir)
         let par2Data = try Data(contentsOf: par2URL)
 
         // PAR2 2.0 magic: "PAR2\0PKT"
@@ -355,7 +355,7 @@ struct RedundancyServiceTests {
 
         let dir = root.appendingPathComponent(spec.albumPath)
         let fileURL = dir.appendingPathComponent(spec.name)
-        let par2URL = try await service.generatePAR2(for: fileURL, outputDirectory: dir)
+        let par2URL = try service.generatePAR2(for: fileURL, outputDirectory: dir)
 
         // Index file should exist
         #expect(FileManager.default.fileExists(atPath: par2URL.path))
@@ -376,12 +376,12 @@ struct RedundancyServiceTests {
 
         let dir = root.appendingPathComponent(spec.albumPath)
         let fileURL = dir.appendingPathComponent(spec.name)
-        let par2URL = try await service.generatePAR2(for: fileURL, outputDirectory: dir)
+        let par2URL = try service.generatePAR2(for: fileURL, outputDirectory: dir)
 
         // Overwrite with different-sized content
         try Data(repeating: 0x22, count: 4000).write(to: fileURL)
 
-        let isValid = try await service.verify(par2URL: par2URL, originalFileURL: fileURL)
+        let isValid = try service.verify(par2URL: par2URL, originalFileURL: fileURL)
         #expect(!isValid)
     }
 
@@ -398,7 +398,7 @@ struct RedundancyServiceTests {
         let badPar2URL = dir.appendingPathComponent(spec.par2Name)
         try Data(repeating: 0x00, count: 50).write(to: badPar2URL)
 
-        let isValid = try await service.verify(par2URL: badPar2URL, originalFileURL: fileURL)
+        let isValid = try service.verify(par2URL: badPar2URL, originalFileURL: fileURL)
         #expect(!isValid)
     }
 
@@ -414,8 +414,8 @@ struct RedundancyServiceTests {
         let fileURL = tmpDir.appendingPathComponent("tiny.bin")
         try Data([0x42]).write(to: fileURL)
 
-        let par2URL = try await service.generatePAR2(for: fileURL, outputDirectory: tmpDir)
-        let isValid = try await service.verify(par2URL: par2URL, originalFileURL: fileURL)
+        let par2URL = try service.generatePAR2(for: fileURL, outputDirectory: tmpDir)
+        let isValid = try service.verify(par2URL: par2URL, originalFileURL: fileURL)
         #expect(isValid)
     }
 
@@ -432,7 +432,7 @@ struct RedundancyServiceTests {
         let fileURL = dir.appendingPathComponent(spec.name)
         let originalData = TestFixtures.content(for: spec)
 
-        let par2URL = try await service.generatePAR2(for: fileURL, outputDirectory: dir)
+        let par2URL = try service.generatePAR2(for: fileURL, outputDirectory: dir)
 
         // Corrupt bytes in the first block
         var corruptedData = originalData
@@ -442,7 +442,7 @@ struct RedundancyServiceTests {
         let corruptedHash = try await hasher.sha256(of: fileURL)
         #expect(corruptedHash != spec.sha256)
 
-        let repairedData = try await service.repair(par2URL: par2URL, corruptedFileURL: fileURL)
+        let repairedData = try service.repair(par2URL: par2URL, corruptedFileURL: fileURL)
         #expect(repairedData != nil)
 
         let repairedURL = dir.appendingPathComponent("repaired.bin")
@@ -465,14 +465,14 @@ struct RedundancyServiceTests {
         let dir = root.appendingPathComponent(spec.albumPath)
         let fileURL = dir.appendingPathComponent(spec.name)
 
-        let par2URL = try await service.generatePAR2(for: fileURL, outputDirectory: dir)
+        let par2URL = try service.generatePAR2(for: fileURL, outputDirectory: dir)
 
         // Corrupt bytes in the last (partial) block
         var corrupted = TestFixtures.content(for: spec)
         for i in 4500..<4550 { corrupted[i] = 0x00 }
         try corrupted.write(to: fileURL)
 
-        let repairedData = try await service.repair(par2URL: par2URL, corruptedFileURL: fileURL)
+        let repairedData = try service.repair(par2URL: par2URL, corruptedFileURL: fileURL)
         #expect(repairedData != nil, "PAR2 repair returned nil for partial last block")
         guard let repairedData else { return }
 
@@ -494,8 +494,8 @@ struct RedundancyServiceTests {
         let dir = root.appendingPathComponent(spec.albumPath)
         let fileURL = dir.appendingPathComponent(spec.name)
 
-        let par2URL = try await service.generatePAR2(for: fileURL, outputDirectory: dir)
-        let isValid = try await service.verify(par2URL: par2URL, originalFileURL: fileURL)
+        let par2URL = try service.generatePAR2(for: fileURL, outputDirectory: dir)
+        let isValid = try service.verify(par2URL: par2URL, originalFileURL: fileURL)
         #expect(isValid)
 
         // Verify vol file contains recovery slices
@@ -521,7 +521,7 @@ struct RedundancyServiceTests {
         let dir = root.appendingPathComponent(spec.albumPath)
         let fileURL = dir.appendingPathComponent(spec.name)
 
-        let par2URL = try await service.generatePAR2(for: fileURL, outputDirectory: dir)
+        let par2URL = try service.generatePAR2(for: fileURL, outputDirectory: dir)
 
         // Run par2cmdline verify
         let process = Process()
@@ -561,7 +561,7 @@ struct RedundancyServiceTests {
         let fileURL = dir.appendingPathComponent("testfile.bin")
         try originalData.write(to: fileURL)
 
-        let par2URL = try await service.generatePAR2(for: fileURL, outputDirectory: dir)
+        let par2URL = try service.generatePAR2(for: fileURL, outputDirectory: dir)
 
         // Corrupt the file
         var corrupted = originalData
@@ -993,7 +993,7 @@ struct DeletionServiceTests {
 
     @Test func deleteRemovesPAR2Companion() async throws {
         let fm = FileManager.default
-        let root = try await TestFixtures.materializeVolumeWithPAR2(label: "deletion-par2")
+        let root = try TestFixtures.materializeVolumeWithPAR2(label: "deletion-par2")
         defer { try? fm.removeItem(at: root) }
 
         let vacationFiles = TestFixtures.files(inAlbum: "Vacation")
@@ -1913,7 +1913,7 @@ struct EncryptPAR2IntegrationTests {
 
         // Step 3: Generate PAR2 on the encrypted file
         let redundancy = RedundancyService()
-        let par2URL = try await redundancy.generatePAR2(for: encryptedURL, outputDirectory: tmpDir)
+        let par2URL = try redundancy.generatePAR2(for: encryptedURL, outputDirectory: tmpDir)
 
         // Step 4: Corrupt the encrypted file (flip bytes in the middle)
         var encryptedData = try Data(contentsOf: encryptedURL)
@@ -1923,10 +1923,7 @@ struct EncryptPAR2IntegrationTests {
         }
         try encryptedData.write(to: encryptedURL)
 
-        // Step 5: Verify corruption is present (hash differs from pre-corruption)
-        let corruptedHash = try await hasher.sha256(of: encryptedURL)
-        let preCorruptionHash = try await hasher.sha256(of: encryptedURL) // Will match corrupted since we overwrote
-        // Just verify the file was actually changed by checking decryption fails
+        // Step 5: Verify the file was actually changed by checking decryption fails
         do {
             let tmpDec = tmpDir.appendingPathComponent("should-fail.bin")
             try await encryptionService.decryptFile(at: encryptedURL, to: tmpDec, nonce: nonce, sha256: sha256)
@@ -1936,7 +1933,7 @@ struct EncryptPAR2IntegrationTests {
         }
 
         // Step 6: Repair using PAR2
-        let repairedData = try await redundancy.repair(par2URL: par2URL, corruptedFileURL: encryptedURL)
+        let repairedData = try redundancy.repair(par2URL: par2URL, corruptedFileURL: encryptedURL)
         #expect(repairedData != nil, "PAR2 should repair the encrypted file")
         guard let repairedData else { return }
 
@@ -1973,9 +1970,9 @@ struct EncryptPAR2IntegrationTests {
         _ = try await encryptionService.encryptFile(at: originalURL, to: encryptedURL, sha256: sha256)
 
         let redundancy = RedundancyService()
-        let par2URL = try await redundancy.generatePAR2(for: encryptedURL, outputDirectory: tmpDir)
+        let par2URL = try redundancy.generatePAR2(for: encryptedURL, outputDirectory: tmpDir)
 
-        let verified = try await redundancy.verify(par2URL: par2URL, originalFileURL: encryptedURL)
+        let verified = try redundancy.verify(par2URL: par2URL, originalFileURL: encryptedURL)
         #expect(verified, "Uncorrupted encrypted file should pass PAR2 verification")
     }
 }

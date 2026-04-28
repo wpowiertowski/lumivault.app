@@ -19,7 +19,8 @@ let package = Package(
             ],
             resources: [
                 .process("Resources/Assets.xcassets"),
-                .copy("Resources/LumiVault.help")
+                .copy("Resources/LumiVault.help"),
+                .copy("Resources/TipJar.storekit")
             ],
             swiftSettings: [
                 .defaultIsolation(MainActor.self),

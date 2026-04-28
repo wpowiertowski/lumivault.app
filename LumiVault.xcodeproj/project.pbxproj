@@ -9,7 +9,9 @@
 /* Begin PBXBuildFile section */
 		032867577A6CBA9980DAB87D /* TipJar.storekit in Resources */ = {isa = PBXBuildFile; fileRef = 681F3FAA2F788B687AAC19BA /* TipJar.storekit */; };
 		03E6665EF681AB03B992359C /* B2Credentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0735E1FC71B26F46934B015B /* B2Credentials.swift */; };
+		0581882C32BBFC7C46992A57 /* RetroCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F9C3644B1701B12A0A1E3B7 /* RetroCanvas.swift */; };
 		08BE30A1F1BE474DC9189428 /* NearDuplicatesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15ADD1B31F649B6D4AE4E55D /* NearDuplicatesView.swift */; };
+		0F5EAD71CC35CD42AB910CE8 /* FlappyGame.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A76C88D6D14F8411611A4C /* FlappyGame.swift */; };
 		12470CCFAE5D282CF32C5464 /* ReconciliationTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B98A6688AC0797C85950E76D /* ReconciliationTypes.swift */; };
 		159BC1A2E47CA71D00C9E839 /* DeletionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42278B7E563F76C6F7FC1EE7 /* DeletionService.swift */; };
 		1A47A3D39001F5568470598E /* SyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27AB8F0B2941311B2F905CE1 /* SyncService.swift */; };
@@ -41,6 +43,7 @@
 		6BE9B8EC4FBAFD4CC89C300A /* PhotosImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 284BC984EF9D9F34D67DD279 /* PhotosImportSheet.swift */; };
 		7606BCE424A01DC36A651519 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 06D0EEE7A6946D0748E5A6C4 /* Assets.xcassets */; };
 		7623A3D396C608719188049B /* AlbumRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = B389A2EDF5A08E2BE8AF007A /* AlbumRecord.swift */; };
+		7C25361151B59326946F5367 /* GamesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93793FFEB071EF35882DC3F8 /* GamesTests.swift */; };
 		7FC9F2ECC3BB994D0D697082 /* PhotoGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A26A124182F5946F24CB1ADD /* PhotoGridView.swift */; };
 		82886ABBCFA8C5A3A14C30CD /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 012BE699987DA66C89CDC8BD /* Constants.swift */; };
 		85F07A3C43271A80A554C146 /* VolumeRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 669B957B8485AF442AEB2DA8 /* VolumeRecord.swift */; };
@@ -51,6 +54,7 @@
 		901ED8814C1AF339CD3CAC25 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6E2C8CD562F32019EB774DA /* ContentView.swift */; };
 		92A8BF69B17C32CBBA801C36 /* AlbumDeletionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 795EC7A08A0ABF43F828C239 /* AlbumDeletionSheet.swift */; };
 		93AB452DC206E0A2C5C02909 /* AlbumExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2BF78C573AEB3723FAA6B52 /* AlbumExportSheet.swift */; };
+		9BFF5B5CBEC8AF900FA3CBE5 /* SnakeGame.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26C10DEDAFFC8F77C0575005 /* SnakeGame.swift */; };
 		A1E3C9C6FEDD55A4C790841A /* ImageConversionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFA740881D64DEF9AAD992E7 /* ImageConversionService.swift */; };
 		AB0DD7ACC613A9C5169FA268 /* PerceptualHash.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F99517836AFD89561B41EE /* PerceptualHash.swift */; };
 		B10D8A06390125F91AC69B08 /* MetadataInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47A770A92996FA81A51FB1A1 /* MetadataInspector.swift */; };
@@ -70,6 +74,7 @@
 		E9CC0D815365176B7AC4CA64 /* LumiVaultUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C8416D7A7C9047F26714AD /* LumiVaultUITests.swift */; };
 		EDE76EA25C3EC99DAF2962EE /* LumiVaultApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 679368003A8DA83CBA994560 /* LumiVaultApp.swift */; };
 		EFB4150EB614969D580F2E58 /* EXIFData.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6826A2A2F1B0541A700F497 /* EXIFData.swift */; };
+		F450618261FF0A965EEC6385 /* GameStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6410C7BD0959F18315BC8076 /* GameStepView.swift */; };
 		F9138AD9D6AFD57B9F8F789D /* PipelineItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ACCA96E297825FB7AD6A91E /* PipelineItem.swift */; };
 		F92EA583B01D47B947517FEA /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 259FAF0AE3CB8F5152CD2AC6 /* SettingsView.swift */; };
 		FB607540471DB65A4F19B74B /* ImageRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E605ECCBCE62C39786BEF19 /* ImageRecord.swift */; };
@@ -115,6 +120,7 @@
 		2227CE0EBFDA45BA03F75D10 /* EncryptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EncryptionService.swift; sourceTree = "<group>"; };
 		22F376C53109DC45304A767E /* CloudSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSettingsView.swift; sourceTree = "<group>"; };
 		259FAF0AE3CB8F5152CD2AC6 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		26C10DEDAFFC8F77C0575005 /* SnakeGame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnakeGame.swift; sourceTree = "<group>"; };
 		27AB8F0B2941311B2F905CE1 /* SyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncService.swift; sourceTree = "<group>"; };
 		284BC984EF9D9F34D67DD279 /* PhotosImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosImportSheet.swift; sourceTree = "<group>"; };
 		2CFB81A5F9B3F78322F61142 /* TestFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestFixtures.swift; sourceTree = "<group>"; };
@@ -123,11 +129,14 @@
 		36CC2F93A79D33C625E126E4 /* CatalogBackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogBackupService.swift; sourceTree = "<group>"; };
 		3ACCA96E297825FB7AD6A91E /* PipelineItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineItem.swift; sourceTree = "<group>"; };
 		42278B7E563F76C6F7FC1EE7 /* DeletionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionService.swift; sourceTree = "<group>"; };
+		42A76C88D6D14F8411611A4C /* FlappyGame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlappyGame.swift; sourceTree = "<group>"; };
 		47A770A92996FA81A51FB1A1 /* MetadataInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataInspector.swift; sourceTree = "<group>"; };
 		4D306B41680CB9765C3B46CC /* ReconciliationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconciliationView.swift; sourceTree = "<group>"; };
 		52BF3E9C2E27A222A01E3E43 /* VolumesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumesSettingsView.swift; sourceTree = "<group>"; };
 		55BFD846559703686D7FA838 /* BookmarkResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkResolver.swift; sourceTree = "<group>"; };
+		5F9C3644B1701B12A0A1E3B7 /* RetroCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetroCanvas.swift; sourceTree = "<group>"; };
 		61D15F535FF979828BFF185F /* ImportFromPhotosCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportFromPhotosCommands.swift; sourceTree = "<group>"; };
+		6410C7BD0959F18315BC8076 /* GameStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameStepView.swift; sourceTree = "<group>"; };
 		669B957B8485AF442AEB2DA8 /* VolumeRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeRecord.swift; sourceTree = "<group>"; };
 		679368003A8DA83CBA994560 /* LumiVaultApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumiVaultApp.swift; sourceTree = "<group>"; };
 		681F3FAA2F788B687AAC19BA /* TipJar.storekit */ = {isa = PBXFileReference; path = TipJar.storekit; sourceTree = "<group>"; };
@@ -135,6 +144,7 @@
 		78323BB35DE5C1DE3D74C325 /* IntegritySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegritySheet.swift; sourceTree = "<group>"; };
 		795EC7A08A0ABF43F828C239 /* AlbumDeletionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumDeletionSheet.swift; sourceTree = "<group>"; };
 		7FD4E291C18518482ADDCA6A /* AsyncSemaphore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncSemaphore.swift; sourceTree = "<group>"; };
+		93793FFEB071EF35882DC3F8 /* GamesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamesTests.swift; sourceTree = "<group>"; };
 		937E65EE6EF8CEA2B9443D20 /* ImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportSheet.swift; sourceTree = "<group>"; };
 		93F0123F93F18FC16E95D05C /* ReconciliationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconciliationService.swift; sourceTree = "<group>"; };
 		A26A124182F5946F24CB1ADD /* PhotoGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoGridView.swift; sourceTree = "<group>"; };
@@ -215,6 +225,17 @@
 			path = Persistence;
 			sourceTree = "<group>";
 		};
+		3F5471C495B4F243024C6A49 /* Games */ = {
+			isa = PBXGroup;
+			children = (
+				42A76C88D6D14F8411611A4C /* FlappyGame.swift */,
+				6410C7BD0959F18315BC8076 /* GameStepView.swift */,
+				5F9C3644B1701B12A0A1E3B7 /* RetroCanvas.swift */,
+				26C10DEDAFFC8F77C0575005 /* SnakeGame.swift */,
+			);
+			path = Games;
+			sourceTree = "<group>";
+		};
 		442AFB9918635A58C59BBD27 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
@@ -227,6 +248,7 @@
 			isa = PBXGroup;
 			children = (
 				E71FC22F276C3DB4FBD295AC /* Detail */,
+				3F5471C495B4F243024C6A49 /* Games */,
 				92530C42F62CC2D48F71BD74 /* Grid */,
 				CE8101270137002F63473D8A /* Import */,
 				D2299B2C90B2EB42736D33CA /* PhotosImport */,
@@ -262,6 +284,7 @@
 		9C3D24AB41A21A14162BA2AA /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				93793FFEB071EF35882DC3F8 /* GamesTests.swift */,
 				D4F69A5682C9063F979E533C /* LumiVaultTests.swift */,
 				2CFB81A5F9B3F78322F61142 /* TestFixtures.swift */,
 			);
@@ -529,7 +552,9 @@
 				55092B1FB5D744B323FDDFCE /* EmptyStateView.swift in Sources */,
 				E5AD622448575773B6865BB8 /* EncryptionService.swift in Sources */,
 				2F0B68DAB1D1FCF1046D6908 /* EncryptionSettingsView.swift in Sources */,
+				0F5EAD71CC35CD42AB910CE8 /* FlappyGame.swift in Sources */,
 				D614E72A43BEE42BDCD6896F /* GaloisField16.swift in Sources */,
+				F450618261FF0A965EEC6385 /* GameStepView.swift in Sources */,
 				576927D602EDB37C9C821BEF /* GeneralSettingsView.swift in Sources */,
 				C3E2B48BC52875B0CC34CFBD /* HasherService.swift in Sources */,
 				A1E3C9C6FEDD55A4C790841A /* ImageConversionService.swift in Sources */,
@@ -559,8 +584,10 @@
 				12470CCFAE5D282CF32C5464 /* ReconciliationTypes.swift in Sources */,
 				89320CFF58AE00D892F6E805 /* ReconciliationView.swift in Sources */,
 				D667D68E0E1F064E5955284C /* RedundancyService.swift in Sources */,
+				0581882C32BBFC7C46992A57 /* RetroCanvas.swift in Sources */,
 				F92EA583B01D47B947517FEA /* SettingsView.swift in Sources */,
 				222AE84A41CFB89D093B2038 /* SidebarView.swift in Sources */,
+				9BFF5B5CBEC8AF900FA3CBE5 /* SnakeGame.swift in Sources */,
 				B74403416D7B5B267D435D02 /* SupportSettingsView.swift in Sources */,
 				25F5E20F34DF68599EB45A5E /* SwiftDataContainer.swift in Sources */,
 				4947D3D9752DCA4CD8200F79 /* SyncCoordinator.swift in Sources */,
@@ -585,6 +612,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7C25361151B59326946F5367 /* GamesTests.swift in Sources */,
 				2AB3DBBB033427F0060FC5E2 /* LumiVaultTests.swift in Sources */,
 				27E6FC12E9C96DA903E62582 /* TestFixtures.swift in Sources */,
 			);
