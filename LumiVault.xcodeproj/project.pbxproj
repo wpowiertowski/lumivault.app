@@ -492,7 +492,6 @@
 				};
 			};
 			buildConfigurationList = AF4F6A96E5659A82E8987131 /* Build configuration list for PBXProject "LumiVault" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -502,6 +501,7 @@
 			mainGroup = C1E2DB57E021F1E65DFEE75B;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			productRefGroup = A5F7B78A41AECBB657CEC08D /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (

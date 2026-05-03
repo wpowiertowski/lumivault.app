@@ -37,12 +37,12 @@ struct PipelineItem: Sendable {
     var error: String?
 
     /// The filename to use for the stored file (converted name if conversion happened).
-    var activeFilename: String {
+    nonisolated var activeFilename: String {
         convertedFilename ?? originalFilename
     }
 
     /// The file URL to use for downstream phases (encryption -> PAR2 -> copy -> upload).
-    var activeFileURL: URL {
+    nonisolated var activeFileURL: URL {
         encryptedURL ?? convertedURL ?? fileURL
     }
 }
