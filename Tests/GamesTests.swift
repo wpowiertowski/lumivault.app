@@ -11,12 +11,23 @@ struct SnakeGameTests {
         #expect(game.direction == .right)
         #expect(!game.isGameOver)
         #expect(game.score == 0)
+        #expect(!game.hasStarted)
+    }
+
+    @Test func snakeHoldsBeforeFirstStart() {
+        let game = SnakeGame(columns: 20, rows: 10)
+        let initialHead = game.snake[0]
+        game.tick()
+        game.tick()
+        #expect(game.snake[0] == initialHead)
+        #expect(!game.isGameOver)
     }
 
     @Test func tickAdvancesHeadByOneCell() {
         let game = SnakeGame(columns: 20, rows: 10)
         // Pin food to the corner so the next tick can't accidentally consume it.
         game.food = SnakeGame.Cell(x: 0, y: 0)
+        game.start()
         let head = game.snake[0]
         game.tick()
         let newHead = game.snake[0]
@@ -31,6 +42,7 @@ struct SnakeGameTests {
         // Snake starts moving right. Trying to turn left should be ignored
         // and the snake should keep moving right rather than colliding with itself.
         game.turn(.left)
+        game.start()
         let head = game.snake[0]
         game.tick()
         #expect(game.snake[0].x == head.x + 1)
@@ -40,6 +52,7 @@ struct SnakeGameTests {
     @Test func collidingWithRightWallEndsGame() {
         let game = SnakeGame(columns: 8, rows: 8)
         game.food = SnakeGame.Cell(x: 0, y: 0)
+        game.start()
         for _ in 0..<10 {
             if game.isGameOver { break }
             game.tick()
@@ -52,6 +65,7 @@ struct SnakeGameTests {
         // Force food directly in front of the head so the very next tick eats it.
         let head = game.snake[0]
         game.food = SnakeGame.Cell(x: head.x + 1, y: head.y)
+        game.start()
         game.tick()
         #expect(game.score == 1)
         #expect(game.snake.count == 4)
@@ -59,12 +73,14 @@ struct SnakeGameTests {
 
     @Test func resetReturnsToInitialState() {
         let game = SnakeGame(columns: 20, rows: 10)
+        game.start()
         for _ in 0..<5 { game.tick() }
         game.reset()
         #expect(game.snake.count == 3)
         #expect(game.score == 0)
         #expect(game.direction == .right)
         #expect(!game.isGameOver)
+        #expect(!game.hasStarted)
     }
 }
 

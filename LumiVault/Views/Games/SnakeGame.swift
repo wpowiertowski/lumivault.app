@@ -30,6 +30,7 @@ final class SnakeGame {
     var food: Cell
     private(set) var score: Int = 0
     private(set) var isGameOver: Bool = false
+    private(set) var hasStarted: Bool = false
 
     init(columns: Int = 28, rows: Int = 18) {
         self.columns = columns
@@ -50,6 +51,14 @@ final class SnakeGame {
         food = Self.spawnFood(columns: columns, rows: rows, occupied: snake)
         score = 0
         isGameOver = false
+        hasStarted = false
+    }
+
+    /// Begin advancing on the next tick. The game sits idle until this is
+    /// called so a freshly-presented board can't run itself into a wall
+    /// before the player has had a chance to react.
+    func start() {
+        hasStarted = true
     }
 
     func turn(_ new: Direction) {
@@ -60,7 +69,7 @@ final class SnakeGame {
     }
 
     func tick() {
-        guard !isGameOver else { return }
+        guard hasStarted, !isGameOver else { return }
         direction = pendingDirection
         let head = snake[0]
         let next = Cell(x: head.x + direction.delta.x, y: head.y + direction.delta.y)
@@ -129,11 +138,13 @@ struct SnakeGameView: View {
                 if game.isGameOver {
                     painter.drawText("GAME OVER", atCellX: max(0, game.columns / 2 - 5), cellY: game.rows / 2 - 1, color: .red)
                     painter.drawText("PRESS R", atCellX: max(0, game.columns / 2 - 3), cellY: game.rows / 2 + 1, color: .white)
+                } else if !game.hasStarted {
+                    painter.drawText("SPACE TO START", atCellX: max(0, game.columns / 2 - 7), cellY: game.rows / 2, color: .white)
                 }
             }
             .aspectRatio(CGFloat(game.columns) / CGFloat(game.rows), contentMode: .fit)
 
-            Text("Arrows or WASD to move • R to restart • Space to pause")
+            Text("Space to start • Arrows or WASD to move • Space to pause • R to restart")
                 .font(Constants.Design.monoCaption2)
                 .foregroundStyle(.secondary)
         }
@@ -169,9 +180,15 @@ struct SnakeGameView: View {
         case .leftArrow, KeyEquivalent("a"): game.turn(.left); return .handled
         case .rightArrow, KeyEquivalent("d"): game.turn(.right); return .handled
         case KeyEquivalent("r"), KeyEquivalent("R"):
-            game.reset(); return .handled
+            game.reset(); isRunning = true; return .handled
         case .space:
-            isRunning.toggle(); return .handled
+            // First space press kicks off play; subsequent presses pause/resume.
+            if !game.hasStarted {
+                game.start()
+            } else {
+                isRunning.toggle()
+            }
+            return .handled
         default: return .ignored
         }
     }
