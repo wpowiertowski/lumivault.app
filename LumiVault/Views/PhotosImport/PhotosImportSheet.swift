@@ -128,10 +128,10 @@ struct PhotosImportSheet: View {
             catalogAlbumCounts = await syncCoordinator.catalogAlbumCounts()
         }
         .task(id: step) {
-            // Watchdog: if the import has been running for 1 minute and progress is
-            // still under 40%, surface the easter-egg games offer.
+            // Watchdog: if the import has been running for 30 seconds and
+            // progress is still under 40%, surface the easter-egg games offer.
             guard step == .importing else { return }
-            try? await Task.sleep(for: .seconds(60))
+            try? await Task.sleep(for: .seconds(30))
             guard !Task.isCancelled, step == .importing else { return }
             if progress.fraction < 0.40 && !showingGames {
                 withAnimation { showGamesOffer = true }
