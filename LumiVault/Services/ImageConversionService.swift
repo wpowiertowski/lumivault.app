@@ -3,7 +3,7 @@ import AppKit
 import ImageIO
 
 enum ImageConversionService {
-    static func convertImage(
+    nonisolated static func convertImage(
         asset: ImportedAsset,
         format: ImageFormat,
         quality: Double,
@@ -93,7 +93,7 @@ enum ImageConversionService {
         }
     }
 
-    private static func encodeCGImage(_ image: CGImage?, type: String, quality: Double) -> Data? {
+    nonisolated private static func encodeCGImage(_ image: CGImage?, type: String, quality: Double) -> Data? {
         guard let image else { return nil }
         let data = NSMutableData()
         guard let dest = CGImageDestinationCreateWithData(data, type as CFString, 1, nil) else { return nil }
@@ -103,7 +103,7 @@ enum ImageConversionService {
     }
 
     /// Create a copy of a CGImage with alpha stripped (noneSkipLast).
-    private static func strippingAlpha(_ source: CGImage) -> CGImage? {
+    nonisolated private static func strippingAlpha(_ source: CGImage) -> CGImage? {
         guard let ctx = CGContext(
             data: nil,
             width: source.width,

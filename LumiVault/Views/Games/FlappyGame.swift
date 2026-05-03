@@ -13,7 +13,7 @@ final class FlappyGame {
     let rows: Int
     let pipeWidth: Int = 3
     let gravity: Double = 0.45     // cells per tick²
-    let flapImpulse: Double = -2.4 // cells per tick
+    let flapImpulse: Double = -1.6 // cells per tick
     let scrollSpeed: Double = 0.35 // cells per tick
 
     private(set) var birdY: Double

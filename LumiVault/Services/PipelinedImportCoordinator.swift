@@ -2,10 +2,12 @@ import Foundation
 import SwiftData
 import AppKit
 import ImageIO
+import CryptoKit
 import os
 
-/// Wrapper to pass MainActor-isolated values into @MainActor Task closures
-/// where the compiler can't prove isolation safety.
+/// Wrapper to pass MainActor-isolated values into Task closures
+/// where the compiler can't prove isolation safety. Always read `.value`
+/// from inside `MainActor.run { … }`.
 private struct UnsafeSendable<T>: @unchecked Sendable {
     let value: T
 }
@@ -20,11 +22,27 @@ private final class RecordLookup: @unchecked Sendable {
     }
 }
 
+/// Sendable view of a resolved import-target volume — captures only the
+/// scalar fields the off-main copy stage needs. The companion `VolumeRecord`
+/// references stay behind a separate `UnsafeSendable` so post-loop cleanup
+/// (lastSyncedAt) can hop back to MainActor.
+private struct ResolvedVolume: Sendable {
+    let volumeID: String
+    let label: String
+    let url: URL
+}
+
 /// Import coordinator that pipelines images through phases so that
 /// already-converted images can hash while later images still convert, etc.
 ///
 /// Pipeline topology (phases skipped when disabled):
 ///   Import -> Conversion -> Hashing/Dedup -> Encryption -> PAR2 -> Copy -> Upload -> Catalog
+///
+/// All non-terminal stages run as `Task.detached` calling `nonisolated async`
+/// methods on this coordinator. Heavy CPU/GPU/I/O work runs on the cooperative
+/// pool; SwiftData mutations and `progress` updates hop to MainActor via
+/// `MainActor.run { … }`. The catalog sink stays on MainActor because it does
+/// dense SwiftData mutation per item.
 class PipelinedImportCoordinator: @unchecked Sendable {
     private let photosService = PhotosImportService()
     private let hasher = HasherService()
@@ -136,8 +154,11 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         let encKey = needsEncryption ? await encryptionService.cachedKey : nil
         let encKeyId = needsEncryption ? await encryptionService.cachedKeyId : nil
 
-        // Resolve volumes once
-        var resolvedVolumes: [(record: VolumeRecord, url: URL)] = []
+        // Resolve volumes once. Capture Sendable scalars for the off-main copy
+        // stage; keep the @Model references behind UnsafeSendable for the
+        // post-loop cleanup that mutates lastSyncedAt.
+        var resolvedVolumes: [ResolvedVolume] = []
+        var volumeRecords: [(volumeID: String, record: VolumeRecord)] = []
         if needsCopy {
             let volumeDescriptor = FetchDescriptor<VolumeRecord>()
             let allVolumes = try modelContext.fetch(volumeDescriptor)
@@ -145,17 +166,17 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 do {
                     let (url, refreshed) = try BookmarkResolver.resolveAccessAndRefresh(vol.bookmarkData)
                     if let refreshed { vol.bookmarkData = refreshed }
-                    resolvedVolumes.append((vol, url))
+                    resolvedVolumes.append(ResolvedVolume(volumeID: vol.volumeID, label: vol.label, url: url))
+                    volumeRecords.append((vol.volumeID, vol))
                 } catch {
                     progress.errors.append("Cannot access volume: \(vol.label) — \(error.localizedDescription)")
                 }
             }
         }
 
-        // Wrap non-Sendable values for Task capture. These tasks all run on
-        // @MainActor so this is safe — the compiler just can't prove it.
+        // Wrap non-Sendable values for Task capture. Always read inside MainActor.run.
         let ctx = UnsafeSendable(value: modelContext)
-        let vols = UnsafeSendable(value: resolvedVolumes)
+        let volRecordsBox = UnsafeSendable(value: volumeRecords)
 
         // Collect all channels so we can cancel them all on teardown
         let allChannels: [any CancellableChannel] = [
@@ -166,453 +187,103 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         // used by all downstream stages instead of PersistentIdentifier lookups
         // (which fail for unsaved/temporary records). All access is on @MainActor.
         let recordsBySHA = RecordLookup()
-
-        // MARK: - Feed (streams from Photos import into the first pipeline channel)
-        let firstChannel = needsConversion ? conversionCh : hashingCh
-        let feedTask = Task { @MainActor [settings] in
-            defer { firstChannel.finish() }
-            for await result in assetStream {
-                guard !Task.isCancelled else { break }
-                switch result {
-                case .success(let asset):
-                    let item = PipelineItem(
-                        albumName: settings.albumName,
-                        importDate: .now,
-                        fileURL: asset.fileURL,
-                        originalFilename: asset.originalFilename,
-                        phAssetLocalIdentifier: asset.phAssetLocalIdentifier
-                    )
-                    await firstChannel.send(item)
-                case .failure(_, let error):
-                    progress.errors.append("Photos export failed: \(error)")
-                    progress.filesDropped += 1
-                case .skipped(_, _, let reason):
-                    progress.filesSkipped += 1
-                    progress.skipReasons[reason, default: 0] += 1
-                }
-            }
-        }
-
-        // MARK: - Conversion
-        var conversionTask: Task<Void, Never>?
-        if needsConversion {
-            conversionTask = Task { @MainActor [settings] in
-                defer { postConversion.finish() }
-                progress.phase = .converting
-
-                for await item in conversionCh.stream {
-                    await conversionCh.consumed()
-                    guard !Task.isCancelled else { break }
-
-                    var mutableItem = item
-                    let converted = ImageConversionService.convertImage(
-                        asset: ImportedAsset(
-                            fileURL: item.fileURL,
-                            originalFilename: item.originalFilename,
-                            creationDate: nil
-                        ),
-                        format: settings.imageFormat,
-                        quality: settings.jpegQuality,
-                        maxDimension: settings.maxDimension,
-                        staging: staging
-                    )
-                    if converted.fileURL != item.fileURL {
-                        mutableItem.convertedURL = converted.fileURL
-                        mutableItem.convertedFilename = converted.originalFilename
-                    }
-                    progress.filesConverted += 1
-                    progress.currentFile = progress.filesConverted
-                    progress.currentFilename = item.originalFilename
-
-                    await postConversion.send(mutableItem)
-                }
-            }
-        }
-
-        // MARK: - Hashing & Dedup
         let candidatesLock = OSAllocatedUnfairLock(initialState: nearDuplicateCandidates)
 
-        let hashTask = Task { @MainActor [ctx, settings] in
-            defer { postHashing.finish() }
-            let modelContext = ctx.value
-            progress.phase = .hashing
-            progress.currentFile = 0
+        // MARK: - Stage launches
+        // Each stage runs detached on the cooperative pool. Heavy CPU/GPU/I/O work
+        // runs off-main; only progress + SwiftData touches hop to MainActor.
+        let firstChannel = needsConversion ? conversionCh : hashingCh
+        let feedTask = Task.detached(priority: .userInitiated) { [self] in
+            await self.runFeedStage(
+                assetStream: assetStream,
+                firstChannel: firstChannel,
+                settings: settings,
+                progress: progress
+            )
+        }
 
-            for await item in hashingCh.stream {
-                await hashingCh.consumed()
-                guard !Task.isCancelled else { break }
-
-                var mutableItem = item
-                let fileToHash = item.convertedURL ?? item.fileURL
-                do {
-                    let (hash, size) = try await self.hasher.sha256AndSize(of: fileToHash)
-                    mutableItem.sha256 = hash
-                    mutableItem.sizeBytes = size
-
-                    // Check our own batch first (pending inserts may not appear in fetch)
-                    if let batchRecord = recordsBySHA[hash] {
-                        if batchRecord.phAssetLocalIdentifier == nil,
-                           let id = item.phAssetLocalIdentifier {
-                            batchRecord.phAssetLocalIdentifier = id
-                        }
-                        mutableItem.isDuplicate = true
-                        mutableItem.snapshot = ImageRecordSnapshot(
-                            sha256: hash,
-                            filename: batchRecord.filename,
-                            sizeBytes: batchRecord.sizeBytes,
-                            isNew: false
-                        )
-                        progress.filesDeduplicated += 1
-                    } else {
-                        let descriptor = FetchDescriptor<ImageRecord>(
-                            predicate: #Predicate { $0.sha256 == hash }
-                        )
-                        let existing = try modelContext.fetch(descriptor)
-
-                        if let existingRecord = existing.first {
-                            if existingRecord.phAssetLocalIdentifier == nil,
-                               let id = item.phAssetLocalIdentifier {
-                                existingRecord.phAssetLocalIdentifier = id
-                            }
-                            mutableItem.isDuplicate = true
-                            recordsBySHA[hash] = existingRecord
-                            mutableItem.snapshot = ImageRecordSnapshot(
-                                sha256: hash,
-                                filename: existingRecord.filename,
-                                sizeBytes: existingRecord.sizeBytes,
-                                isNew: false
-                            )
-                            progress.filesDeduplicated += 1
-                        } else {
-                            let record = ImageRecord(
-                                sha256: hash,
-                                filename: item.activeFilename,
-                                sizeBytes: size,
-                                phAssetLocalIdentifier: item.phAssetLocalIdentifier
-                            )
-                            try? await self.thumbnailService.generateThumbnail(for: fileToHash, sha256: hash)
-                            record.thumbnailState = .generated
-
-                            if let pHash = try? PerceptualHash.compute(for: fileToHash) {
-                                record.perceptualHash = pHash
-                                mutableItem.perceptualHash = pHash
-
-                                if settings.detectNearDuplicates {
-                                    let originalFilename = item.originalFilename
-                                    let candidates = candidatesLock.withLock { $0 }
-                                    for candidate in candidates {
-                                        let distance = PerceptualHash.hammingDistance(pHash, candidate.hash)
-                                        if distance < settings.nearDuplicateThreshold {
-                                            let match = NearDuplicateMatch(
-                                                newFilename: originalFilename,
-                                                newSha256: hash,
-                                                existingFilename: candidate.filename,
-                                                existingSha256: candidate.sha256,
-                                                hammingDistance: distance
-                                            )
-                                            progress.nearDuplicates.append(match)
-                                            progress.nearDuplicatesFound += 1
-                                            break
-                                        }
-                                    }
-                                    candidatesLock.withLock {
-                                        $0.append((hash, originalFilename, pHash))
-                                    }
-                                }
-                            }
-
-                            modelContext.insert(record)
-                            recordsBySHA[hash] = record
-                            mutableItem.snapshot = ImageRecordSnapshot(
-                                sha256: hash,
-                                filename: item.activeFilename,
-                                sizeBytes: size,
-                                isNew: true
-                            )
-                        }
-                    }
-                } catch {
-                    mutableItem.error = "Hash failed: \(item.originalFilename) — \(error.localizedDescription)"
-                    progress.errors.append(mutableItem.error!)
-                }
-
-                progress.filesHashed += 1
-                progress.currentFile = progress.filesHashed
-                progress.currentFilename = item.originalFilename
-
-                await postHashing.send(mutableItem)
+        var conversionTask: Task<Void, Never>?
+        if needsConversion {
+            conversionTask = Task.detached(priority: .userInitiated) { [self] in
+                await self.runConversionStage(
+                    inputCh: conversionCh,
+                    outputCh: postConversion,
+                    settings: settings,
+                    staging: staging,
+                    progress: progress
+                )
             }
         }
 
-        // MARK: - Encryption
+        let hashTask = Task.detached(priority: .userInitiated) { [self] in
+            await self.runHashStage(
+                inputCh: hashingCh,
+                outputCh: postHashing,
+                settings: settings,
+                ctx: ctx,
+                recordsBySHA: recordsBySHA,
+                candidatesLock: candidatesLock,
+                progress: progress
+            )
+        }
+
         var encryptionTask: Task<Void, Never>?
         if needsEncryption, let key = encKey {
-            encryptionTask = Task { @MainActor in
-                defer { postEncryption.finish() }
-                progress.phase = .encrypting
-                progress.currentFile = 0
-
-                for await item in encryptionCh.stream {
-                    await encryptionCh.consumed()
-                    guard !Task.isCancelled else { break }
-
-                    var mutableItem = item
-                    guard let snap = item.snapshot, item.error == nil, snap.isNew else {
-                        await postEncryption.send(mutableItem)
-                        continue
-                    }
-
-                    let encryptedURL = staging.appendingPathComponent(snap.filename + ".enc")
-                    do {
-                        let (nonce, encSize) = try EncryptionService.encryptFileWithKey(
-                            at: item.activeFileURL, to: encryptedURL, sha256: snap.sha256, key: key
-                        )
-                        mutableItem.encryptedURL = encryptedURL
-                        mutableItem.encryptionNonce = nonce
-                        mutableItem.encryptedSize = encSize
-
-                        if let record = recordsBySHA[snap.sha256] {
-                            record.isEncrypted = true
-                            record.encryptionNonce = nonce
-                            record.encryptionKeyId = encKeyId
-                        }
-
-                        progress.filesEncrypted += 1
-                        progress.currentFile = progress.filesEncrypted
-                        progress.currentFilename = snap.filename
-                    } catch {
-                        mutableItem.error = "Encrypt failed: \(snap.filename) — \(error.localizedDescription)"
-                        progress.errors.append(mutableItem.error!)
-                    }
-
-                    await postEncryption.send(mutableItem)
-                }
+            encryptionTask = Task.detached(priority: .userInitiated) { [self] in
+                await self.runEncryptionStage(
+                    inputCh: encryptionCh,
+                    outputCh: postEncryption,
+                    staging: staging,
+                    encKey: key,
+                    encKeyId: encKeyId,
+                    recordsBySHA: recordsBySHA,
+                    progress: progress
+                )
             }
         }
 
-        // MARK: - PAR2
         var par2Task: Task<Void, Never>?
         if needsPAR2 {
-            par2Task = Task { @MainActor in
-                defer { postPAR2.finish() }
-                progress.phase = .par2
-                progress.currentFile = 0
-
-                for await item in par2Ch.stream {
-                    await par2Ch.consumed()
-                    guard !Task.isCancelled else { break }
-
-                    var mutableItem = item
-                    guard let snap = item.snapshot, item.error == nil, snap.isNew else {
-                        await postPAR2.send(mutableItem)
-                        continue
-                    }
-
-                    progress.currentFilename = snap.filename
-                    progress.par2FileFraction = 0
-
-                    do {
-                        let par2URL = try self.redundancyService.generatePAR2(
-                            for: item.activeFileURL,
-                            outputDirectory: staging,
-                            onProgress: { fraction in
-                                DispatchQueue.main.async {
-                                    progress.par2FileFraction = fraction
-                                }
-                            },
-                            cancelFlag: cancelFlag
-                        )
-                        mutableItem.par2Filename = par2URL.lastPathComponent
-                        mutableItem.par2URL = par2URL
-
-                        if let record = recordsBySHA[snap.sha256] {
-                            record.par2Filename = par2URL.lastPathComponent
-                        }
-
-                        progress.filesProtected += 1
-                    } catch {
-                        mutableItem.error = "PAR2 failed: \(snap.filename) — \(error.localizedDescription)"
-                        progress.errors.append(mutableItem.error!)
-                    }
-
-                    progress.currentFile += 1
-                    await postPAR2.send(mutableItem)
-                }
+            par2Task = Task.detached(priority: .userInitiated) { [self] in
+                await self.runPAR2Stage(
+                    inputCh: par2Ch,
+                    outputCh: postPAR2,
+                    staging: staging,
+                    cancelFlag: cancelFlag,
+                    recordsBySHA: recordsBySHA,
+                    progress: progress
+                )
             }
         }
 
-        // MARK: - Copy to Volumes
         var copyTask: Task<Void, Never>?
         if needsCopy {
-            copyTask = Task { @MainActor [vols, settings] in
-                defer { postCopy.finish() }
-                let resolvedVolumes = vols.value
-                progress.phase = .copying
-                progress.currentFile = 0
-
-                for await item in copyCh.stream {
-                    await copyCh.consumed()
-                    guard !Task.isCancelled else { break }
-
-                    var mutableItem = item
-                    guard let snap = item.snapshot, item.error == nil else {
-                        await postCopy.send(mutableItem)
-                        continue
-                    }
-
-                    let sourceFile = item.activeFileURL
-                    for (volRecord, volURL) in resolvedVolumes {
-                        let destBase = volURL
-                            .appendingPathComponent(settings.year, isDirectory: true)
-                            .appendingPathComponent(settings.month, isDirectory: true)
-                            .appendingPathComponent(settings.day, isDirectory: true)
-                            .appendingPathComponent(settings.albumName, isDirectory: true)
-
-                        do {
-                            try FileManager.default.createDirectory(at: destBase, withIntermediateDirectories: true)
-
-                            let dest = destBase.appendingPathComponent(snap.filename)
-                            if !FileManager.default.fileExists(atPath: dest.path) {
-                                try FileManager.default.copyItem(at: sourceFile, to: dest)
-                            }
-
-                            let relativePath = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)/\(snap.filename)"
-                            let location = StorageLocation(volumeID: volRecord.volumeID, relativePath: relativePath)
-                            if !mutableItem.storageLocations.contains(location) {
-                                mutableItem.storageLocations.append(location)
-                            }
-
-                            if let record = recordsBySHA[snap.sha256] {
-                                if !record.storageLocations.contains(location) {
-                                    record.storageLocations.append(location)
-                                }
-                            }
-
-                            // Copy PAR2 companion files (index + vol)
-                            if !item.par2Filename.isEmpty {
-                                let companions = RedundancyService.companionFiles(
-                                    forIndex: item.par2Filename, in: staging
-                                )
-                                for companion in companions {
-                                    let dest = destBase.appendingPathComponent(companion.lastPathComponent)
-                                    if !FileManager.default.fileExists(atPath: dest.path) {
-                                        try FileManager.default.copyItem(at: companion, to: dest)
-                                    }
-                                }
-                            }
-                        } catch {
-                            mutableItem.error = "Copy failed: \(snap.filename) to \(volRecord.label) — \(error.localizedDescription)"
-                            progress.errors.append(mutableItem.error!)
-                        }
-                    }
-
-                    progress.filesCopied += 1
-                    await postCopy.send(mutableItem)
-                }
-
-                for (volRecord, volURL) in resolvedVolumes {
-                    volRecord.lastSyncedAt = .now
-                    volURL.stopAccessingSecurityScopedResource()
-                }
+            copyTask = Task.detached(priority: .userInitiated) { [self] in
+                await self.runCopyStage(
+                    inputCh: copyCh,
+                    outputCh: postCopy,
+                    staging: staging,
+                    settings: settings,
+                    resolvedVolumes: resolvedVolumes,
+                    volumeRecords: volRecordsBox,
+                    recordsBySHA: recordsBySHA,
+                    progress: progress
+                )
             }
         }
 
-        // MARK: - B2 Upload
         var uploadTask: Task<Void, Never>?
         if needsUpload, let credentials = settings.b2Credentials {
-            uploadTask = Task { @MainActor in
-                defer { postUpload.finish() }
-                progress.phase = .uploading
-                progress.currentFile = 0
-
-                for await item in uploadCh.stream {
-                    await uploadCh.consumed()
-                    guard !Task.isCancelled else { break }
-
-                    var mutableItem = item
-                    guard let snap = item.snapshot, item.error == nil else {
-                        await postUpload.send(mutableItem)
-                        continue
-                    }
-
-                    let remotePath = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)/\(snap.filename)"
-
-                    do {
-                        let alreadyExists = try await self.b2Service.fileExists(
-                            fileName: remotePath,
-                            bucketId: credentials.bucketId,
-                            credentials: credentials
-                        )
-
-                        if !alreadyExists {
-                            let uploadOnAttempt: @Sendable (Int) -> Void = { attempt in
-                                Task { @MainActor in
-                                    if attempt == 0 {
-                                        progress.health = .normal
-                                    } else {
-                                        progress.health = .slow(.b2Retrying(attempt: attempt))
-                                    }
-                                }
-                            }
-                            let fileId = try await self.b2Service.uploadImage(
-                                fileURL: item.activeFileURL,
-                                remotePath: remotePath,
-                                sha256: snap.sha256,
-                                credentials: credentials,
-                                onAttempt: uploadOnAttempt
-                            )
-                            mutableItem.b2FileId = fileId
-                            if let record = recordsBySHA[snap.sha256] {
-                                record.b2FileId = fileId
-                            }
-                        } else {
-                            if let record = recordsBySHA[snap.sha256],
-                               record.b2FileId == nil {
-                                let listings = try await self.b2Service.listAllFiles(
-                                    bucketId: credentials.bucketId,
-                                    credentials: credentials,
-                                    prefix: remotePath
-                                )
-                                if let listing = listings.first(where: { $0.fileName == remotePath }) {
-                                    record.b2FileId = listing.fileId
-                                }
-                            }
-                        }
-
-                        // Upload PAR2 companion files (index + vol)
-                        if !item.par2Filename.isEmpty {
-                            let companions = RedundancyService.companionFiles(
-                                forIndex: item.par2Filename, in: staging
-                            )
-                            let remoteBase = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)"
-                            for companion in companions {
-                                let remoteName = "\(remoteBase)/\(companion.lastPathComponent)"
-                                let exists = try await self.b2Service.fileExists(
-                                    fileName: remoteName,
-                                    bucketId: credentials.bucketId,
-                                    credentials: credentials
-                                )
-                                if !exists {
-                                    _ = try await self.b2Service.uploadImage(
-                                        fileURL: companion,
-                                        remotePath: remoteName,
-                                        sha256: "",
-                                        credentials: credentials
-                                    )
-                                }
-                            }
-                        }
-
-                        progress.filesUploaded += 1
-                        progress.currentFile = progress.filesUploaded
-                        progress.currentFilename = snap.filename
-                    } catch {
-                        mutableItem.error = error.localizedDescription
-                        progress.errors.append(mutableItem.error!)
-                    }
-
-                    await postUpload.send(mutableItem)
-                }
+            uploadTask = Task.detached(priority: .userInitiated) { [self] in
+                await self.runUploadStage(
+                    inputCh: uploadCh,
+                    outputCh: postUpload,
+                    staging: staging,
+                    settings: settings,
+                    credentials: credentials,
+                    recordsBySHA: recordsBySHA,
+                    progress: progress
+                )
             }
         }
 
@@ -638,7 +309,9 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 Task { @MainActor in
                     cancelFlag.withLock { $0 = true }
 
-                    // Cancel all pipeline tasks so their loops exit
+                    // Cancel all pipeline tasks so their loops exit. Detached
+                    // tasks don't inherit cancellation, so this explicit cancel
+                    // is what flips Task.isCancelled inside each stage body.
                     for task in pipelineTasks { task.cancel() }
 
                     // Cancel all channels: unblocks any producers stuck on
@@ -651,8 +324,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         }
 
         // MARK: - Catalog (final sink) — awaited to completion
-        // Run the entire catalog sink on MainActor to avoid data races on
-        // @Observable PhotosImportProgress and to keep SwiftData access safe.
+        // Stays on MainActor: dense SwiftData mutation per item.
         let catalogSinkTask = Task { @MainActor [ctx, settings] in
             let modelContext = ctx.value
             let albumName = settings.albumName
@@ -887,4 +559,580 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         }
     }
 
+    // MARK: - Stage implementations (off-main)
+
+    /// Streams from the Photos import into the first pipeline channel.
+    private nonisolated func runFeedStage(
+        assetStream: AsyncStream<ImportResult>,
+        firstChannel: AsyncChannel<PipelineItem>,
+        settings: ImportSettings,
+        progress: PhotosImportProgress
+    ) async {
+        defer { firstChannel.finish() }
+        for await result in assetStream {
+            if Task.isCancelled { break }
+            switch result {
+            case .success(let asset):
+                let item = PipelineItem(
+                    albumName: settings.albumName,
+                    importDate: .now,
+                    fileURL: asset.fileURL,
+                    originalFilename: asset.originalFilename,
+                    phAssetLocalIdentifier: asset.phAssetLocalIdentifier
+                )
+                await firstChannel.send(item)
+            case .failure(_, let error):
+                let msg = "Photos export failed: \(error)"
+                await MainActor.run {
+                    progress.errors.append(msg)
+                    progress.filesDropped += 1
+                }
+            case .skipped(_, _, let reason):
+                await MainActor.run {
+                    progress.filesSkipped += 1
+                    progress.skipReasons[reason, default: 0] += 1
+                }
+            }
+        }
+    }
+
+    /// Decodes/re-encodes/resizes images. CPU-heavy work runs off-main.
+    private nonisolated func runConversionStage(
+        inputCh: AsyncChannel<PipelineItem>,
+        outputCh: AsyncChannel<PipelineItem>,
+        settings: ImportSettings,
+        staging: URL,
+        progress: PhotosImportProgress
+    ) async {
+        defer { outputCh.finish() }
+        await MainActor.run { progress.phase = .converting }
+
+        for await item in inputCh.stream {
+            await inputCh.consumed()
+            if Task.isCancelled { break }
+
+            var mutableItem = item
+            let converted = ImageConversionService.convertImage(
+                asset: ImportedAsset(
+                    fileURL: item.fileURL,
+                    originalFilename: item.originalFilename,
+                    creationDate: nil
+                ),
+                format: settings.imageFormat,
+                quality: settings.jpegQuality,
+                maxDimension: settings.maxDimension,
+                staging: staging
+            )
+            if converted.fileURL != item.fileURL {
+                mutableItem.convertedURL = converted.fileURL
+                mutableItem.convertedFilename = converted.originalFilename
+            }
+            let fname = item.originalFilename
+            await MainActor.run {
+                progress.filesConverted += 1
+                progress.currentFile = progress.filesConverted
+                progress.currentFilename = fname
+            }
+            await outputCh.send(mutableItem)
+        }
+    }
+
+    /// Hash + dedup. SHA-256 runs on the hasher actor; perceptual hash and
+    /// near-dup scan run off-main. SwiftData fetch+insert is batched into one
+    /// MainActor.run per item to preserve fetch-then-insert atomicity.
+    private nonisolated func runHashStage(
+        inputCh: AsyncChannel<PipelineItem>,
+        outputCh: AsyncChannel<PipelineItem>,
+        settings: ImportSettings,
+        ctx: UnsafeSendable<ModelContext>,
+        recordsBySHA: RecordLookup,
+        candidatesLock: OSAllocatedUnfairLock<[(sha256: String, filename: String, hash: Data)]>,
+        progress: PhotosImportProgress
+    ) async {
+        defer { outputCh.finish() }
+        await MainActor.run {
+            progress.phase = .hashing
+            progress.currentFile = 0
+        }
+
+        for await item in inputCh.stream {
+            await inputCh.consumed()
+            if Task.isCancelled { break }
+
+            var mutableItem = item
+            let fileToHash = item.convertedURL ?? item.fileURL
+            do {
+                let (hash, size) = try await self.hasher.sha256AndSize(of: fileToHash)
+                mutableItem.sha256 = hash
+                mutableItem.sizeBytes = size
+
+                let phAssetId = item.phAssetLocalIdentifier
+                // Atomic dedup decision on main: check batch first, then DB.
+                let existing: (filename: String, sizeBytes: Int64)? = try await MainActor.run {
+                    let modelContext = ctx.value
+                    if let batchRecord = recordsBySHA[hash] {
+                        if batchRecord.phAssetLocalIdentifier == nil, let id = phAssetId {
+                            batchRecord.phAssetLocalIdentifier = id
+                        }
+                        return (batchRecord.filename, batchRecord.sizeBytes)
+                    }
+                    let descriptor = FetchDescriptor<ImageRecord>(
+                        predicate: #Predicate { $0.sha256 == hash }
+                    )
+                    let dbResults = try modelContext.fetch(descriptor)
+                    if let dbRecord = dbResults.first {
+                        if dbRecord.phAssetLocalIdentifier == nil, let id = phAssetId {
+                            dbRecord.phAssetLocalIdentifier = id
+                        }
+                        recordsBySHA[hash] = dbRecord
+                        return (dbRecord.filename, dbRecord.sizeBytes)
+                    }
+                    return nil
+                }
+
+                if let existing {
+                    mutableItem.isDuplicate = true
+                    mutableItem.snapshot = ImageRecordSnapshot(
+                        sha256: hash,
+                        filename: existing.filename,
+                        sizeBytes: existing.sizeBytes,
+                        isNew: false
+                    )
+                    await MainActor.run { progress.filesDeduplicated += 1 }
+                } else {
+                    // Brand-new record. Heavy work off-main:
+                    //   1. thumbnail (already on thumbnail actor)
+                    //   2. perceptual hash (CPU)
+                    //   3. near-dup scan (CPU + thread-safe lock)
+                    try? await self.thumbnailService.generateThumbnail(for: fileToHash, sha256: hash)
+                    let pHash = try? PerceptualHash.compute(for: fileToHash)
+                    if let pHash {
+                        mutableItem.perceptualHash = pHash
+                    }
+
+                    var nearDupMatch: NearDuplicateMatch?
+                    if settings.detectNearDuplicates, let pHash {
+                        let originalFilename = item.originalFilename
+                        let candidates = candidatesLock.withLock { $0 }
+                        for candidate in candidates {
+                            let distance = PerceptualHash.hammingDistance(pHash, candidate.hash)
+                            if distance < settings.nearDuplicateThreshold {
+                                nearDupMatch = NearDuplicateMatch(
+                                    newFilename: originalFilename,
+                                    newSha256: hash,
+                                    existingFilename: candidate.filename,
+                                    existingSha256: candidate.sha256,
+                                    hammingDistance: distance
+                                )
+                                break
+                            }
+                        }
+                        candidatesLock.withLock {
+                            $0.append((hash, originalFilename, pHash))
+                        }
+                    }
+
+                    let activeFilename = item.activeFilename
+                    let pHashCopy = pHash
+                    let matchToAppend = nearDupMatch
+                    await MainActor.run {
+                        let modelContext = ctx.value
+                        let record = ImageRecord(
+                            sha256: hash,
+                            filename: activeFilename,
+                            sizeBytes: size,
+                            phAssetLocalIdentifier: phAssetId
+                        )
+                        record.thumbnailState = .generated
+                        if let pHashCopy {
+                            record.perceptualHash = pHashCopy
+                        }
+                        if let matchToAppend {
+                            progress.nearDuplicates.append(matchToAppend)
+                            progress.nearDuplicatesFound += 1
+                        }
+                        modelContext.insert(record)
+                        recordsBySHA[hash] = record
+                    }
+                    mutableItem.snapshot = ImageRecordSnapshot(
+                        sha256: hash,
+                        filename: activeFilename,
+                        sizeBytes: size,
+                        isNew: true
+                    )
+                }
+            } catch {
+                let errMsg = "Hash failed: \(item.originalFilename) — \(error.localizedDescription)"
+                mutableItem.error = errMsg
+                await MainActor.run { progress.errors.append(errMsg) }
+            }
+
+            let fname = item.originalFilename
+            await MainActor.run {
+                progress.filesHashed += 1
+                progress.currentFile = progress.filesHashed
+                progress.currentFilename = fname
+            }
+            await outputCh.send(mutableItem)
+        }
+    }
+
+    /// Encrypts new files. Synchronous AES-GCM runs off-main.
+    private nonisolated func runEncryptionStage(
+        inputCh: AsyncChannel<PipelineItem>,
+        outputCh: AsyncChannel<PipelineItem>,
+        staging: URL,
+        encKey: SymmetricKey,
+        encKeyId: String?,
+        recordsBySHA: RecordLookup,
+        progress: PhotosImportProgress
+    ) async {
+        defer { outputCh.finish() }
+        await MainActor.run {
+            progress.phase = .encrypting
+            progress.currentFile = 0
+        }
+
+        for await item in inputCh.stream {
+            await inputCh.consumed()
+            if Task.isCancelled { break }
+
+            var mutableItem = item
+            guard let snap = item.snapshot, item.error == nil, snap.isNew else {
+                await outputCh.send(mutableItem)
+                continue
+            }
+
+            let encryptedURL = staging.appendingPathComponent(snap.filename + ".enc")
+            do {
+                let (nonce, encSize) = try EncryptionService.encryptFileWithKey(
+                    at: item.activeFileURL, to: encryptedURL, sha256: snap.sha256, key: encKey
+                )
+                mutableItem.encryptedURL = encryptedURL
+                mutableItem.encryptionNonce = nonce
+                mutableItem.encryptedSize = encSize
+
+                let sha = snap.sha256
+                let fname = snap.filename
+                await MainActor.run {
+                    if let record = recordsBySHA[sha] {
+                        record.isEncrypted = true
+                        record.encryptionNonce = nonce
+                        record.encryptionKeyId = encKeyId
+                    }
+                    progress.filesEncrypted += 1
+                    progress.currentFile = progress.filesEncrypted
+                    progress.currentFilename = fname
+                }
+            } catch {
+                let errMsg = "Encrypt failed: \(snap.filename) — \(error.localizedDescription)"
+                mutableItem.error = errMsg
+                await MainActor.run { progress.errors.append(errMsg) }
+            }
+
+            await outputCh.send(mutableItem)
+        }
+    }
+
+    /// Generates PAR2 recovery data. File I/O, Reed-Solomon math, and Metal
+    /// dispatch all run off-main; the per-file `onProgress` callback hops
+    /// back to MainActor explicitly.
+    private nonisolated func runPAR2Stage(
+        inputCh: AsyncChannel<PipelineItem>,
+        outputCh: AsyncChannel<PipelineItem>,
+        staging: URL,
+        cancelFlag: OSAllocatedUnfairLock<Bool>,
+        recordsBySHA: RecordLookup,
+        progress: PhotosImportProgress
+    ) async {
+        defer { outputCh.finish() }
+        await MainActor.run {
+            progress.phase = .par2
+            progress.currentFile = 0
+        }
+
+        for await item in inputCh.stream {
+            await inputCh.consumed()
+            if Task.isCancelled { break }
+
+            var mutableItem = item
+            guard let snap = item.snapshot, item.error == nil, snap.isNew else {
+                await outputCh.send(mutableItem)
+                continue
+            }
+
+            let snapFilename = snap.filename
+            await MainActor.run {
+                progress.currentFilename = snapFilename
+                progress.par2FileFraction = 0
+            }
+
+            do {
+                let par2URL = try self.redundancyService.generatePAR2(
+                    for: item.activeFileURL,
+                    outputDirectory: staging,
+                    onProgress: { fraction in
+                        Task { @MainActor in
+                            progress.par2FileFraction = fraction
+                        }
+                    },
+                    cancelFlag: cancelFlag
+                )
+                mutableItem.par2Filename = par2URL.lastPathComponent
+                mutableItem.par2URL = par2URL
+
+                let sha = snap.sha256
+                let par2Name = par2URL.lastPathComponent
+                await MainActor.run {
+                    if let record = recordsBySHA[sha] {
+                        record.par2Filename = par2Name
+                    }
+                    progress.filesProtected += 1
+                    progress.currentFile += 1
+                }
+            } catch {
+                let errMsg = "PAR2 failed: \(snap.filename) — \(error.localizedDescription)"
+                mutableItem.error = errMsg
+                await MainActor.run {
+                    progress.errors.append(errMsg)
+                    progress.currentFile += 1
+                }
+            }
+
+            await outputCh.send(mutableItem)
+        }
+    }
+
+    /// Copies files (and PAR2 companions) to external volumes. Per-file I/O
+    /// runs off-main. Volume cleanup (lastSyncedAt + stop access) runs after
+    /// the loop and is MainActor.run-non-cancellable so it always completes.
+    private nonisolated func runCopyStage(
+        inputCh: AsyncChannel<PipelineItem>,
+        outputCh: AsyncChannel<PipelineItem>,
+        staging: URL,
+        settings: ImportSettings,
+        resolvedVolumes: [ResolvedVolume],
+        volumeRecords: UnsafeSendable<[(volumeID: String, record: VolumeRecord)]>,
+        recordsBySHA: RecordLookup,
+        progress: PhotosImportProgress
+    ) async {
+        defer { outputCh.finish() }
+        await MainActor.run {
+            progress.phase = .copying
+            progress.currentFile = 0
+        }
+
+        for await item in inputCh.stream {
+            await inputCh.consumed()
+            if Task.isCancelled { break }
+
+            var mutableItem = item
+            guard let snap = item.snapshot, item.error == nil else {
+                await outputCh.send(mutableItem)
+                continue
+            }
+
+            let sourceFile = item.activeFileURL
+            var newLocations: [StorageLocation] = []
+            var copyErrors: [String] = []
+
+            for vol in resolvedVolumes {
+                let destBase = vol.url
+                    .appendingPathComponent(settings.year, isDirectory: true)
+                    .appendingPathComponent(settings.month, isDirectory: true)
+                    .appendingPathComponent(settings.day, isDirectory: true)
+                    .appendingPathComponent(settings.albumName, isDirectory: true)
+
+                do {
+                    try FileManager.default.createDirectory(at: destBase, withIntermediateDirectories: true)
+
+                    let dest = destBase.appendingPathComponent(snap.filename)
+                    if !FileManager.default.fileExists(atPath: dest.path) {
+                        try FileManager.default.copyItem(at: sourceFile, to: dest)
+                    }
+
+                    let relativePath = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)/\(snap.filename)"
+                    let location = StorageLocation(volumeID: vol.volumeID, relativePath: relativePath)
+                    if !mutableItem.storageLocations.contains(location) {
+                        mutableItem.storageLocations.append(location)
+                    }
+                    newLocations.append(location)
+
+                    // Copy PAR2 companion files (index + vol)
+                    if !item.par2Filename.isEmpty {
+                        let companions = RedundancyService.companionFiles(
+                            forIndex: item.par2Filename, in: staging
+                        )
+                        for companion in companions {
+                            let cdest = destBase.appendingPathComponent(companion.lastPathComponent)
+                            if !FileManager.default.fileExists(atPath: cdest.path) {
+                                try FileManager.default.copyItem(at: companion, to: cdest)
+                            }
+                        }
+                    }
+                } catch {
+                    copyErrors.append("Copy failed: \(snap.filename) to \(vol.label) — \(error.localizedDescription)")
+                }
+            }
+
+            // Mirror original behavior: mutableItem.error reflects the last per-volume failure.
+            if let lastErr = copyErrors.last {
+                mutableItem.error = lastErr
+            }
+
+            let sha = snap.sha256
+            let locsToAppend = newLocations
+            let errsToAppend = copyErrors
+            await MainActor.run {
+                if let record = recordsBySHA[sha] {
+                    for location in locsToAppend {
+                        if !record.storageLocations.contains(location) {
+                            record.storageLocations.append(location)
+                        }
+                    }
+                }
+                for err in errsToAppend {
+                    progress.errors.append(err)
+                }
+                progress.filesCopied += 1
+            }
+
+            await outputCh.send(mutableItem)
+        }
+
+        // Cleanup runs whether the loop ended naturally or via cancellation.
+        await MainActor.run {
+            for (_, volRecord) in volumeRecords.value {
+                volRecord.lastSyncedAt = .now
+            }
+        }
+        for vol in resolvedVolumes {
+            vol.url.stopAccessingSecurityScopedResource()
+        }
+    }
+
+    /// Uploads to B2. Network I/O is already async; only progress + record
+    /// mutations need MainActor hops.
+    private nonisolated func runUploadStage(
+        inputCh: AsyncChannel<PipelineItem>,
+        outputCh: AsyncChannel<PipelineItem>,
+        staging: URL,
+        settings: ImportSettings,
+        credentials: B2Credentials,
+        recordsBySHA: RecordLookup,
+        progress: PhotosImportProgress
+    ) async {
+        defer { outputCh.finish() }
+        await MainActor.run {
+            progress.phase = .uploading
+            progress.currentFile = 0
+        }
+
+        for await item in inputCh.stream {
+            await inputCh.consumed()
+            if Task.isCancelled { break }
+
+            var mutableItem = item
+            guard let snap = item.snapshot, item.error == nil else {
+                await outputCh.send(mutableItem)
+                continue
+            }
+
+            let remotePath = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)/\(snap.filename)"
+
+            do {
+                let alreadyExists = try await self.b2Service.fileExists(
+                    fileName: remotePath,
+                    bucketId: credentials.bucketId,
+                    credentials: credentials
+                )
+
+                if !alreadyExists {
+                    let uploadOnAttempt: @Sendable (Int) -> Void = { attempt in
+                        Task { @MainActor in
+                            if attempt == 0 {
+                                progress.health = .normal
+                            } else {
+                                progress.health = .slow(.b2Retrying(attempt: attempt))
+                            }
+                        }
+                    }
+                    let fileId = try await self.b2Service.uploadImage(
+                        fileURL: item.activeFileURL,
+                        remotePath: remotePath,
+                        sha256: snap.sha256,
+                        credentials: credentials,
+                        onAttempt: uploadOnAttempt
+                    )
+                    mutableItem.b2FileId = fileId
+                    let sha = snap.sha256
+                    await MainActor.run {
+                        if let record = recordsBySHA[sha] {
+                            record.b2FileId = fileId
+                        }
+                    }
+                } else {
+                    let sha = snap.sha256
+                    let needsBackfill: Bool = await MainActor.run {
+                        if let record = recordsBySHA[sha], record.b2FileId == nil {
+                            return true
+                        }
+                        return false
+                    }
+                    if needsBackfill {
+                        let listings = try await self.b2Service.listAllFiles(
+                            bucketId: credentials.bucketId,
+                            credentials: credentials,
+                            prefix: remotePath
+                        )
+                        if let listing = listings.first(where: { $0.fileName == remotePath }) {
+                            let fileId = listing.fileId
+                            await MainActor.run {
+                                if let record = recordsBySHA[sha] {
+                                    record.b2FileId = fileId
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Upload PAR2 companion files (index + vol)
+                if !item.par2Filename.isEmpty {
+                    let companions = RedundancyService.companionFiles(
+                        forIndex: item.par2Filename, in: staging
+                    )
+                    let remoteBase = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)"
+                    for companion in companions {
+                        let remoteName = "\(remoteBase)/\(companion.lastPathComponent)"
+                        let exists = try await self.b2Service.fileExists(
+                            fileName: remoteName,
+                            bucketId: credentials.bucketId,
+                            credentials: credentials
+                        )
+                        if !exists {
+                            _ = try await self.b2Service.uploadImage(
+                                fileURL: companion,
+                                remotePath: remoteName,
+                                sha256: "",
+                                credentials: credentials
+                            )
+                        }
+                    }
+                }
+
+                let fname = snap.filename
+                await MainActor.run {
+                    progress.filesUploaded += 1
+                    progress.currentFile = progress.filesUploaded
+                    progress.currentFilename = fname
+                }
+            } catch {
+                let errMsg = error.localizedDescription
+                mutableItem.error = errMsg
+                await MainActor.run { progress.errors.append(errMsg) }
+            }
+
+            await outputCh.send(mutableItem)
+        }
+    }
 }
