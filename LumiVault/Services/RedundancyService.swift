@@ -748,6 +748,25 @@ actor RedundancyService {
         }
     }
 
+    /// Return existing `<base>.vol*.par2` files in `directory` whose name is not in `keepNames`.
+    /// Used to evict orphan vol files left over from earlier PAR2 generations of a file whose
+    /// size has since changed (which shifts the `vol0+N` suffix).
+    nonisolated static func staleVolFiles(
+        forIndex indexFilename: String,
+        keep keepNames: Set<String>,
+        in directory: URL
+    ) -> [URL] {
+        guard indexFilename.hasSuffix(".par2") else { return [] }
+        let baseName = String(indexFilename.dropLast(5)) // remove ".par2"
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return [] }
+        return files.filter { url in
+            let name = url.lastPathComponent
+            let isVol = name.hasPrefix(baseName + ".vol") && name.hasSuffix(".par2")
+            return isVol && !keepNames.contains(name)
+        }
+    }
+
     // MARK: - Legacy PV2R Format Compatibility
 
     nonisolated private func verifyLegacy(par2Data: Data, originalFileURL: URL) throws -> Bool {
