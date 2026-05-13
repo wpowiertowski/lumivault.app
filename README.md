@@ -133,7 +133,7 @@ xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultUITests -destinati
 | CatalogServiceMergeTests | 5 | Disjoint merge, SHA union, new albums, timestamps, deduplication |
 | CatalogRemovalTests | 3 | Album removal, empty container pruning, single image removal |
 | HasherServiceTests | 4 | Fixture hash verification, empty file, size tracking, consistency |
-| RedundancyServiceTests | 11 | PAR2 2.0 generate/verify, corrupt-and-repair round-trip, split file format, par2cmdline interop (verify + repair), edge cases |
+| RedundancyServiceTests | 12 | PAR2 2.0 generate/verify, corrupt-and-repair round-trip, split file format, par2cmdline interop (verify + repair), stale vol-file identification, edge cases |
 | PerceptualHashTests | 7 | Hamming distance, symmetry, thresholds, invalid input |
 | SwiftDataModelTests | 5 | Relationships, defaults, Codable support types |
 | ReconciliationDiffTests | 5 | B2 diff: matched, dangling, orphan, PAR2 skip, mixed scenario |
@@ -142,7 +142,7 @@ xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultUITests -destinati
 | EncryptionServiceTests | 17 | Key derivation, encrypt/decrypt round-trip (data + file), wrong key/AD rejection, nonce uniqueness, static method interop |
 | B2ServiceHelperTests | 7 | SHA-1 known vectors, HTTP response validation (success + error codes) |
 | PhotosImportProgressTests | 6 | Pipelined import progress: empty, mid-phase, complete, PAR2 sub-progress, multi-album, dropped-files counter |
-| CatalogBackupServiceTests | 4 | Volume backup/restore round-trip, error reporting, missing catalog |
+| CatalogBackupServiceTests | 5 | Volume backup/restore round-trip, error reporting, missing catalog, orphan vol-file eviction |
 | ImageConversionTests | 5 | JPEG conversion, dimension scaling, below-max preservation, no-op pass-through |
 | PerceptualHashComputeTests | 3 | dHash compute returns 8 bytes, deterministic output, non-image rejection |
 | EncryptPAR2IntegrationTests | 2 | Encrypt→PAR2→corrupt→repair→decrypt round-trip, uncorrupted verification |

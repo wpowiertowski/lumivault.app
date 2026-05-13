@@ -368,6 +368,36 @@ struct RedundancyServiceTests {
         #expect(!volFiles.isEmpty)
     }
 
+    @Test func staleVolFilesIdentifiesOrphansOnly() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("lumivault-stale-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        // Seed the directory with: index, one current vol, two orphan vols from earlier
+        // generations, plus an unrelated file that must not be touched.
+        let placeholders = [
+            "catalog.json.par2",
+            "catalog.json.vol0+1.par2",   // orphan
+            "catalog.json.vol0+5.par2",   // orphan
+            "catalog.json.vol0+16.par2",  // current
+            "catalog.json",               // unrelated
+            "other.par2",                 // unrelated
+        ]
+        for name in placeholders {
+            try Data().write(to: dir.appendingPathComponent(name))
+        }
+
+        let stale = RedundancyService.staleVolFiles(
+            forIndex: "catalog.json.par2",
+            keep: ["catalog.json.par2", "catalog.json.vol0+16.par2"],
+            in: dir
+        )
+
+        let staleNames = Set(stale.map { $0.lastPathComponent })
+        #expect(staleNames == ["catalog.json.vol0+1.par2", "catalog.json.vol0+5.par2"])
+    }
+
     @Test func par2VerifyFailsOnSizeMismatch() async throws {
         let service = RedundancyService()
         let spec = TestFixtures.files[3] // forest.heic, 8192 bytes
@@ -1671,6 +1701,35 @@ struct CatalogBackupServiceTests {
         let originalCount = catalog.years.values.flatMap { $0.months.values }.flatMap { $0.days.values }.flatMap { $0.albums.values }.flatMap { $0.images }.count
         let restoredCount = restored.years.values.flatMap { $0.months.values }.flatMap { $0.days.values }.flatMap { $0.albums.values }.flatMap { $0.images }.count
         #expect(restoredCount == originalCount)
+    }
+
+    @Test func backupToVolumeEvictsOrphanVolFiles() async throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-evict-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        // Seed two orphan vol files with large counts that can't match the recovery-block
+        // count of the small TestFixtures catalog (which has only 1 block).
+        let orphan1 = tmpDir.appendingPathComponent("catalog.json.vol0+88.par2")
+        let orphan2 = tmpDir.appendingPathComponent("catalog.json.vol0+99.par2")
+        try Data([0xDE, 0xAD]).write(to: orphan1)
+        try Data([0xBE, 0xEF]).write(to: orphan2)
+
+        let catalog = TestFixtures.catalog()
+        let service = CatalogBackupService()
+        let volume = VolumeSnapshot(volumeID: "vol-evict", label: "EvictVol", mountURL: tmpDir)
+
+        let errors = await service.backupToVolumes(catalog: catalog, volumes: [volume])
+        #expect(errors.isEmpty)
+
+        #expect(!fm.fileExists(atPath: orphan1.path))
+        #expect(!fm.fileExists(atPath: orphan2.path))
+
+        // Exactly one current vol file should remain alongside the index.
+        let companions = RedundancyService.companionFiles(forIndex: "catalog.json.par2", in: tmpDir)
+        let volFiles = companions.filter { $0.lastPathComponent.contains(".vol") }
+        #expect(volFiles.count == 1)
     }
 
     @Test func backupToVolumeReportsErrorForBadPath() async {

@@ -2,14 +2,14 @@
 
 ## Existing Automated Test Assessment
 
-### Summary: 112 tests across 22 suites
+### Summary: 114 tests across 22 suites
 
 | Rating | Suite | Tests | Assessment |
 | -------- | ------- | ------- | ------------ |
 | High Value | EncryptionServiceTests | 17 | Key derivation determinism, encrypt/decrypt round-trip (data + file), wrong key/AD rejection, nonce uniqueness, static method interop |
 | High Value | EncryptPAR2IntegrationTests | 2 | Full encrypt-PAR2-corrupt-repair-decrypt pipeline, uncorrupted encrypted file passes PAR2 verification |
 | High Value | EncryptionEdgeCaseTests | 4 | Empty data, ciphertext size = plaintext+16, 1MB large data round-trip, file-level encrypted size check |
-| High Value | RedundancyServiceTests | 11 | Core data-integrity logic. Covers PAR2 2.0 encode, verify, corrupt-and-repair round-trips, split file format, par2cmdline interop (verify + repair), edge cases. Irreplaceable. |
+| High Value | RedundancyServiceTests | 12 | Core data-integrity logic. Covers PAR2 2.0 encode, verify, corrupt-and-repair round-trips, split file format, par2cmdline interop (verify + repair), stale vol-file identification, edge cases. Irreplaceable. |
 | High Value | CatalogServiceMergeTests | 5 | Union-by-SHA merge, timestamp precedence, dedup — exactly the logic that protects multi-device iCloud sync. |
 | High Value | CatalogRemovalTests | 3 | Album removal, empty container pruning, single-image removal — validates catalog mutation correctness. |
 | High Value | VolumeScanTests | 4 | Reconciliation scan: dangling locations, orphan detection, healthy pass, unmounted skip. Core integrity flow. |
@@ -18,7 +18,7 @@
 | High Value | PhotosLibraryMonitorDiffTests | 4 | Album diff core (PHAsset-free `computeDeltaParts`): additions only, removals only, mixed delta, no-change pass-through. Validates the Photos auto-sync logic without PhotoKit fixtures. |
 | Medium Value | B2ServiceHelperTests | 7 | SHA-1 known test vectors, HTTP response validation for success (200, 299) and error (401, 500) status codes |
 | Medium Value | PhotosImportProgressTests | 6 | Fraction calculation for the pipelined import: empty state, import-phase progress, mid-pipeline progress, complete, multi-album, and `filesDropped` counter tracking items silently lost in the pipeline. |
-| Medium Value | CatalogBackupServiceTests | 4 | Volume backup write + decode, error on bad path, file restore round-trip, missing catalog error |
+| Medium Value | CatalogBackupServiceTests | 5 | Volume backup write + decode, error on bad path, file restore round-trip, missing catalog error, orphan vol-file eviction |
 | Medium Value | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture hash verification |
 | Medium Value | ImageConversionTests | 5 | JPEG conversion with extension change, valid output, dimension scaling, original format pass-through, below-max preservation. Tests exercise the shared `ImageConversionService.convertImage`. |
 | Medium Value | HasherServiceTests | 4 | Fixture hash verification is the trust anchor for the entire test suite. Empty file + consistency checks are useful but simple. |

@@ -37,6 +37,8 @@ actor CatalogBackupService {
             return RedundancyService.companionFiles(forIndex: indexURL.lastPathComponent, in: tmpDir)
         }()
 
+        let currentPar2Names = Set(par2Files.map { $0.lastPathComponent })
+
         for volume in volumes {
             let mountURL = volume.mountURL
             let destURL = mountURL.appendingPathComponent("catalog.json")
@@ -48,6 +50,16 @@ actor CatalogBackupService {
                     let dest = mountURL.appendingPathComponent(par2File.lastPathComponent)
                     let fileData = try Data(contentsOf: par2File)
                     try fileData.write(to: dest, options: .atomic)
+                }
+                // Evict orphan vol files from prior generations (their vol0+N suffix
+                // shifts when catalog.json's size — and thus block count — changes).
+                let stale = RedundancyService.staleVolFiles(
+                    forIndex: "catalog.json.par2",
+                    keep: currentPar2Names,
+                    in: mountURL
+                )
+                for url in stale {
+                    try? FileManager.default.removeItem(at: url)
                 }
             } catch {
                 errors.append("Failed to save catalog to \(volume.label): \(error.localizedDescription)")
@@ -119,6 +131,23 @@ actor CatalogBackupService {
                     fileURL: par2File,
                     remotePath: par2File.lastPathComponent,
                     sha256: Catalog.sha256Hex(of: par2Data),
+                    credentials: credentials
+                )
+            }
+
+            // Evict orphan catalog.json.vol*.par2 objects from prior generations.
+            // The vol0+N suffix shifts when catalog.json's size changes, so re-upload
+            // alone leaves the old vol object in the bucket.
+            let currentNames = Set(par2Files.map { $0.lastPathComponent })
+            let existing = try await b2Service.listAllFiles(
+                bucketId: credentials.bucketId,
+                credentials: credentials,
+                prefix: "catalog.json.vol"
+            )
+            for file in existing where file.fileName.hasSuffix(".par2") && !currentNames.contains(file.fileName) {
+                try? await b2Service.deleteFile(
+                    fileId: file.fileId,
+                    fileName: file.fileName,
                     credentials: credentials
                 )
             }
