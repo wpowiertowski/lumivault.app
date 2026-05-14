@@ -29,6 +29,15 @@ actor SyncService {
         }
     }
 
+    /// Test-only initializer that points at an explicit file URL and bypasses
+    /// NSFileCoordinator. Lets unit tests exercise push/pull/merge against a temp
+    /// directory without requiring an iCloud entitlement.
+    init(catalogService: CatalogService, syncURL: URL) {
+        self.catalogService = catalogService
+        self.syncURL = syncURL
+        self.usesICloud = false
+    }
+
     var isICloudAvailable: Bool {
         usesICloud || isDebugFallbackAvailable
     }

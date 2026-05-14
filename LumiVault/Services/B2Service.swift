@@ -4,12 +4,18 @@ import CryptoKit
 actor B2Service {
     private var authorization: B2Authorization?
     private var uploadURL: B2UploadURL?
-    private let session: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 90
-        config.timeoutIntervalForResource = 300
-        return URLSession(configuration: config)
-    }()
+    private let session: URLSession
+
+    init(session: URLSession? = nil) {
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 90
+            config.timeoutIntervalForResource = 300
+            self.session = URLSession(configuration: config)
+        }
+    }
 
     // MARK: - Authorize
 
