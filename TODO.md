@@ -36,10 +36,10 @@ Items that would improve test coverage but require architectural changes.
 
 Source: TEST-PLAN.md "Remaining Automated Test TODOs"
 
-- [ ] **B2Service network methods** (upload, download, list, delete) — needs URLSession protocol abstraction or URLProtocol subclass for HTTP mocking. Medium effort.
-- [ ] **PipelinedImportCoordinator pipeline** — channel backpressure, cancellation teardown, and phase-skipping wiring are testable in isolation. Full end-to-end pipeline still needs protocol-based service injection. Medium effort.
-- [ ] **AsyncChannel / AsyncSemaphore** — new utilities with cancellation semantics (cancelAll unblocks waiters). No unit tests yet. Low effort.
-- [ ] **SyncService push/pull/merge** — depends on FileManager ubiquity container + NSFileCoordinator; needs filesystem abstraction. Medium effort.
+- [x] **B2Service network methods** (upload, download, list, delete) — covered by B2ServiceNetworkTests via URLProtocol stub (authorize, getUploadURL, uploadFile, list pagination, fileExists, delete).
+- [x] **AsyncChannel / AsyncSemaphore** — covered by AsyncPrimitivesTests (backpressure, finish, cancel-unblocks-producer, multi-producer race, cancelAll semantics).
+- [x] **SyncService push/pull/merge** — covered by SyncServiceTests against a temp directory via the test-only init that bypasses NSFileCoordinator.
+- [ ] **PipelinedImportCoordinator end-to-end** — channel/semaphore primitives are now covered; full pipeline orchestration (sentinel task, phase-skipping wiring, service interactions) still needs protocol-based service injection. Medium effort.
 - [ ] **SyncCoordinator state machine** — orchestrates 3 services + UserDefaults + SwiftData; needs dependency injection. Medium effort.
 - [ ] **ThumbnailService cache logic** — two-level cache (NSCache + disk); CIContext renders all-white at small sizes in headless CI. Low value vs manual QA.
 - [ ] **PerceptualHash visual distinctness** — CIContext.render produces all-white pixels in headless test environments at 9x8 resolution. CI environment limitation.

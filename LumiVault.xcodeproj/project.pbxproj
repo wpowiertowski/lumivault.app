@@ -38,8 +38,10 @@
 		582ECC00817146472B6B1B4F /* ThumbnailService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1C282CA4BBA78763E15C190 /* ThumbnailService.swift */; };
 		59544439E11F04EE2898B7E5 /* PhotoDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32A9013EC3BE7075A355EC39 /* PhotoDetailView.swift */; };
 		5AB47F22282371B278D838D5 /* CloudSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22F376C53109DC45304A767E /* CloudSettingsView.swift */; };
+		62A3225E923219B9A991A8AF /* B2ServiceNetworkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B11AF157144E4837D8EE913 /* B2ServiceNetworkTests.swift */; };
 		669DDC7D1389AB0C47C80F66 /* ImportFromPhotosCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61D15F535FF979828BFF185F /* ImportFromPhotosCommands.swift */; };
 		6780E2492025225BB83B874D /* ReconciliationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93F0123F93F18FC16E95D05C /* ReconciliationService.swift */; };
+		6AC34B6A81FDAB65294F85C9 /* AsyncPrimitivesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4DA177B337BD6A1C2268C14 /* AsyncPrimitivesTests.swift */; };
 		6BE9B8EC4FBAFD4CC89C300A /* PhotosImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 284BC984EF9D9F34D67DD279 /* PhotosImportSheet.swift */; };
 		7606BCE424A01DC36A651519 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 06D0EEE7A6946D0748E5A6C4 /* Assets.xcassets */; };
 		7623A3D396C608719188049B /* AlbumRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = B389A2EDF5A08E2BE8AF007A /* AlbumRecord.swift */; };
@@ -50,6 +52,7 @@
 		863485B86E9A23410301996B /* ImportProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C07AF15364718C2056F0DE5F /* ImportProgressView.swift */; };
 		89320CFF58AE00D892F6E805 /* ReconciliationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D306B41680CB9765C3B46CC /* ReconciliationView.swift */; };
 		8BF3B0F0C701C584B70F424E /* ImportSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E01DC6510FDA76A175275263 /* ImportSettingsView.swift */; };
+		8CD050FBD82D0F256781112F /* SyncServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93EA5474D335D73AA5521633 /* SyncServiceTests.swift */; };
 		8E278B72DB5073512F515562 /* ImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 937E65EE6EF8CEA2B9443D20 /* ImportSheet.swift */; };
 		901ED8814C1AF339CD3CAC25 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6E2C8CD562F32019EB774DA /* ContentView.swift */; };
 		92A8BF69B17C32CBBA801C36 /* AlbumDeletionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 795EC7A08A0ABF43F828C239 /* AlbumDeletionSheet.swift */; };
@@ -146,7 +149,9 @@
 		7FD4E291C18518482ADDCA6A /* AsyncSemaphore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncSemaphore.swift; sourceTree = "<group>"; };
 		93793FFEB071EF35882DC3F8 /* GamesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamesTests.swift; sourceTree = "<group>"; };
 		937E65EE6EF8CEA2B9443D20 /* ImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportSheet.swift; sourceTree = "<group>"; };
+		93EA5474D335D73AA5521633 /* SyncServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncServiceTests.swift; sourceTree = "<group>"; };
 		93F0123F93F18FC16E95D05C /* ReconciliationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconciliationService.swift; sourceTree = "<group>"; };
+		9B11AF157144E4837D8EE913 /* B2ServiceNetworkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = B2ServiceNetworkTests.swift; sourceTree = "<group>"; };
 		A26A124182F5946F24CB1ADD /* PhotoGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoGridView.swift; sourceTree = "<group>"; };
 		A4B64E8F8B0DBDF7B71FF1E6 /* VolumeSyncSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeSyncSheet.swift; sourceTree = "<group>"; };
 		A4CACCF602F3A573BC7627EE /* EncryptionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EncryptionSettingsView.swift; sourceTree = "<group>"; };
@@ -174,6 +179,7 @@
 		E68790766AAC0D4983E632CB /* B2SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = B2SettingsView.swift; sourceTree = "<group>"; };
 		E69F5FC018A6F4282FD4B52D /* PhotosLibraryMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosLibraryMonitor.swift; sourceTree = "<group>"; };
 		E7C8416D7A7C9047F26714AD /* LumiVaultUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumiVaultUITests.swift; sourceTree = "<group>"; };
+		F4DA177B337BD6A1C2268C14 /* AsyncPrimitivesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncPrimitivesTests.swift; sourceTree = "<group>"; };
 		F90BF32093AC2357CD61747D /* Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalog.swift; sourceTree = "<group>"; };
 		FC1982FE3C2E560E783753AF /* PhotosImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosImportService.swift; sourceTree = "<group>"; };
 		FE52C702FD0948C6E836DC57 /* ImportDefaultsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportDefaultsSettingsView.swift; sourceTree = "<group>"; };
@@ -284,8 +290,11 @@
 		9C3D24AB41A21A14162BA2AA /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				F4DA177B337BD6A1C2268C14 /* AsyncPrimitivesTests.swift */,
+				9B11AF157144E4837D8EE913 /* B2ServiceNetworkTests.swift */,
 				93793FFEB071EF35882DC3F8 /* GamesTests.swift */,
 				D4F69A5682C9063F979E533C /* LumiVaultTests.swift */,
+				93EA5474D335D73AA5521633 /* SyncServiceTests.swift */,
 				2CFB81A5F9B3F78322F61142 /* TestFixtures.swift */,
 			);
 			path = Tests;
@@ -612,8 +621,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6AC34B6A81FDAB65294F85C9 /* AsyncPrimitivesTests.swift in Sources */,
+				62A3225E923219B9A991A8AF /* B2ServiceNetworkTests.swift in Sources */,
 				7C25361151B59326946F5367 /* GamesTests.swift in Sources */,
 				2AB3DBBB033427F0060FC5E2 /* LumiVaultTests.swift in Sources */,
+				8CD050FBD82D0F256781112F /* SyncServiceTests.swift in Sources */,
 				27E6FC12E9C96DA903E62582 /* TestFixtures.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

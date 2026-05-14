@@ -5,6 +5,7 @@ import Foundation
 // MARK: - AsyncSemaphore
 
 @Suite
+@MainActor
 struct AsyncSemaphoreTests {
 
     @Test func waitConsumesAvailableCount() async {
@@ -76,6 +77,7 @@ struct AsyncSemaphoreTests {
 // MARK: - AsyncChannel
 
 @Suite
+@MainActor
 struct AsyncChannelTests {
 
     @Test func sendAndReceive() async {
