@@ -117,7 +117,7 @@ LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool
 
 ## Testing
 
-112 unit tests across 22 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
+154 unit tests across 28 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
 
 ```bash
 swift test                                    # Run all unit tests
@@ -141,6 +141,10 @@ xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultUITests -destinati
 | DeletionServiceTests | 7 | Volume file removal, PAR2 companion, unmounted skip, bulk delete, edge cases |
 | EncryptionServiceTests | 17 | Key derivation, encrypt/decrypt round-trip (data + file), wrong key/AD rejection, nonce uniqueness, static method interop |
 | B2ServiceHelperTests | 7 | SHA-1 known vectors, HTTP response validation (success + error codes) |
+| B2ServiceNetworkTests | 11 | End-to-end B2 REST flow via URLProtocol stub: authorize, getUploadURL, uploadFile, list pagination, fileExists, delete |
+| SyncServiceTests | 7 | push/pull/merge against a temp directory: round-trip, missing file, corrupt JSON, remote/local union |
+| AsyncChannelTests | 5 | Bounded async channel: send/receive, backpressure, finish, cancel unblocks producers, multi-producer race |
+| AsyncSemaphoreTests | 5 | Counting semaphore: wait/signal, suspension at zero, cancelAll resumes every waiter |
 | PhotosImportProgressTests | 6 | Pipelined import progress: empty, mid-phase, complete, PAR2 sub-progress, multi-album, dropped-files counter |
 | CatalogBackupServiceTests | 5 | Volume backup/restore round-trip, error reporting, missing catalog, orphan vol-file eviction |
 | ImageConversionTests | 5 | JPEG conversion, dimension scaling, below-max preservation, no-op pass-through |
@@ -151,6 +155,8 @@ xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultUITests -destinati
 | ImportSettingsTests | 1 | Default near-duplicate threshold value matches `Constants.Dedup` |
 | PhotosLibraryMonitorDiffTests | 4 | Album diff: additions, removals, mixed delta, no-change pass-through |
 | PhotosSyncSchemaTests | 2 | Lightweight migration smoke tests for `phAssetLocalIdentifier` / `photosAlbumLocalIdentifier` |
+| SnakeGameTests | 7 | Easter-egg Snake game state machine: initial state, tick movement, no-direct-reverse, wall collision, food growth, reset |
+| FlappyGameTests | 5 | Easter-egg Flappy game state machine: hover-before-flap, flap impulse, gravity, floor collision, reset |
 | **LumiVaultUITests** | **12** | **XCUIAutomation (local only): welcome screen, navigation, settings tabs, import flow, deletion context menu** |
 
 ## Requirements

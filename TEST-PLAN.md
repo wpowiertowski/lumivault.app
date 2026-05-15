@@ -2,7 +2,7 @@
 
 ## Existing Automated Test Assessment
 
-### Summary: 114 tests across 22 suites
+### Summary: 154 tests across 28 suites
 
 | Rating | Suite | Tests | Assessment |
 | -------- | ------- | ------- | ------------ |
@@ -16,6 +16,10 @@
 | High Value | DeletionServiceTests | 7 | File removal from volumes, PAR2 companion cleanup, unmounted volume skip, bulk delete, edge cases. Real FS operations. |
 | High Value | ReconciliationDiffTests | 5 | B2 diff logic: matched, dangling B2 IDs, orphans, PAR2 skip, mixed scenarios. Pure logic, well-structured. |
 | High Value | PhotosLibraryMonitorDiffTests | 4 | Album diff core (PHAsset-free `computeDeltaParts`): additions only, removals only, mixed delta, no-change pass-through. Validates the Photos auto-sync logic without PhotoKit fixtures. |
+| High Value | B2ServiceNetworkTests | 11 | End-to-end B2 REST flow via URLProtocol stub: authorize (Basic auth + 401), getUploadURL (auth gating + decode), uploadFile (headers, sha1, single-use URL), list pagination, fileExists hit/miss, delete file. |
+| High Value | SyncServiceTests | 7 | push writes encoded catalog and creates parent dirs; pull returns nil/decodes/unions with local; push-then-pull round-trip; corrupt remote JSON propagates an error. Bypasses NSFileCoordinator via test-only init. |
+| High Value | AsyncChannelTests | 5 | Bounded async channel: send/receive, backpressure blocks producer when full, finish ends consumer loop, cancel unblocks producers + terminates consumer, multi-producer/single-consumer race. |
+| High Value | AsyncSemaphoreTests | 5 | Counting semaphore: wait consumes count, signal-without-waiters increases count, wait suspends at zero, cancelAll resumes every waiter, wait-after-cancel does not suspend. |
 | Medium Value | B2ServiceHelperTests | 7 | SHA-1 known test vectors, HTTP response validation for success (200, 299) and error (401, 500) status codes |
 | Medium Value | PhotosImportProgressTests | 6 | Fraction calculation for the pipelined import: empty state, import-phase progress, mid-pipeline progress, complete, multi-album, and `filesDropped` counter tracking items silently lost in the pipeline. |
 | Medium Value | CatalogBackupServiceTests | 5 | Volume backup write + decode, error on bad path, file restore round-trip, missing catalog error, orphan vol-file eviction |
@@ -28,6 +32,8 @@
 | Low Value | SwiftDataModelTests | 5 | Checks defaults and Codable on trivial types. `albumRecordDateLabel` tests string interpolation. Rarely catches real bugs. |
 | Low Value | ImportSettingsTests | 1 | Default-value smoke test for `ImportSettings.nearDuplicateThreshold` (matches `Constants.Dedup`). |
 | Low Value | PhotosSyncSchemaTests | 2 | Lightweight-migration smoke tests for the new optional `phAssetLocalIdentifier` / `photosAlbumLocalIdentifier` fields on legacy SwiftData stores. |
+| Low Value | SnakeGameTests | 7 | Easter-egg Snake game state machine: initial segments, hold-before-start, tick movement, no-direct-reverse, wall collision, food growth/score, reset. |
+| Low Value | FlappyGameTests | 5 | Easter-egg Flappy game state machine: hover-before-flap, flap impulse, gravity, floor collision, reset. |
 
 ### Redundancy & Overlap
 
@@ -38,12 +44,12 @@ No truly redundant tests. Each test has a distinct scenario. Some suites have te
 | Area | Risk | Status |
 | ------ | ------ | -------- |
 | EncryptionService | High | **Covered** — 20 tests across 3 suites: key derivation, round-trips, wrong key/AD, nonce uniqueness, file ops, edge cases, encrypt-PAR2-decrypt integration |
-| B2Service (network layer) | High | **Partially covered** — 7 tests on pure helpers (SHA-1, HTTP response validation). Network methods require URLSession abstraction; covered by manual QA. |
-| PipelinedImportCoordinator | High | **Partially covered** — 5 tests on image conversion + 5 on ExportProgress. Pipeline uses AsyncChannel + backpressure; orchestration, cancellation teardown, and channel wiring are not unit-tested; covered by manual QA (TC-2, TC-4). |
+| B2Service (network layer) | High | **Covered** — 18 tests total: 7 pure helpers (SHA-1, HTTP response validation) + 11 network methods via URLProtocol stub (authorize, getUploadURL, uploadFile, list pagination, fileExists, delete). |
+| PipelinedImportCoordinator | High | **Partially covered** — 5 tests on image conversion, 5 on ExportProgress, plus AsyncChannel/AsyncSemaphore primitives now covered by 10 dedicated tests (backpressure, finish, cancel-unblocks-producer). Full pipeline orchestration and phase-skipping wiring still rely on manual QA (TC-2, TC-4). |
 | CatalogBackupService | Medium | **Covered** — 6 tests: volume backup/restore round-trip, error reporting, missing catalog, happy path restore |
 | Volume sync (VolumeSyncSheet inline copy loop) | Medium | **Not unit-tested** — loop lives in a SwiftUI view. Hash-dedup + PAR2 companion behavior validated by manual QA (TC-8, TC-9). |
 | PerceptualHash | Medium | **Covered** — 10 tests across 2 suites: hammingDistance (7 pure math) + compute (3 with real images) |
-| SyncService / SyncCoordinator | Medium | **Not testable** — requires iCloud provisioning. Catalog merge logic covered by CatalogServiceMergeTests. |
+| SyncService / SyncCoordinator | Medium | **SyncService covered** — 7 tests exercise push/pull/merge against a temp directory via a test-only init that bypasses NSFileCoordinator (round-trip, missing-file, corrupt JSON, remote/local union). SyncCoordinator orchestration still requires iCloud provisioning. |
 | ThumbnailService | Low | **Not tested** — ImageIO + NSCache. Visual correctness validated by manual QA. |
 | PhotosImportService | Low | **Not testable** — requires Photos.app sandbox entitlement. Covered by manual QA. |
 
@@ -53,10 +59,7 @@ These items would further improve coverage but require architectural changes:
 
 | Item | Blocker | Effort |
 | ------ | --------- | -------- |
-| B2Service network methods (upload, download, list, delete) | Needs URLSession protocol abstraction or URLProtocol subclass for HTTP mocking | Medium — touches B2Service constructor + all callers |
-| PipelinedImportCoordinator pipeline | Pipeline uses AsyncChannel/AsyncSemaphore for inter-phase communication. Channel backpressure, cancellation teardown (sentinel task + channel.cancel), and phase-skipping wiring are testable in isolation. Full end-to-end pipeline still needs protocol-based service injection. | Medium — channel/semaphore unit tests are straightforward; full pipeline test remains high effort |
-| AsyncChannel / AsyncSemaphore | New utilities with cancellation semantics (cancelAll unblocks waiters). No unit tests yet. | Low — pure async logic, easy to test in isolation |
-| SyncService push/pull/merge | Depends on FileManager ubiquity container + NSFileCoordinator; needs filesystem abstraction | Medium — iCloud APIs deeply coupled |
+| PipelinedImportCoordinator end-to-end | AsyncChannel/AsyncSemaphore primitives are now covered (AsyncPrimitivesTests). Full pipeline orchestration — sentinel task, phase-skipping wiring, service interactions — still needs protocol-based service injection. | Medium |
 | SyncCoordinator state machine | Orchestrates 3 services + UserDefaults + SwiftData; needs dependency injection | Medium — requires constructor refactor |
 | ThumbnailService cache logic | Two-level cache (NSCache + disk); needs real image rendering which is unreliable in headless CI (CIContext renders all-white at small sizes) | Low — limited value vs manual QA |
 | PerceptualHash visual distinctness | CIContext.render produces all-white pixels in headless test environments at 9x8 resolution; cannot reliably test that different images produce different hashes | Low — CI environment limitation |
