@@ -144,7 +144,7 @@ struct PhotosImportSheet: View {
             guard showingGames else { return }
             while !Task.isCancelled {
                 gameProgress.fraction = progress.fraction
-                gameProgress.phaseLabel = progress.phase.rawValue
+                gameProgress.phaseLabel = progress.displayLabel
                 gameProgress.currentFilename = progress.currentFilename
                 gameProgress.totalFiles = progress.totalFiles
                 gameProgress.currentFile = progress.currentFile
@@ -217,7 +217,7 @@ struct PhotosImportSheet: View {
             HStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.small)
-                Text(progress.phase.rawValue)
+                Text(progress.displayLabel)
                     .font(Constants.Design.monoHeadline)
                     .accessibilityIdentifier("import.phaseLabel")
             }
