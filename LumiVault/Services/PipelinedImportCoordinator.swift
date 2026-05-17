@@ -90,6 +90,54 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         )
     }
 
+    /// Run the full pipeline against a set of file URLs (drag&drop / file picker).
+    /// No Photos library involvement: assets are taken as-is, and the resulting
+    /// album record does not carry a `photosAlbumLocalIdentifier`.
+    func importFiles(
+        urls: [URL],
+        settings: ImportSettings,
+        modelContext: ModelContext,
+        progress: PhotosImportProgress
+    ) async throws {
+        let staging = try makeStagingDirectory()
+        defer { try? FileManager.default.removeItem(at: staging) }
+
+        let totalFiles = urls.count
+        await MainActor.run {
+            progress.totalFiles = totalFiles
+            progress.currentFile = 0
+        }
+
+        let (stream, continuation) = AsyncStream.makeStream(of: ImportResult.self)
+        let urlsBox = urls
+        let feedTask = Task.detached(priority: .userInitiated) {
+            for (index, url) in urlsBox.enumerated() {
+                if Task.isCancelled { break }
+                let asset = ImportedAsset(
+                    fileURL: url,
+                    originalFilename: url.lastPathComponent,
+                    creationDate: nil,
+                    phAssetLocalIdentifier: nil
+                )
+                continuation.yield(.success(asset))
+                await MainActor.run {
+                    progress.currentFile = index + 1
+                }
+            }
+            continuation.finish()
+        }
+        defer { feedTask.cancel() }
+
+        try await runImportPipeline(
+            assetStream: stream,
+            staging: staging,
+            photosAlbumId: nil,
+            settings: settings,
+            modelContext: modelContext,
+            progress: progress
+        )
+    }
+
     private func makeStagingDirectory() throws -> URL {
         let staging = FileManager.default.temporaryDirectory
             .appendingPathComponent("lumivault-import-\(UUID().uuidString)", isDirectory: true)
@@ -100,7 +148,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
     private func runImportPipeline(
         assetStream: AsyncStream<ImportResult>,
         staging: URL,
-        photosAlbumId: String,
+        photosAlbumId: String?,
         settings: ImportSettings,
         modelContext: ModelContext,
         progress: PhotosImportProgress
@@ -117,6 +165,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
         await MainActor.run {
             progress.phase = .importing
+            progress.activeStages = []
         }
 
         // Create channels
@@ -354,7 +403,8 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 isNewAlbum = true
             }
             // Backfill identifier on legacy albums on re-import.
-            if albumRecord.photosAlbumLocalIdentifier == nil {
+            // Skip for non-Photos imports (drag&drop) to avoid clobbering with nil.
+            if albumRecord.photosAlbumLocalIdentifier == nil, let photosAlbumId {
                 albumRecord.photosAlbumLocalIdentifier = photosAlbumId
             }
 
@@ -362,6 +412,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             var catalogItemCount = 0
 
             progress.phase = .cataloging
+            progress.activeStages.insert(.cataloging)
 
             for await item in catalogCh.stream {
                 await catalogCh.consumed()
@@ -437,6 +488,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                     modelContext.delete(albumRecord)
                 }
                 progress.phase = .failed
+                progress.activeStages.removeAll()
                 return catalogItemCount
             }
 
@@ -449,6 +501,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             }
 
             progress.phase = .complete
+            progress.activeStages.removeAll()
             return catalogItemCount
         }
 
@@ -569,6 +622,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         progress: PhotosImportProgress
     ) async {
         defer { firstChannel.finish() }
+        await MainActor.run { _ = progress.activeStages.insert(.importing) }
         for await result in assetStream {
             if Task.isCancelled { break }
             switch result {
@@ -594,6 +648,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 }
             }
         }
+        await MainActor.run { _ = progress.activeStages.remove(.importing) }
     }
 
     /// Decodes/re-encodes/resizes images. CPU-heavy work runs off-main.
@@ -605,7 +660,10 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         progress: PhotosImportProgress
     ) async {
         defer { outputCh.finish() }
-        await MainActor.run { progress.phase = .converting }
+        await MainActor.run {
+            progress.phase = .converting
+            progress.activeStages.insert(.converting)
+        }
 
         for await item in inputCh.stream {
             await inputCh.consumed()
@@ -635,6 +693,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             }
             await outputCh.send(mutableItem)
         }
+        await MainActor.run { _ = progress.activeStages.remove(.converting) }
     }
 
     /// Hash + dedup. SHA-256 runs on the hasher actor; perceptual hash and
@@ -653,6 +712,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         await MainActor.run {
             progress.phase = .hashing
             progress.currentFile = 0
+            progress.activeStages.insert(.hashing)
         }
 
         for await item in inputCh.stream {
@@ -775,6 +835,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             }
             await outputCh.send(mutableItem)
         }
+        await MainActor.run { _ = progress.activeStages.remove(.hashing) }
     }
 
     /// Encrypts new files. Synchronous AES-GCM runs off-main.
@@ -791,6 +852,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         await MainActor.run {
             progress.phase = .encrypting
             progress.currentFile = 0
+            progress.activeStages.insert(.encrypting)
         }
 
         for await item in inputCh.stream {
@@ -832,6 +894,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
             await outputCh.send(mutableItem)
         }
+        await MainActor.run { _ = progress.activeStages.remove(.encrypting) }
     }
 
     /// Generates PAR2 recovery data. File I/O, Reed-Solomon math, and Metal
@@ -849,6 +912,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         await MainActor.run {
             progress.phase = .par2
             progress.currentFile = 0
+            progress.activeStages.insert(.par2)
         }
 
         for await item in inputCh.stream {
@@ -901,6 +965,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
             await outputCh.send(mutableItem)
         }
+        await MainActor.run { _ = progress.activeStages.remove(.par2) }
     }
 
     /// Copies files (and PAR2 companions) to external volumes. Per-file I/O
@@ -920,6 +985,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         await MainActor.run {
             progress.phase = .copying
             progress.currentFile = 0
+            progress.activeStages.insert(.copying)
         }
 
         for await item in inputCh.stream {
@@ -1005,6 +1071,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             for (_, volRecord) in volumeRecords.value {
                 volRecord.lastSyncedAt = .now
             }
+            _ = progress.activeStages.remove(.copying)
         }
         for vol in resolvedVolumes {
             vol.url.stopAccessingSecurityScopedResource()
@@ -1026,6 +1093,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         await MainActor.run {
             progress.phase = .uploading
             progress.currentFile = 0
+            progress.activeStages.insert(.uploading)
         }
 
         for await item in inputCh.stream {
@@ -1134,5 +1202,6 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
             await outputCh.send(mutableItem)
         }
+        await MainActor.run { _ = progress.activeStages.remove(.uploading) }
     }
 }

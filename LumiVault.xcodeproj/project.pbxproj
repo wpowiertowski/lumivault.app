@@ -49,7 +49,6 @@
 		7FC9F2ECC3BB994D0D697082 /* PhotoGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A26A124182F5946F24CB1ADD /* PhotoGridView.swift */; };
 		82886ABBCFA8C5A3A14C30CD /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 012BE699987DA66C89CDC8BD /* Constants.swift */; };
 		85F07A3C43271A80A554C146 /* VolumeRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 669B957B8485AF442AEB2DA8 /* VolumeRecord.swift */; };
-		863485B86E9A23410301996B /* ImportProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C07AF15364718C2056F0DE5F /* ImportProgressView.swift */; };
 		89320CFF58AE00D892F6E805 /* ReconciliationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D306B41680CB9765C3B46CC /* ReconciliationView.swift */; };
 		8BF3B0F0C701C584B70F424E /* ImportSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E01DC6510FDA76A175275263 /* ImportSettingsView.swift */; };
 		8CD050FBD82D0F256781112F /* SyncServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93EA5474D335D73AA5521633 /* SyncServiceTests.swift */; };
@@ -164,7 +163,6 @@
 		B389A2EDF5A08E2BE8AF007A /* AlbumRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumRecord.swift; sourceTree = "<group>"; };
 		B98A6688AC0797C85950E76D /* ReconciliationTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconciliationTypes.swift; sourceTree = "<group>"; };
 		BFA740881D64DEF9AAD992E7 /* ImageConversionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageConversionService.swift; sourceTree = "<group>"; };
-		C07AF15364718C2056F0DE5F /* ImportProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportProgressView.swift; sourceTree = "<group>"; };
 		C2BF78C573AEB3723FAA6B52 /* AlbumExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumExportSheet.swift; sourceTree = "<group>"; };
 		CA85E7129726352A8ABA7D14 /* PhotosAlbumPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosAlbumPicker.swift; sourceTree = "<group>"; };
 		D1C282CA4BBA78763E15C190 /* ThumbnailService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailService.swift; sourceTree = "<group>"; };
@@ -358,7 +356,6 @@
 		CE8101270137002F63473D8A /* Import */ = {
 			isa = PBXGroup;
 			children = (
-				C07AF15364718C2056F0DE5F /* ImportProgressView.swift */,
 				937E65EE6EF8CEA2B9443D20 /* ImportSheet.swift */,
 			);
 			path = Import;
@@ -570,7 +567,6 @@
 				FB607540471DB65A4F19B74B /* ImageRecord.swift in Sources */,
 				FF73CCC9E5DA42613C13ADF1 /* ImportDefaultsSettingsView.swift in Sources */,
 				669DDC7D1389AB0C47C80F66 /* ImportFromPhotosCommands.swift in Sources */,
-				863485B86E9A23410301996B /* ImportProgressView.swift in Sources */,
 				8BF3B0F0C701C584B70F424E /* ImportSettingsView.swift in Sources */,
 				8E278B72DB5073512F515562 /* ImportSheet.swift in Sources */,
 				DCA7881A48055EE6FC8BC7A6 /* ImportTypes.swift in Sources */,

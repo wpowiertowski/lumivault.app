@@ -26,8 +26,16 @@ struct PhotosImportSheet: View {
     @Environment(\.encryptionService) private var encryptionService
     @Query private var volumes: [VolumeRecord]
     @State private var catalogAlbumCounts: [String: Int] = [:]
+    @State private var pendingImports: [PendingAlbumImport] = []
+    @State private var isComputingDates = false
 
     private var isMultiAlbum: Bool { selectedAlbumIds.count > 1 }
+
+    private var visibleSteps: [ImportStep] {
+        isMultiAlbum
+            ? [.pickAlbum, .configure, .confirmDates, .importing, .complete]
+            : [.pickAlbum, .configure, .importing, .complete]
+    }
 
     private let catalogService = CatalogService()
 
@@ -52,7 +60,7 @@ struct PhotosImportSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             // Step indicator
-            StepIndicator(current: step)
+            StepIndicator(current: step, steps: visibleSteps)
                 .padding()
 
             Divider()
@@ -67,6 +75,8 @@ struct PhotosImportSheet: View {
                         albumPickerStep
                     case .configure:
                         configureStep
+                    case .confirmDates:
+                        confirmDatesStep
                     case .importing:
                         if showingGames {
                             GameStepView(progress: gameProgress) {
@@ -107,9 +117,24 @@ struct PhotosImportSheet: View {
                 case .configure:
                     Button("Back") { step = .pickAlbum }
                         .accessibilityIdentifier("import.back")
+                    if isMultiAlbum {
+                        Button("Next") { step = .confirmDates }
+                            .keyboardShortcut(.defaultAction)
+                            .accessibilityIdentifier("import.next")
+                    } else {
+                        Button("Start Import") { startImport() }
+                            .keyboardShortcut(.defaultAction)
+                            .disabled(settings.albumName.isEmpty)
+                            .accessibilityIdentifier("import.start")
+                    }
+
+                case .confirmDates:
+                    Button("Back") { step = .configure }
+                        .accessibilityIdentifier("import.back")
                     Button("Start Import") { startImport() }
                         .keyboardShortcut(.defaultAction)
-                        .disabled(!isMultiAlbum && settings.albumName.isEmpty)
+                        .disabled(isComputingDates || pendingImports.isEmpty
+                                  || pendingImports.contains(where: { $0.albumName.isEmpty }))
                         .accessibilityIdentifier("import.start")
 
                 case .importing:
@@ -137,6 +162,16 @@ struct PhotosImportSheet: View {
                 withAnimation { showGamesOffer = true }
             }
         }
+        .task(id: step) {
+            guard step == .confirmDates else { return }
+            // Recompute when the selection set has changed (e.g. user went back
+            // to the album picker and picked differently); otherwise preserve
+            // any edits the user already made.
+            if Set(pendingImports.map(\.id)) != selectedAlbumIds {
+                pendingImports = []
+                await computePendingImports()
+            }
+        }
         .task(id: showingGames) {
             // While a game is on screen, coalesce live progress mutations into a
             // 30 Hz mirror so SwiftUI re-renders ~30×/sec instead of every mutation.
@@ -144,7 +179,7 @@ struct PhotosImportSheet: View {
             guard showingGames else { return }
             while !Task.isCancelled {
                 gameProgress.fraction = progress.fraction
-                gameProgress.phaseLabel = progress.phase.rawValue
+                gameProgress.phaseLabel = progress.displayLabel
                 gameProgress.currentFilename = progress.currentFilename
                 gameProgress.totalFiles = progress.totalFiles
                 gameProgress.currentFile = progress.currentFile
@@ -192,13 +227,47 @@ struct PhotosImportSheet: View {
                 .padding(.top, 12)
 
             if isMultiAlbum {
-                Text("Importing \(selectedAlbumIds.count) albums. Each album will use its own name and date.")
+                Text("Importing \(selectedAlbumIds.count) albums. You'll confirm each album's name and date in the next step.")
                     .font(Constants.Design.monoCaption)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal)
             }
 
             ImportSettingsView(settings: $settings, showAlbumDetails: !isMultiAlbum)
+        }
+    }
+
+    private var confirmDatesStep: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Confirm Album Dates")
+                .font(Constants.Design.monoTitle3)
+                .padding(.horizontal)
+                .padding(.top, 12)
+
+            Text("Dates are the median photo creation date in each album. Edit any that look wrong before continuing.")
+                .font(Constants.Design.monoCaption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+
+            if isComputingDates {
+                VStack(spacing: 8) {
+                    ProgressView()
+                    Text("Scanning \(selectedAlbumIds.count) album\(selectedAlbumIds.count == 1 ? "" : "s")…")
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach($pendingImports) { $pending in
+                            AlbumDateRow(pending: $pending)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+                }
+            }
         }
     }
 
@@ -217,7 +286,7 @@ struct PhotosImportSheet: View {
             HStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.small)
-                Text(progress.phase.rawValue)
+                Text(progress.displayLabel)
                     .font(Constants.Design.monoHeadline)
                     .accessibilityIdentifier("import.phaseLabel")
             }
@@ -473,7 +542,7 @@ struct PhotosImportSheet: View {
                     selectedAlbumTitle = album.title
                     settings.albumName = album.title
 
-                    let date = album.startDate ?? .now
+                    let date = (await service.medianCreationDate(in: albumId)) ?? .now
                     let calendar = Calendar.current
                     settings.year = String(calendar.component(.year, from: date))
                     settings.month = String(format: "%02d", calendar.component(.month, from: date))
@@ -482,9 +551,39 @@ struct PhotosImportSheet: View {
                 step = .configure
             }
         } else {
-            // Multiple albums — album details derived per-album during import
+            // Multiple albums — album details confirmed per-album in the next step
             step = .configure
         }
+    }
+
+    /// Builds the `pendingImports` list with the median creation date for each
+    /// selected album. Runs once on entry to the confirmDates step.
+    private func computePendingImports() async {
+        isComputingDates = true
+        defer { isComputingDates = false }
+
+        let service = PhotosImportService()
+        let allAlbums = await service.fetchAlbums()
+        let selected = allAlbums.filter { selectedAlbumIds.contains($0.id) }
+
+        var built: [PendingAlbumImport] = []
+        built.reserveCapacity(selected.count)
+        let calendar = Calendar.current
+        for album in selected {
+            let median = await service.medianCreationDate(in: album.id)
+            let date = median ?? .now
+            built.append(PendingAlbumImport(
+                id: album.id,
+                originalTitle: album.title,
+                assetCount: album.assetCount,
+                albumName: album.title,
+                year: String(calendar.component(.year, from: date)),
+                month: String(format: "%02d", calendar.component(.month, from: date)),
+                day: String(format: "%02d", calendar.component(.day, from: date)),
+                computedDate: median
+            ))
+        }
+        pendingImports = built
     }
 
     private func startImport() {
@@ -502,27 +601,20 @@ struct PhotosImportSheet: View {
             let coordinator = PipelinedImportCoordinator(catalogService: catalogService, encryptionService: encryptionService)
 
             if selectedAlbumIds.count > 1 {
-                // Multi-album import
-                let service = PhotosImportService()
-                let allAlbums = await service.fetchAlbums()
-                let selected = allAlbums.filter { selectedAlbumIds.contains($0.id) }
-
-                totalImportAlbums = selected.count
-                progress.globalTotalFiles = selected.reduce(0) { $0 + $1.assetCount }
+                // Multi-album import — use the user-confirmed values from pendingImports.
+                totalImportAlbums = pendingImports.count
+                progress.globalTotalFiles = pendingImports.reduce(0) { $0 + $1.assetCount }
                 progress.completedAlbumFiles = 0
 
-                for (index, album) in selected.enumerated() {
+                for (index, pending) in pendingImports.enumerated() {
                     currentImportAlbumIndex = index + 1
-                    currentImportAlbumName = album.title
+                    currentImportAlbumName = pending.albumName
 
-                    // Build per-album settings from shared settings + album metadata
                     var albumSettings = settings
-                    albumSettings.albumName = album.title
-                    let date = album.startDate ?? .now
-                    let calendar = Calendar.current
-                    albumSettings.year = String(calendar.component(.year, from: date))
-                    albumSettings.month = String(format: "%02d", calendar.component(.month, from: date))
-                    albumSettings.day = String(format: "%02d", calendar.component(.day, from: date))
+                    albumSettings.albumName = pending.albumName
+                    albumSettings.year = pending.year
+                    albumSettings.month = pending.month
+                    albumSettings.day = pending.day
 
                     // Reset per-album progress fields
                     progress.phase = .importing
@@ -533,7 +625,7 @@ struct PhotosImportSheet: View {
 
                     do {
                         try await coordinator.importAlbum(
-                            photosAlbumId: album.id,
+                            photosAlbumId: pending.id,
                             settings: albumSettings,
                             modelContext: ctx,
                             progress: progress
@@ -546,7 +638,7 @@ struct PhotosImportSheet: View {
                         break
                     } catch {
                         progress.completedAlbumFiles += progress.totalFiles
-                        progress.errors.append("Import failed for \"\(album.title)\": \(error.localizedDescription)")
+                        progress.errors.append("Import failed for \"\(pending.albumName)\": \(error.localizedDescription)")
                     }
                 }
 
@@ -581,24 +673,40 @@ struct PhotosImportSheet: View {
 // MARK: - Supporting Views
 
 private enum ImportStep: Int, CaseIterable {
-    case pickAlbum, configure, importing, complete
+    case pickAlbum, configure, confirmDates, importing, complete
 
     var label: String {
         switch self {
         case .pickAlbum: "Select Albums"
         case .configure: "Settings"
+        case .confirmDates: "Confirm Dates"
         case .importing: "Importing"
         case .complete: "Done"
         }
     }
 }
 
+private struct PendingAlbumImport: Identifiable, Equatable {
+    let id: String
+    let originalTitle: String
+    let assetCount: Int
+    var albumName: String
+    var year: String
+    var month: String
+    var day: String
+    /// Median creation date computed from the album's image assets, or nil if
+    /// none had a creationDate. Displayed alongside the editable date so the
+    /// user can tell when we couldn't infer one.
+    var computedDate: Date?
+}
+
 private struct StepIndicator: View {
     let current: ImportStep
+    let steps: [ImportStep]
 
     var body: some View {
         HStack(spacing: 4) {
-            ForEach(ImportStep.allCases, id: \.rawValue) { step in
+            ForEach(steps, id: \.rawValue) { step in
                 HStack(spacing: 4) {
                     Circle()
                         .fill(step.rawValue <= current.rawValue ? Constants.Design.accentColor : Color.secondary.opacity(0.3))
@@ -607,7 +715,7 @@ private struct StepIndicator: View {
                         .font(Constants.Design.monoCaption)
                         .foregroundStyle(step.rawValue <= current.rawValue ? .primary : .secondary)
                 }
-                if step != ImportStep.allCases.last {
+                if step != steps.last {
                     Rectangle()
                         .fill(step.rawValue < current.rawValue ? Constants.Design.accentColor : Color.secondary.opacity(0.3))
                         .frame(height: 1)
@@ -615,6 +723,52 @@ private struct StepIndicator: View {
                 }
             }
         }
+    }
+}
+
+private struct AlbumDateRow: View {
+    @Binding var pending: PendingAlbumImport
+
+    private var dateBinding: Binding<Date> {
+        Binding(
+            get: {
+                var comps = DateComponents()
+                comps.year = Int(pending.year)
+                comps.month = Int(pending.month)
+                comps.day = Int(pending.day)
+                return Calendar(identifier: .gregorian).date(from: comps) ?? .now
+            },
+            set: { newDate in
+                let cal = Calendar(identifier: .gregorian)
+                pending.year = String(cal.component(.year, from: newDate))
+                pending.month = String(format: "%02d", cal.component(.month, from: newDate))
+                pending.day = String(format: "%02d", cal.component(.day, from: newDate))
+            }
+        )
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                TextField("Album Name", text: $pending.albumName)
+                    .textFieldStyle(.roundedBorder)
+                    .font(Constants.Design.monoBody)
+                HStack(spacing: 6) {
+                    Text("\(pending.assetCount) image\(pending.assetCount == 1 ? "" : "s")")
+                    if pending.computedDate == nil {
+                        Text("· no creation dates found")
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .font(Constants.Design.monoCaption2)
+                .foregroundStyle(.tertiary)
+            }
+            DatePicker("", selection: dateBinding, displayedComponents: .date)
+                .labelsHidden()
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }
 

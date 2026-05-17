@@ -88,10 +88,22 @@ final class PhotosImportProgress: @unchecked Sendable {
 
     var health: PipelineHealth = .normal
 
+    /// Stages currently doing work in the parallel pipeline. Drives `displayLabel`.
+    var activeStages: Set<ImportPhase> = []
+
     /// Multi-album tracking: total files across all albums (0 = single-album mode).
     var globalTotalFiles: Int = 0
     /// Multi-album tracking: files fully processed in previously completed albums.
     var completedAlbumFiles: Int = 0
+
+    /// Text for the main import pipeline label.
+    /// Multiple parallel stages running → "Processing images";
+    /// exactly one → that stage's description; none → the current phase rawValue.
+    var displayLabel: String {
+        if activeStages.count > 1 { return "Processing images" }
+        if let only = activeStages.first { return only.rawValue }
+        return phase.rawValue
+    }
 
     var fraction: Double {
         guard totalFiles > 0 else {

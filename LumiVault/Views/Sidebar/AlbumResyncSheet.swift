@@ -159,7 +159,7 @@ struct AlbumResyncSheet: View {
             } else {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text(progress.phase.rawValue)
+                    Text(progress.displayLabel)
                         .font(Constants.Design.monoHeadline)
                 }
                 ProgressView(value: progress.fraction)
