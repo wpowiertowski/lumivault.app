@@ -100,6 +100,35 @@ actor PhotosImportService {
         return albums
     }
 
+    /// Median `creationDate` across image assets in the album. `creationDate`
+    /// is the original capture timestamp on the PHAsset, distinct from the
+    /// edit/modification date (`modificationDate`). Returns nil if the album
+    /// is missing or contains no images with creation dates.
+    ///
+    /// Filtering to images matches what the import pipeline actually ingests —
+    /// videos in the same Photos album won't skew the result.
+    func medianCreationDate(in albumLocalIdentifier: String) -> Date? {
+        let fetchResult = PHAssetCollection.fetchAssetCollections(
+            withLocalIdentifiers: [albumLocalIdentifier], options: nil
+        )
+        guard let collection = fetchResult.firstObject else { return nil }
+
+        let opts = PHFetchOptions()
+        opts.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+        let assets = PHAsset.fetchAssets(in: collection, options: opts)
+
+        var dates: [Date] = []
+        dates.reserveCapacity(assets.count)
+        for i in 0..<assets.count {
+            if let date = assets.object(at: i).creationDate {
+                dates.append(date)
+            }
+        }
+        guard !dates.isEmpty else { return nil }
+        dates.sort()
+        return dates[dates.count / 2]
+    }
+
     // MARK: - Album Asset Diff
 
     /// Returns the current image PHAssets in the named album, or `nil` if the
