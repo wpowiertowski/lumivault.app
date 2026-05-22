@@ -64,6 +64,7 @@
 		B6087FD659F665B3227E6778 /* PhotosImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC1982FE3C2E560E783753AF /* PhotosImportService.swift */; };
 		B74403416D7B5B267D435D02 /* SupportSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08151D3FAC4937C0EE5104CC /* SupportSettingsView.swift */; };
 		B99329806C565AFC0EF68260 /* VolumesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52BF3E9C2E27A222A01E3E43 /* VolumesSettingsView.swift */; };
+		C0F667DA2B128C963052AA69 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 036EC4B45DE6669C10BB0A3D /* AppIcon.icon */; };
 		C3CF5E268A47CFFAD589C4DD /* AsyncChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55E512C07356078D3E3D8CD /* AsyncChannel.swift */; };
 		C3E2B48BC52875B0CC34CFBD /* HasherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3198F0E915EFA392E07CBB6B /* HasherService.swift */; };
 		CDFE6E5E0536944B2630D0C1 /* AsyncSemaphore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FD4E291C18518482ADDCA6A /* AsyncSemaphore.swift */; };
@@ -106,6 +107,7 @@
 		0099C37B5592C7B2AACD467B /* VolumeListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeListView.swift; sourceTree = "<group>"; };
 		012BE699987DA66C89CDC8BD /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		013C39B57D0BACCC51619D46 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		036EC4B45DE6669C10BB0A3D /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		0559D966DBB4F64CE222568C /* B2SyncSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = B2SyncSheet.swift; sourceTree = "<group>"; };
 		06D0EEE7A6946D0748E5A6C4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		0735E1FC71B26F46934B015B /* B2Credentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = B2Credentials.swift; sourceTree = "<group>"; };
@@ -364,6 +366,7 @@
 		D0F67E9D9C056774BF167850 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				036EC4B45DE6669C10BB0A3D /* AppIcon.icon */,
 				06D0EEE7A6946D0748E5A6C4 /* Assets.xcassets */,
 				E1B876E2BEAD4C3EBF5E1688 /* LumiVault.help */,
 				681F3FAA2F788B687AAC19BA /* TipJar.storekit */,
@@ -523,6 +526,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C0F667DA2B128C963052AA69 /* AppIcon.icon in Resources */,
 				7606BCE424A01DC36A651519 /* Assets.xcassets in Resources */,
 				3F1CC37E542EA4CF0C617E64 /* LumiVault.help in Resources */,
 				032867577A6CBA9980DAB87D /* TipJar.storekit in Resources */,

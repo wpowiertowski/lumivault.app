@@ -3,12 +3,12 @@
     {
       "idiom" : "universal",
       "color" : {
-        "color-space" : "srgb",
+        "color-space" : "display-p3",
         "components" : {
           "alpha" : "1.000",
-          "blue" : "0.871",
-          "green" : "0.580",
-          "red" : "0.329"
+          "red" : "1.000",
+          "green" : "0.439",
+          "blue" : "0.000"
         }
       }
     }
