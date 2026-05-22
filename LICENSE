@@ -19,3 +19,22 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+Brand Assets Exception
+
+The MIT License above applies to the source code of LumiVault only. It does
+NOT apply to the LumiVault name, logo, or icon assets, including but not
+limited to all files under:
+
+    LumiVault/Resources/AppIcon.icon/**
+
+These brand assets are Copyright (c) 2026 Wojtek Powiertowski,
+All Rights Reserved. They are not licensed under the MIT License and may not
+be copied, modified, redistributed, or used to identify any product or
+service other than the official LumiVault application without prior written
+permission from the copyright holder.
+
+If you fork this repository, you must replace the icon assets and use a
+distinct product name before distributing your fork.
