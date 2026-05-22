@@ -52,11 +52,12 @@ targets:
           - "**/*.entitlements"
           - Info.plist
           - Resources/LumiVault.help
+          - Resources/AppIcon.icon
       - path: LumiVault/Resources/LumiVault.help
         type: folder
         buildPhase: resources
-    resources:
-      - path: LumiVault/Resources/Assets.xcassets
+      - path: LumiVault/Resources/AppIcon.icon
+        buildPhase: resources
     settings:
       base:
         INFOPLIST_FILE: LumiVault/Info.plist
