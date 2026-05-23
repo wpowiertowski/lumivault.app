@@ -44,6 +44,9 @@ struct PhotoGridItem: View {
     private func loadThumbnail() async {
         if let cached = await thumbnailService.thumbnail(for: image.sha256, size: .grid) {
             thumbnail = cached
+            if image.thumbnailState != .generated {
+                image.thumbnailState = .generated
+            }
             return
         }
         await regenerateFromOriginal()
@@ -54,6 +57,7 @@ struct PhotoGridItem: View {
         let isEncrypted = image.isEncrypted
         let nonce = image.encryptionNonce
         let locations = image.storageLocations
+        var didAttemptGeneration = false
 
         for location in locations {
             guard let volume = volumes.first(where: { $0.volumeID == location.volumeID }),
@@ -61,6 +65,7 @@ struct PhotoGridItem: View {
                 continue
             }
             let fileURL = mountURL.appendingPathComponent(location.relativePath)
+            didAttemptGeneration = true
 
             do {
                 if isEncrypted, let nonce {
@@ -75,11 +80,18 @@ struct PhotoGridItem: View {
                 }
                 mountURL.stopAccessingSecurityScopedResource()
                 thumbnail = await thumbnailService.thumbnail(for: sha256, size: .grid)
+                image.thumbnailState = .generated
                 return
             } catch {
                 mountURL.stopAccessingSecurityScopedResource()
                 continue
             }
+        }
+
+        // Only flag `.failed` if we actually reached a mounted volume and generation threw.
+        // No mounted volumes → stay `.pending` so it retries when a drive is reconnected.
+        if didAttemptGeneration {
+            image.thumbnailState = .failed
         }
     }
 }
