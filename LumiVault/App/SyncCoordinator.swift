@@ -145,7 +145,88 @@ final class SyncCoordinator: @unchecked Sendable {
 
         // Reload into catalog service
         try await catalogService.load(from: catalogURL)
+
+        // Rebuild SwiftData from the restored catalog so @Query-backed views populate.
+        // The catalog is the authoritative source for filename/size/par2/b2/encryption fields;
+        // local-only state (storageLocations, perceptualHash, thumbnailState) is preserved when
+        // a record already exists and is rediscovered by sync/verify flows otherwise.
+        await MainActor.run { hydrateSwiftData(from: catalog) }
         return catalog
+    }
+
+    @MainActor
+    private func hydrateSwiftData(from catalog: Catalog) {
+        guard let container = modelContainer else { return }
+        let context = ModelContext(container)
+
+        for (year, yearData) in catalog.years {
+            for (month, monthData) in yearData.months {
+                for (day, dayData) in monthData.days {
+                    for (albumName, catalogAlbum) in dayData.albums {
+                        let lookupName = albumName
+                        let lookupYear = year
+                        let lookupMonth = month
+                        let lookupDay = day
+                        let albumDescriptor = FetchDescriptor<AlbumRecord>(
+                            predicate: #Predicate {
+                                $0.name == lookupName && $0.year == lookupYear &&
+                                $0.month == lookupMonth && $0.day == lookupDay
+                            }
+                        )
+                        let album: AlbumRecord
+                        if let existing = try? context.fetch(albumDescriptor).first {
+                            album = existing
+                        } else {
+                            album = AlbumRecord(
+                                name: albumName,
+                                year: year,
+                                month: month,
+                                day: day,
+                                addedAt: catalogAlbum.addedAt
+                            )
+                            context.insert(album)
+                        }
+
+                        for catalogImage in catalogAlbum.images {
+                            let sha = catalogImage.sha256
+                            let imageDescriptor = FetchDescriptor<ImageRecord>(
+                                predicate: #Predicate { $0.sha256 == sha }
+                            )
+                            let nonce = catalogImage.encryptionNonce.flatMap { Data(base64Encoded: $0) }
+                            let isEncrypted = catalogImage.encryptionAlgorithm != nil
+                            if let existing = try? context.fetch(imageDescriptor).first {
+                                existing.filename = catalogImage.filename
+                                existing.sizeBytes = catalogImage.sizeBytes
+                                existing.par2Filename = catalogImage.par2Filename
+                                existing.b2FileId = catalogImage.b2FileId
+                                existing.isEncrypted = isEncrypted
+                                existing.encryptionKeyId = catalogImage.encryptionKeyId
+                                existing.encryptionNonce = nonce
+                                if existing.album == nil {
+                                    existing.album = album
+                                }
+                            } else {
+                                let record = ImageRecord(
+                                    sha256: catalogImage.sha256,
+                                    filename: catalogImage.filename,
+                                    sizeBytes: catalogImage.sizeBytes,
+                                    par2Filename: catalogImage.par2Filename,
+                                    b2FileId: catalogImage.b2FileId,
+                                    addedAt: catalogAlbum.addedAt,
+                                    album: album,
+                                    isEncrypted: isEncrypted,
+                                    encryptionKeyId: catalogImage.encryptionKeyId,
+                                    encryptionNonce: nonce
+                                )
+                                context.insert(record)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        try? context.save()
     }
 
     enum RestoreSource {
