@@ -61,5 +61,44 @@
     <div class="warning">
         <strong>Important:</strong> Restoring a catalog replaces your current catalog entirely. Make sure you're restoring from the most recent backup to avoid losing recent imports.
     </div>
+
+    <h2>Recovering from Data Loss</h2>
+    <p>If LumiVault has lost its local state (fresh install, deleted container, or empty library), follow this order to recover. The order matters because volumes can only re-link to existing catalog entries.</p>
+
+    <ol>
+        <li><strong>Restore the catalog first</strong> &mdash; from a volume, a file copy, or B2. Your albums and images appear in the sidebar.</li>
+        <li><strong>Re-enter B2 credentials</strong> in <strong>Settings &gt; B2</strong> if you use B2 backup. Credentials are stored locally and are not part of the catalog.</li>
+        <li><strong>Re-toggle iCloud Sync</strong> in <strong>Settings &gt; iCloud</strong> if you use it. The toggle state is local.</li>
+        <li><strong>Add each external volume</strong> in <strong>Settings &gt; Volumes</strong>. After each, run the <strong>Sync to Volume</strong> sheet that opens. It detects existing files on the drive by hash and re-links them to the catalog without copying.</li>
+        <li><strong>Run Integrity Check</strong> from <strong>Settings &gt; Integrity</strong> to verify hashes and PAR2 coverage across all volumes.</li>
+    </ol>
+
+    <h3>What the catalog carries &mdash; and what it doesn't</h3>
+    <p>The catalog is the source of truth for what you've archived. Some state lives outside it and must be rebuilt or re-entered after a restore:</p>
+    <table>
+        <thead>
+            <tr><th>State</th><th>In the catalog?</th><th>After restore</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Album list, image filenames &amp; hashes</td><td>Yes</td><td>Restored</td></tr>
+            <tr><td>PAR2 sidecar filenames</td><td>Yes</td><td>Restored</td></tr>
+            <tr><td>B2 file IDs &amp; encryption metadata</td><td>Yes</td><td>Restored</td></tr>
+            <tr><td>Per-volume file locations</td><td>No</td><td>Empty &mdash; rebuilt by Sync to Volume (step 4)</td></tr>
+            <tr><td>External volume bookmarks &amp; IDs</td><td>No</td><td>Re-add via Settings &gt; Volumes</td></tr>
+            <tr><td>B2 credentials</td><td>No</td><td>Re-enter in Settings &gt; B2</td></tr>
+            <tr><td>iCloud / B2 sync toggles</td><td>No</td><td>Re-enable in Settings</td></tr>
+            <tr><td>Thumbnails</td><td>No</td><td>Regenerate on demand as you browse</td></tr>
+            <tr><td>Perceptual hashes (near-duplicate detection)</td><td>No</td><td>Rebuilt by Near Duplicates view or re-import</td></tr>
+            <tr><td>Link to original Photos album</td><td>No</td><td>Restored on re-import of that album</td></tr>
+        </tbody>
+    </table>
+
+    <div class="note">
+        <strong>Note on volume IDs:</strong> Each external volume gets a fresh identifier when you add it back &mdash; the pre-restore ID is not stored on the drive itself. This is harmless: the Sync to Volume sheet matches files by SHA-256 hash, not by volume ID, so existing archives are re-linked correctly.
+    </div>
+
+    <div class="warning">
+        <strong>Don't add volumes before restoring.</strong> If you add a volume while the catalog is empty, the Sync to Volume sheet will report &ldquo;0 images in catalog&rdquo; and have nothing to link against. Restore first.
+    </div>
 </body>
 </html>
