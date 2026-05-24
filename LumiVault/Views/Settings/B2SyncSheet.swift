@@ -6,6 +6,7 @@ struct B2SyncSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(SyncCoordinator.self) private var syncCoordinator
+    @Environment(AppearanceManager.self) private var appearance
     @Query private var images: [ImageRecord]
     @Query private var volumes: [VolumeRecord]
 
@@ -21,7 +22,7 @@ struct B2SyncSheet: View {
         VStack(spacing: 16) {
             HStack {
                 Image(systemName: "cloud.fill")
-                    .foregroundStyle(Constants.Design.accentColor)
+                    .foregroundStyle(appearance.accentColor)
                 Text("Sync Volumes to B2")
                     .font(Constants.Design.monoHeadline)
             }

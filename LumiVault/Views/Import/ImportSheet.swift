@@ -8,6 +8,7 @@ struct ImportSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @Environment(\.encryptionService) private var encryptionService
+    @Environment(AppearanceManager.self) private var appearance
     @Query private var volumes: [VolumeRecord]
 
     @State private var selectedURLs: [URL] = []
@@ -97,12 +98,12 @@ struct ImportSheet: View {
     private var dropZone: some View {
         RoundedRectangle(cornerRadius: 12)
             .strokeBorder(
-                isDragTargeted ? Constants.Design.accentColor : Color.secondary.opacity(0.3),
+                isDragTargeted ? appearance.accentColor : Color.secondary.opacity(0.3),
                 style: StrokeStyle(lineWidth: 2, dash: [8])
             )
             .background {
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(isDragTargeted ? Constants.Design.accentColor.opacity(0.05) : .clear)
+                    .fill(isDragTargeted ? appearance.accentColor.opacity(0.05) : .clear)
             }
             .overlay {
                 VStack(spacing: 8) {

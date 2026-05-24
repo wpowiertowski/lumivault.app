@@ -108,10 +108,12 @@ struct FlappyGameView: View {
     @State private var game = FlappyGame()
     @State private var highScore: Int = UserDefaults.standard.integer(forKey: "games.flappy.highScore")
     @State private var tickTask: Task<Void, Never>?
+    @Environment(AppearanceManager.self) private var appearance
 
     private let tickInterval: Duration = .milliseconds(60)
 
     var body: some View {
+        let accent = appearance.accentColor
         VStack(spacing: 8) {
             HStack {
                 Text("SCORE \(game.score)")
@@ -119,7 +121,7 @@ struct FlappyGameView: View {
                 Text("HIGH \(highScore)")
             }
             .font(Constants.Design.monoCaption)
-            .foregroundStyle(Constants.Design.accentColor)
+            .foregroundStyle(accent)
 
             RetroCanvas(columns: game.columns, rows: game.rows) { painter in
                 // pipes
@@ -129,10 +131,10 @@ struct FlappyGameView: View {
                     let bottomY = pipe.gapTop + pipe.gapHeight
                     let bottomHeight = game.rows - bottomY
                     if topHeight > 0 {
-                        painter.fillRect(x: leftCell, y: 0, width: game.pipeWidth, height: topHeight, color: Constants.Design.accentColor)
+                        painter.fillRect(x: leftCell, y: 0, width: game.pipeWidth, height: topHeight, color: accent)
                     }
                     if bottomHeight > 0 {
-                        painter.fillRect(x: leftCell, y: bottomY, width: game.pipeWidth, height: bottomHeight, color: Constants.Design.accentColor)
+                        painter.fillRect(x: leftCell, y: bottomY, width: game.pipeWidth, height: bottomHeight, color: accent)
                     }
                 }
                 // bird (3-cell sprite)

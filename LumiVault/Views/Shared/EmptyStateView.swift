@@ -4,6 +4,7 @@ struct EmptyStateView: View {
     let message: String
     var actionLabel: String? = nil
     var action: (() -> Void)? = nil
+    @Environment(AppearanceManager.self) private var appearance
 
     var body: some View {
         VStack(spacing: 16) {
@@ -11,7 +12,7 @@ struct EmptyStateView: View {
                 .font(.caption)
                 .fontWeight(.semibold)
                 .tracking(2)
-                .foregroundStyle(Constants.Design.accentColor)
+                .foregroundStyle(appearance.accentColor)
 
             Text(message)
                 .font(Constants.Design.monoHeadline)

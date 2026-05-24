@@ -5,6 +5,7 @@ struct VolumeSyncSheet: View {
     let volume: VolumeRecord
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(AppearanceManager.self) private var appearance
     @Query private var images: [ImageRecord]
     @Query private var allVolumes: [VolumeRecord]
 
@@ -24,7 +25,7 @@ struct VolumeSyncSheet: View {
             // Header
             HStack {
                 Image(systemName: "externaldrive.fill")
-                    .foregroundStyle(Constants.Design.accentColor)
+                    .foregroundStyle(appearance.accentColor)
                 Text("Sync to \(volume.label)")
                     .font(Constants.Design.monoHeadline)
             }

@@ -6,6 +6,7 @@ struct PhotoGridItem: View {
     let volumes: [VolumeRecord]
     @Environment(\.thumbnailService) private var thumbnailService
     @Environment(\.encryptionService) private var encryptionService
+    @Environment(AppearanceManager.self) private var appearance
     @State private var thumbnail: NSImage?
 
     var body: some View {
@@ -32,7 +33,7 @@ struct PhotoGridItem: View {
         .overlay {
             if isSelected {
                 RoundedRectangle(cornerRadius: 4)
-                    .stroke(Constants.Design.accentColor, lineWidth: 3)
+                    .stroke(appearance.accentColor, lineWidth: 3)
             }
         }
         .accessibilityIdentifier("grid.photo.\(String(image.sha256.prefix(8)))")

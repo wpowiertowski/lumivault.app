@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GeneralSettingsView: View {
     @Environment(SyncCoordinator.self) private var syncCoordinator
+    @Environment(AppearanceManager.self) private var appearance
     @AppStorage("catalogPath") private var catalogPath = "~/.lumivault/catalog.json"
     @AppStorage("redundancyPercentage") private var redundancyPercentage = 10.0
     @AppStorage("thumbnailCacheLimit") private var thumbnailCacheLimit = 2.0 // GB
@@ -11,6 +12,10 @@ struct GeneralSettingsView: View {
 
     var body: some View {
         Form {
+            Section("Appearance") {
+                AppIconPicker()
+            }
+
             Section("Catalog") {
                 TextField("Catalog Path", text: $catalogPath)
                     .font(Constants.Design.monoBody)

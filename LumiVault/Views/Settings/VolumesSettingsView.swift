@@ -4,6 +4,7 @@ import SwiftData
 struct VolumesSettingsView: View {
     @Query private var volumes: [VolumeRecord]
     @Environment(\.modelContext) private var modelContext
+    @Environment(AppearanceManager.self) private var appearance
     @State private var showingSyncAlert = false
     @State private var showingSyncSheet = false
     @State private var newlyAddedVolume: VolumeRecord?
@@ -33,7 +34,7 @@ struct VolumesSettingsView: View {
                     ForEach(volumes, id: \.persistentModelID) { volume in
                         HStack {
                             Image(systemName: "externaldrive.fill")
-                                .foregroundStyle(Constants.Design.accentColor)
+                                .foregroundStyle(appearance.accentColor)
                             VStack(alignment: .leading) {
                                 Text(volume.label)
                                     .font(Constants.Design.monoBody)

@@ -135,6 +135,7 @@ private struct WelcomeView: View {
 
 private struct FirstLaunchView: View {
     @Binding var hasSeenWelcome: Bool
+    @Environment(AppearanceManager.self) private var appearance
 
     var body: some View {
         ScrollView {
@@ -145,13 +146,13 @@ private struct FirstLaunchView: View {
                 VStack(spacing: 12) {
                     Image(systemName: "photo.on.rectangle.angled")
                         .font(.system(size: 48))
-                        .foregroundStyle(Constants.Design.accentColor)
+                        .foregroundStyle(appearance.accentColor)
 
                     Text("LUMIVAULT")
                         .font(.caption)
                         .fontWeight(.semibold)
                         .tracking(2)
-                        .foregroundStyle(Constants.Design.accentColor)
+                        .foregroundStyle(appearance.accentColor)
 
                     Text("Your photos, preserved forever.")
                         .font(Constants.Design.monoHeadline)
@@ -222,7 +223,7 @@ private struct FirstLaunchView: View {
                 }
                 .controlSize(.large)
                 .buttonStyle(.borderedProminent)
-                .tint(Constants.Design.accentColor)
+                .tint(appearance.accentColor)
                 .padding(.top, 32)
                 .padding(.bottom, 40)
             }
@@ -256,7 +257,7 @@ private struct FirstLaunchView: View {
             Text(number)
                 .font(Constants.Design.monoCaption)
                 .fontWeight(.bold)
-                .foregroundStyle(Constants.Design.accentColor)
+                .foregroundStyle(appearance.accentColor)
                 .frame(width: 16)
 
             Text(.init(text))
@@ -286,6 +287,7 @@ private struct FirstLaunchView: View {
 private struct ImportPromptView: View {
     var sidebarVisible: Bool
     @Environment(SyncCoordinator.self) private var syncCoordinator
+    @Environment(AppearanceManager.self) private var appearance
     @AppStorage("b2Enabled") private var b2Enabled = false
     @State private var isRestoring = false
     @State private var restoreError: String?
@@ -301,7 +303,7 @@ private struct ImportPromptView: View {
                         Text("Click to import\nfrom Photos")
                             .font(Constants.Design.monoCaption)
                     }
-                    .foregroundStyle(Constants.Design.accentColor.opacity(0.6))
+                    .foregroundStyle(appearance.accentColor.opacity(0.6))
                     .padding(.leading, 20)
                     .padding(.top, 12)
 
@@ -320,7 +322,7 @@ private struct ImportPromptView: View {
                     .font(.caption)
                     .fontWeight(.semibold)
                     .tracking(2)
-                    .foregroundStyle(Constants.Design.accentColor)
+                    .foregroundStyle(appearance.accentColor)
 
                 Text("Import an album to get started")
                     .font(Constants.Design.monoHeadline)
@@ -424,5 +426,6 @@ private struct ImportPromptView: View {
 
 #Preview {
     ContentView()
+        .environment(AppearanceManager())
         .modelContainer(SwiftDataContainer.create())
 }

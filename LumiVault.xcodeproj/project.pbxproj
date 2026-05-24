@@ -10,6 +10,7 @@
 		032867577A6CBA9980DAB87D /* TipJar.storekit in Resources */ = {isa = PBXBuildFile; fileRef = 681F3FAA2F788B687AAC19BA /* TipJar.storekit */; };
 		03E6665EF681AB03B992359C /* B2Credentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0735E1FC71B26F46934B015B /* B2Credentials.swift */; };
 		0581882C32BBFC7C46992A57 /* RetroCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F9C3644B1701B12A0A1E3B7 /* RetroCanvas.swift */; };
+		083B35AF5256245BE32511CF /* AppearanceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 989DD4C8FCF70473795B5A2D /* AppearanceManager.swift */; };
 		08BE30A1F1BE474DC9189428 /* NearDuplicatesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15ADD1B31F649B6D4AE4E55D /* NearDuplicatesView.swift */; };
 		0F5EAD71CC35CD42AB910CE8 /* FlappyGame.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A76C88D6D14F8411611A4C /* FlappyGame.swift */; };
 		12470CCFAE5D282CF32C5464 /* ReconciliationTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B98A6688AC0797C85950E76D /* ReconciliationTypes.swift */; };
@@ -21,7 +22,9 @@
 		27E6FC12E9C96DA903E62582 /* TestFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CFB81A5F9B3F78322F61142 /* TestFixtures.swift */; };
 		29603BDE743EC9A5EF23D668 /* CatalogBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36CC2F93A79D33C625E126E4 /* CatalogBackupService.swift */; };
 		2AB3DBBB033427F0060FC5E2 /* LumiVaultTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F69A5682C9063F979E533C /* LumiVaultTests.swift */; };
+		2C495EAF6697464E755BBB6E /* AppIconPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C9D5CDF855C1849DF341F1D /* AppIconPicker.swift */; };
 		2F0B68DAB1D1FCF1046D6908 /* EncryptionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4CACCF602F3A573BC7627EE /* EncryptionSettingsView.swift */; };
+		350104310F78F3E7EA52967C /* AppIcon-Magenta.icon in Resources */ = {isa = PBXBuildFile; fileRef = F85C879C72C892A0C3CEF07F /* AppIcon-Magenta.icon */; };
 		377E661A689793390F13D75A /* B2SyncSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0559D966DBB4F64CE222568C /* B2SyncSheet.swift */; };
 		3822A367C5727C93EDA2CF9C /* B2Service.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1068629E8FF6AF2C6063CC06 /* B2Service.swift */; };
 		3CF3C07E9C178EB6E6961593 /* Catalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90BF32093AC2357CD61747D /* Catalog.swift */; };
@@ -32,6 +35,7 @@
 		501A35F756977D30D428B869 /* PipelinedImportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DAAFF78DFC668D556C45BE3 /* PipelinedImportCoordinator.swift */; };
 		501A9A0B01E7CDE2D560E609 /* PhotosAlbumPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA85E7129726352A8ABA7D14 /* PhotosAlbumPicker.swift */; };
 		50D5C5A6BA309A0BCAB0CC64 /* VolumeListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0099C37B5592C7B2AACD467B /* VolumeListView.swift */; };
+		50DD092D8C56FC376353C448 /* AppIconVariant.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCEAE39D412979926A1B5158 /* AppIconVariant.swift */; };
 		53B2C5DA24018B4D6611F9AF /* AlbumResyncSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 170A85D45BB0A8CB5F310DEC /* AlbumResyncSheet.swift */; };
 		55092B1FB5D744B323FDDFCE /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8DDEE614B4A6D6FE85E9906 /* EmptyStateView.swift */; };
 		576927D602EDB37C9C821BEF /* GeneralSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F4EAD4EE81E22BA1863819 /* GeneralSettingsView.swift */; };
@@ -67,6 +71,7 @@
 		C0F667DA2B128C963052AA69 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 036EC4B45DE6669C10BB0A3D /* AppIcon.icon */; };
 		C3CF5E268A47CFFAD589C4DD /* AsyncChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55E512C07356078D3E3D8CD /* AsyncChannel.swift */; };
 		C3E2B48BC52875B0CC34CFBD /* HasherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3198F0E915EFA392E07CBB6B /* HasherService.swift */; };
+		C9EF929E75B0DEAA144C155F /* AppIcon-Cobalt.icon in Resources */ = {isa = PBXBuildFile; fileRef = F1E17E73980714AF53F6E144 /* AppIcon-Cobalt.icon */; };
 		CDFE6E5E0536944B2630D0C1 /* AsyncSemaphore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FD4E291C18518482ADDCA6A /* AsyncSemaphore.swift */; };
 		D614E72A43BEE42BDCD6896F /* GaloisField16.swift in Sources */ = {isa = PBXBuildFile; fileRef = A705C358860AAE79B6C774A6 /* GaloisField16.swift */; };
 		D667D68E0E1F064E5955284C /* RedundancyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0933DB339B93FFE9258AEA7 /* RedundancyService.swift */; };
@@ -81,6 +86,7 @@
 		F9138AD9D6AFD57B9F8F789D /* PipelineItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ACCA96E297825FB7AD6A91E /* PipelineItem.swift */; };
 		F92EA583B01D47B947517FEA /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 259FAF0AE3CB8F5152CD2AC6 /* SettingsView.swift */; };
 		FB607540471DB65A4F19B74B /* ImageRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E605ECCBCE62C39786BEF19 /* ImageRecord.swift */; };
+		FBAC39B1D6741D0B0F39979A /* AppIcon-Forest.icon in Resources */ = {isa = PBXBuildFile; fileRef = CD40A7D7C76BDEF883661CD7 /* AppIcon-Forest.icon */; };
 		FBF46E3E16E6E1B3E7661FA3 /* CatalogService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D422E392E978E03DC79086BD /* CatalogService.swift */; };
 		FC2F73AE4F5F0C4F9FEBBF6A /* B2SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E68790766AAC0D4983E632CB /* B2SettingsView.swift */; };
 		FF73CCC9E5DA42613C13ADF1 /* ImportDefaultsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE52C702FD0948C6E836DC57 /* ImportDefaultsSettingsView.swift */; };
@@ -148,10 +154,12 @@
 		78323BB35DE5C1DE3D74C325 /* IntegritySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegritySheet.swift; sourceTree = "<group>"; };
 		795EC7A08A0ABF43F828C239 /* AlbumDeletionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumDeletionSheet.swift; sourceTree = "<group>"; };
 		7FD4E291C18518482ADDCA6A /* AsyncSemaphore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncSemaphore.swift; sourceTree = "<group>"; };
+		8C9D5CDF855C1849DF341F1D /* AppIconPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconPicker.swift; sourceTree = "<group>"; };
 		93793FFEB071EF35882DC3F8 /* GamesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamesTests.swift; sourceTree = "<group>"; };
 		937E65EE6EF8CEA2B9443D20 /* ImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportSheet.swift; sourceTree = "<group>"; };
 		93EA5474D335D73AA5521633 /* SyncServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncServiceTests.swift; sourceTree = "<group>"; };
 		93F0123F93F18FC16E95D05C /* ReconciliationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconciliationService.swift; sourceTree = "<group>"; };
+		989DD4C8FCF70473795B5A2D /* AppearanceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceManager.swift; sourceTree = "<group>"; };
 		9B11AF157144E4837D8EE913 /* B2ServiceNetworkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = B2ServiceNetworkTests.swift; sourceTree = "<group>"; };
 		A26A124182F5946F24CB1ADD /* PhotoGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoGridView.swift; sourceTree = "<group>"; };
 		A4B64E8F8B0DBDF7B71FF1E6 /* VolumeSyncSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeSyncSheet.swift; sourceTree = "<group>"; };
@@ -167,6 +175,8 @@
 		BFA740881D64DEF9AAD992E7 /* ImageConversionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageConversionService.swift; sourceTree = "<group>"; };
 		C2BF78C573AEB3723FAA6B52 /* AlbumExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumExportSheet.swift; sourceTree = "<group>"; };
 		CA85E7129726352A8ABA7D14 /* PhotosAlbumPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosAlbumPicker.swift; sourceTree = "<group>"; };
+		CCEAE39D412979926A1B5158 /* AppIconVariant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconVariant.swift; sourceTree = "<group>"; };
+		CD40A7D7C76BDEF883661CD7 /* AppIcon-Forest.icon */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "AppIcon-Forest.icon"; path = "LumiVault/Resources/AppIcon-Forest.icon"; sourceTree = SOURCE_ROOT; };
 		D1C282CA4BBA78763E15C190 /* ThumbnailService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailService.swift; sourceTree = "<group>"; };
 		D422E392E978E03DC79086BD /* CatalogService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogService.swift; sourceTree = "<group>"; };
 		D4F69A5682C9063F979E533C /* LumiVaultTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumiVaultTests.swift; sourceTree = "<group>"; };
@@ -179,7 +189,9 @@
 		E68790766AAC0D4983E632CB /* B2SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = B2SettingsView.swift; sourceTree = "<group>"; };
 		E69F5FC018A6F4282FD4B52D /* PhotosLibraryMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosLibraryMonitor.swift; sourceTree = "<group>"; };
 		E7C8416D7A7C9047F26714AD /* LumiVaultUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumiVaultUITests.swift; sourceTree = "<group>"; };
+		F1E17E73980714AF53F6E144 /* AppIcon-Cobalt.icon */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "AppIcon-Cobalt.icon"; path = "LumiVault/Resources/AppIcon-Cobalt.icon"; sourceTree = SOURCE_ROOT; };
 		F4DA177B337BD6A1C2268C14 /* AsyncPrimitivesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncPrimitivesTests.swift; sourceTree = "<group>"; };
+		F85C879C72C892A0C3CEF07F /* AppIcon-Magenta.icon */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "AppIcon-Magenta.icon"; path = "LumiVault/Resources/AppIcon-Magenta.icon"; sourceTree = SOURCE_ROOT; };
 		F90BF32093AC2357CD61747D /* Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalog.swift; sourceTree = "<group>"; };
 		FC1982FE3C2E560E783753AF /* PhotosImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosImportService.swift; sourceTree = "<group>"; };
 		FE52C702FD0948C6E836DC57 /* ImportDefaultsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportDefaultsSettingsView.swift; sourceTree = "<group>"; };
@@ -366,6 +378,9 @@
 		D0F67E9D9C056774BF167850 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				F1E17E73980714AF53F6E144 /* AppIcon-Cobalt.icon */,
+				CD40A7D7C76BDEF883661CD7 /* AppIcon-Forest.icon */,
+				F85C879C72C892A0C3CEF07F /* AppIcon-Magenta.icon */,
 				036EC4B45DE6669C10BB0A3D /* AppIcon.icon */,
 				06D0EEE7A6946D0748E5A6C4 /* Assets.xcassets */,
 				E1B876E2BEAD4C3EBF5E1688 /* LumiVault.help */,
@@ -387,6 +402,8 @@
 		E26B1C6711DF4539D761040A /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
+				989DD4C8FCF70473795B5A2D /* AppearanceManager.swift */,
+				CCEAE39D412979926A1B5158 /* AppIconVariant.swift */,
 				D55E512C07356078D3E3D8CD /* AsyncChannel.swift */,
 				7FD4E291C18518482ADDCA6A /* AsyncSemaphore.swift */,
 				55BFD846559703686D7FA838 /* BookmarkResolver.swift */,
@@ -400,6 +417,7 @@
 		E3AC84C829FC08937E99B62F /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				8C9D5CDF855C1849DF341F1D /* AppIconPicker.swift */,
 				E68790766AAC0D4983E632CB /* B2SettingsView.swift */,
 				0559D966DBB4F64CE222568C /* B2SyncSheet.swift */,
 				22F376C53109DC45304A767E /* CloudSettingsView.swift */,
@@ -526,6 +544,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C9EF929E75B0DEAA144C155F /* AppIcon-Cobalt.icon in Resources */,
+				FBAC39B1D6741D0B0F39979A /* AppIcon-Forest.icon in Resources */,
+				350104310F78F3E7EA52967C /* AppIcon-Magenta.icon in Resources */,
 				C0F667DA2B128C963052AA69 /* AppIcon.icon in Resources */,
 				7606BCE424A01DC36A651519 /* Assets.xcassets in Resources */,
 				3F1CC37E542EA4CF0C617E64 /* LumiVault.help in Resources */,
@@ -544,6 +565,9 @@
 				93AB452DC206E0A2C5C02909 /* AlbumExportSheet.swift in Sources */,
 				7623A3D396C608719188049B /* AlbumRecord.swift in Sources */,
 				53B2C5DA24018B4D6611F9AF /* AlbumResyncSheet.swift in Sources */,
+				2C495EAF6697464E755BBB6E /* AppIconPicker.swift in Sources */,
+				50DD092D8C56FC376353C448 /* AppIconVariant.swift in Sources */,
+				083B35AF5256245BE32511CF /* AppearanceManager.swift in Sources */,
 				C3CF5E268A47CFFAD589C4DD /* AsyncChannel.swift in Sources */,
 				CDFE6E5E0536944B2630D0C1 /* AsyncSemaphore.swift in Sources */,
 				03E6665EF681AB03B992359C /* B2Credentials.swift in Sources */,
@@ -650,7 +674,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LumiVault/LumiVault.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -672,7 +695,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = LumiVault/LumiVault.Debug.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;

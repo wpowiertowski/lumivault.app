@@ -3,6 +3,7 @@ import SwiftUI
 struct B2SettingsView: View {
     @AppStorage("b2Enabled") private var b2Enabled = false
     @AppStorage("b2BucketName") private var bucketName = ""
+    @Environment(AppearanceManager.self) private var appearance
     @State private var keyId = ""
     @State private var applicationKey = ""
     @State private var bucketId = ""
@@ -144,13 +145,14 @@ private struct SetupStep: View {
     let number: Int
     let title: String
     let detail: String
+    @Environment(AppearanceManager.self) private var appearance
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Text("\(number).")
                 .font(Constants.Design.monoCaption)
                 .fontWeight(.semibold)
-                .foregroundStyle(Constants.Design.accentColor)
+                .foregroundStyle(appearance.accentColor)
                 .frame(width: 16, alignment: .trailing)
 
             VStack(alignment: .leading, spacing: 2) {

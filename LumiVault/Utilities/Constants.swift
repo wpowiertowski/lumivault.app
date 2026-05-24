@@ -4,8 +4,6 @@ import SwiftUI
 enum Constants {
     // MARK: - Design
     enum Design {
-        static let accentColor = Color(.displayP3, red: 1.0, green: 0.439, blue: 0.0)
-
         static let monoLargeTitle = Font.system(.largeTitle, design: .monospaced).weight(.medium)
         static let monoTitle = Font.system(.title, design: .monospaced).weight(.medium)
         static let monoTitle2 = Font.system(.title2, design: .monospaced).weight(.medium)

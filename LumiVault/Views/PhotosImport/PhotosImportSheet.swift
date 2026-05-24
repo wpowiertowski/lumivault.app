@@ -24,6 +24,7 @@ struct PhotosImportSheet: View {
     @State private var gameProgress = GameProgressMirror()
     @Environment(SyncCoordinator.self) private var syncCoordinator
     @Environment(\.encryptionService) private var encryptionService
+    @Environment(AppearanceManager.self) private var appearance
     @Query private var volumes: [VolumeRecord]
     @State private var catalogAlbumCounts: [String: Int] = [:]
     @State private var pendingImports: [PendingAlbumImport] = []
@@ -384,7 +385,7 @@ struct PhotosImportSheet: View {
     private var gamesOfferBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "gamecontroller.fill")
-                .foregroundStyle(Constants.Design.accentColor)
+                .foregroundStyle(appearance.accentColor)
             VStack(alignment: .leading, spacing: 2) {
                 Text("This is going to take a while.")
                     .font(Constants.Design.monoCaption)
@@ -406,7 +407,7 @@ struct PhotosImportSheet: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Constants.Design.accentColor.opacity(0.12))
+        .background(appearance.accentColor.opacity(0.12))
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .padding(.horizontal)
     }
@@ -703,13 +704,14 @@ private struct PendingAlbumImport: Identifiable, Equatable {
 private struct StepIndicator: View {
     let current: ImportStep
     let steps: [ImportStep]
+    @Environment(AppearanceManager.self) private var appearance
 
     var body: some View {
         HStack(spacing: 4) {
             ForEach(steps, id: \.rawValue) { step in
                 HStack(spacing: 4) {
                     Circle()
-                        .fill(step.rawValue <= current.rawValue ? Constants.Design.accentColor : Color.secondary.opacity(0.3))
+                        .fill(step.rawValue <= current.rawValue ? appearance.accentColor : Color.secondary.opacity(0.3))
                         .frame(width: 8, height: 8)
                     Text(step.label)
                         .font(Constants.Design.monoCaption)
@@ -717,7 +719,7 @@ private struct StepIndicator: View {
                 }
                 if step != steps.last {
                     Rectangle()
-                        .fill(step.rawValue < current.rawValue ? Constants.Design.accentColor : Color.secondary.opacity(0.3))
+                        .fill(step.rawValue < current.rawValue ? appearance.accentColor : Color.secondary.opacity(0.3))
                         .frame(height: 1)
                         .frame(maxWidth: 40)
                 }

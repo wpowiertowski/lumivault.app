@@ -114,10 +114,12 @@ struct SnakeGameView: View {
     @State private var isRunning = true
     @State private var highScore: Int = UserDefaults.standard.integer(forKey: "games.snake.highScore")
     @State private var tickTask: Task<Void, Never>?
+    @Environment(AppearanceManager.self) private var appearance
 
     private let tickInterval: Duration = .milliseconds(110)
 
     var body: some View {
+        let accent = appearance.accentColor
         VStack(spacing: 8) {
             HStack {
                 Text("SCORE \(game.score)")
@@ -125,14 +127,14 @@ struct SnakeGameView: View {
                 Text("HIGH \(highScore)")
             }
             .font(Constants.Design.monoCaption)
-            .foregroundStyle(Constants.Design.accentColor)
+            .foregroundStyle(accent)
 
             RetroCanvas(columns: game.columns, rows: game.rows) { painter in
                 // food
                 painter.fillCell(x: game.food.x, y: game.food.y, color: .red)
                 // snake — head brighter than body
                 for (i, cell) in game.snake.enumerated() {
-                    let color = i == 0 ? Constants.Design.accentColor : Constants.Design.accentColor.opacity(0.7)
+                    let color = i == 0 ? accent : accent.opacity(0.7)
                     painter.fillCell(x: cell.x, y: cell.y, color: color)
                 }
                 if game.isGameOver {

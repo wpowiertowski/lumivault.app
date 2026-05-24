@@ -6,6 +6,7 @@ struct IntegritySheet: View {
     let images: [ImageRecord]
     @Query private var volumes: [VolumeRecord]
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppearanceManager.self) private var appearance
 
     @State private var phase: IntegrityPhase = .scanning
     @State private var progress = ReconciliationProgress()
@@ -24,7 +25,7 @@ struct IntegritySheet: View {
             // Header
             HStack {
                 Image(systemName: "checkmark.shield")
-                    .foregroundStyle(Constants.Design.accentColor)
+                    .foregroundStyle(appearance.accentColor)
                 Text("Verifying \(title)")
                     .font(Constants.Design.monoHeadline)
                     .lineLimit(1)
@@ -197,12 +198,13 @@ private struct IntegrityDetailsSheet: View {
     let repairResults: [RepairResult]
     let volumeLabels: [String: String]
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppearanceManager.self) private var appearance
 
     var body: some View {
         VStack(spacing: 12) {
             HStack {
                 Image(systemName: "list.bullet.rectangle")
-                    .foregroundStyle(Constants.Design.accentColor)
+                    .foregroundStyle(appearance.accentColor)
                 Text("\(discrepancies.count) Issues")
                     .font(Constants.Design.monoHeadline)
             }

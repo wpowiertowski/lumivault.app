@@ -17,16 +17,19 @@ struct LumiVaultApp: App {
     @NSApplicationDelegateAdaptor(AppActivationDelegate.self) private var appDelegate
     @State private var syncCoordinator = SyncCoordinator()
     @State private var photosMonitor = PhotosLibraryMonitor()
+    @State private var appearance = AppearanceManager()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .tint(Constants.Design.accentColor)
+                .tint(appearance.accentColor)
                 .environment(syncCoordinator)
                 .environment(photosMonitor)
+                .environment(appearance)
                 .environment(\.encryptionService, encryptionService)
                 .environment(\.thumbnailService, thumbnailService)
                 .task {
+                    appearance.applyDockIcon()
                     syncCoordinator.modelContainer = container
                     await syncCoordinator.setup()
                     photosMonitor.start(modelContext: container.mainContext)
@@ -42,8 +45,10 @@ struct LumiVaultApp: App {
 
         Settings {
             SettingsView()
+                .tint(appearance.accentColor)
                 .environment(syncCoordinator)
                 .environment(photosMonitor)
+                .environment(appearance)
                 .environment(\.encryptionService, encryptionService)
                 .environment(\.thumbnailService, thumbnailService)
         }

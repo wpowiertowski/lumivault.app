@@ -2,6 +2,7 @@ import SwiftUI
 import StoreKit
 
 struct SupportSettingsView: View {
+    @Environment(AppearanceManager.self) private var appearance
     @State private var products: [Product] = []
     @State private var isLoading = true
     @State private var purchaseError: String?
@@ -21,7 +22,7 @@ struct SupportSettingsView: View {
                 VStack(spacing: 8) {
                     Image(systemName: "cup.and.saucer.fill")
                         .font(.system(size: 36))
-                        .foregroundStyle(Constants.Design.accentColor)
+                        .foregroundStyle(appearance.accentColor)
 
                     Text("Support LumiVault")
                         .font(Constants.Design.monoHeadline)
@@ -133,6 +134,7 @@ struct SupportSettingsView: View {
 private struct TipRow: View {
     let product: Product
     let onPurchase: () async -> Void
+    @Environment(AppearanceManager.self) private var appearance
     @State private var isPurchasing = false
 
     private var icon: String {
@@ -159,7 +161,7 @@ private struct TipRow: View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.title2)
-                .foregroundStyle(Constants.Design.accentColor)
+                .foregroundStyle(appearance.accentColor)
                 .frame(width: 32)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -189,8 +191,8 @@ private struct TipRow: View {
                         .fontWeight(.medium)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(Constants.Design.accentColor.opacity(0.15))
-                        .foregroundStyle(Constants.Design.accentColor)
+                        .background(appearance.accentColor.opacity(0.15))
+                        .foregroundStyle(appearance.accentColor)
                         .clipShape(Capsule())
                 }
             }

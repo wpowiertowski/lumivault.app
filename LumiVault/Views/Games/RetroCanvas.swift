@@ -8,6 +8,7 @@ struct RetroCanvas: View {
     let columns: Int
     let rows: Int
     let draw: (RetroPainter) -> Void
+    @Environment(AppearanceManager.self) private var appearance
 
     var body: some View {
         GeometryReader { geo in
@@ -41,7 +42,7 @@ struct RetroCanvas: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(Constants.Design.accentColor.opacity(0.4), lineWidth: 1)
+                .stroke(appearance.accentColor.opacity(0.4), lineWidth: 1)
         )
     }
 
