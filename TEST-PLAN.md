@@ -173,7 +173,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 | --- | -------- | ---------- |
 | 1.1 | Launch app with no prior data | Welcome view appears with restore options and arrow pointing to sidebar |
 | 1.2 | Click "Detect Existing" | App searches for `~/.lumivault/catalog.json`. If found, shows import summary. If not, shows "not found" message |
-| 1.3 | Click "Restore from File" | File picker opens, filtered to `.json` files |
+| 1.3 | Click "From File..." | File picker opens, filtered to `.json` files |
 | 1.4 | Select a valid catalog.json | Catalog imports, sidebar populates with year/album tree |
 | 1.5 | Select an invalid file (e.g., .txt) | Graceful error, no crash, app remains on welcome screen |
 

@@ -103,7 +103,8 @@ LumiVault/
 │   ├── Detail/           Full-resolution preview + metadata inspector
 │   ├── Import/           Drag-and-drop file import with progress
 │   ├── PhotosImport/     Photos library album picker + import wizard
-│   ├── Settings/         General, Volumes, iCloud, B2, Encryption, Import Defaults, Integrity, Support
+│   ├── Settings/         General, Import Defaults, Volumes, iCloud, B2, Encryption, Integrity, Support
+│   ├── Games/            Easter-egg Snake / Flappy mini-games shown during long PAR2 phases
 │   └── Shared/           Reusable components (EmptyStateView)
 ├── Utilities/            Perceptual hashing, file coordination, bookmarks
 └── Resources/            Asset catalog, StoreKit configuration
