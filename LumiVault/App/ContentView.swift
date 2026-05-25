@@ -4,6 +4,7 @@ import SwiftData
 struct ContentView: View {
     @Query private var albums: [AlbumRecord]
     @Environment(SyncCoordinator.self) private var syncCoordinator
+    @Environment(\.openSettings) private var openSettings
     @State private var selectedAlbum: AlbumRecord?
     @State private var selectedImage: ImageRecord?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
@@ -16,7 +17,7 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { proxy in
             let sidebarIdeal: CGFloat = 240
-            let halfWidth = max(200, (proxy.size.width - sidebarIdeal) / 2)
+            let contentIdeal = max(200, proxy.size.width * 0.6)
 
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(selectedAlbum: $selectedAlbum)
@@ -32,7 +33,7 @@ struct ContentView: View {
                         EmptyStateView(message: "Select an album")
                     }
                 }
-                .navigationSplitViewColumnWidth(min: 200, ideal: halfWidth)
+                .navigationSplitViewColumnWidth(min: 200, ideal: contentIdeal)
             } detail: {
                 if let image = selectedImage {
                     PhotoDetailView(image: image)
@@ -96,7 +97,7 @@ struct ContentView: View {
             }
             .alert("Catalog Integrity Warning", isPresented: $showingIntegrityAlert) {
                 Button("Restore from Backup...") {
-                    // Navigate to welcome/restore flow
+                    openSettings()
                 }
                 Button("Continue Anyway", role: .cancel) { }
             } message: {

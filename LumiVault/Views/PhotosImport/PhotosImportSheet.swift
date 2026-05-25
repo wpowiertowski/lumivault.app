@@ -3,6 +3,7 @@ import SwiftData
 
 struct PhotosImportSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openSettings) private var openSettings
     @Environment(\.modelContext) private var modelContext
     @State private var step: ImportStep = .pickAlbum
     @State private var selectedAlbumIds: Set<String> = []
@@ -197,7 +198,8 @@ struct PhotosImportSheet: View {
             Text("Connect an external volume or configure Backblaze B2 in Settings before importing.")
         } actions: {
             Button("Open Settings...") {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                dismiss()
+                openSettings()
             }
             .buttonStyle(.borderedProminent)
         }
