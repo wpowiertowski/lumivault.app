@@ -33,7 +33,7 @@ struct LumiVaultApp: App {
                 }
         }
         .modelContainer(container)
-        .defaultSize(width: 960, height: 640)
+        .defaultSize(width: 1440, height: 900)
         .windowResizability(.contentMinSize)
         .commands {
             ImportFromPhotosCommands()

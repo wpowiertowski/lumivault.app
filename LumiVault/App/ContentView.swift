@@ -17,7 +17,7 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { proxy in
             let sidebarIdeal: CGFloat = 240
-            let halfWidth = max(200, (proxy.size.width - sidebarIdeal) / 2)
+            let contentIdeal = max(200, proxy.size.width * 0.6)
 
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(selectedAlbum: $selectedAlbum)
@@ -33,7 +33,7 @@ struct ContentView: View {
                         EmptyStateView(message: "Select an album")
                     }
                 }
-                .navigationSplitViewColumnWidth(min: 200, ideal: halfWidth)
+                .navigationSplitViewColumnWidth(min: 200, ideal: contentIdeal)
             } detail: {
                 if let image = selectedImage {
                     PhotoDetailView(image: image)
