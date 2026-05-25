@@ -65,4 +65,4 @@ Source: TEST-PLAN.md "Manual Test Cases NOT Automated"
 
 ## Code Quality
 
-Nothing pending — IntegrityServiceTests was removed along with IntegrityService in PR 2 of the cleanup plan.
+Nothing pending.

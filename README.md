@@ -5,6 +5,10 @@
 [![SwiftUI](https://img.shields.io/badge/SwiftUI-blue.svg)](https://developer.apple.com/swiftui/)
 [![SwiftData](https://img.shields.io/badge/SwiftData-blue.svg)](https://developer.apple.com/swiftdata/)
 
+<p align="center">
+  <img src="icon.png" alt="LumiVault" width="128" height="128">
+</p>
+
 # LumiVault
 
 Your photos, preserved forever. Native macOS archiving with Apple Photos integration, Reed-Solomon error correction, and iCloud sync.
@@ -103,7 +107,8 @@ LumiVault/
 │   ├── Detail/           Full-resolution preview + metadata inspector
 │   ├── Import/           Drag-and-drop file import with progress
 │   ├── PhotosImport/     Photos library album picker + import wizard
-│   ├── Settings/         General, Volumes, iCloud, B2, Encryption, Import Defaults, Integrity, Support
+│   ├── Settings/         General, Import Defaults, Volumes, iCloud, B2, Encryption, Integrity, Support
+│   ├── Games/            Easter-egg Snake / Flappy mini-games shown during long PAR2 phases
 │   └── Shared/           Reusable components (EmptyStateView)
 ├── Utilities/            Perceptual hashing, file coordination, bookmarks
 └── Resources/            Asset catalog, StoreKit configuration

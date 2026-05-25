@@ -573,6 +573,8 @@ LumiVault/
 │   ├── AlbumRecord.swift                // SwiftData @Model (cascade delete → images)
 │   ├── VolumeRecord.swift               // SwiftData @Model
 │   ├── B2Credentials.swift              // B2 auth, API response, listing types
+│   ├── EXIFData.swift                   // Parsed EXIF metadata for the inspector
+│   ├── ImportTypes.swift                // ImportSettings + shared import enums
 │   └── ReconciliationTypes.swift        // Sendable snapshots, discrepancies, progress
 │
 ├── Services/
@@ -609,12 +611,18 @@ LumiVault/
 │   │   ├── PhotoDetailView.swift        // Full-resolution preview
 │   │   └── MetadataInspector.swift      // EXIF, hash, PAR2, storage locations
 │   ├── Import/
-│   │   ├── ImportSheet.swift            // Drag-and-drop / folder picker
-│   │   └── ImportProgressView.swift     // Per-file progress with dedup stats
+│   │   └── ImportSheet.swift            // Drag-and-drop / folder picker with inline progress
 │   ├── PhotosImport/
 │   │   ├── PhotosAlbumPicker.swift      // Photos library album browser
 │   │   ├── ImportSettingsView.swift      // Import configuration form
 │   │   └── PhotosImportSheet.swift      // Multi-step import wizard
+│   ├── Games/
+│   │   ├── GameStepView.swift           // Container shown during long PAR2 phases
+│   │   ├── RetroCanvas.swift            // Shared pixel-grid canvas
+│   │   ├── SnakeGame.swift              // Easter-egg Snake state machine
+│   │   └── FlappyGame.swift             // Easter-egg Flappy state machine
+│   ├── Shared/
+│   │   └── EmptyStateView.swift         // Reusable empty / placeholder view
 │   ├── NearDuplicatesView.swift  // Near-duplicate pairs browser
 │   └── Settings/
 │       ├── SettingsView.swift            // Settings tab container
