@@ -5,6 +5,10 @@
 [![SwiftUI](https://img.shields.io/badge/SwiftUI-blue.svg)](https://developer.apple.com/swiftui/)
 [![SwiftData](https://img.shields.io/badge/SwiftData-blue.svg)](https://developer.apple.com/swiftdata/)
 
+<p align="center">
+  <img src="icon.png" alt="LumiVault" width="128" height="128">
+</p>
+
 # LumiVault
 
 Your photos, preserved forever. Native macOS archiving with Apple Photos integration, Reed-Solomon error correction, and iCloud sync.
