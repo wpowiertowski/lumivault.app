@@ -101,10 +101,34 @@ actor CatalogService {
               var album = dayEntry.albums[name] else { return }
 
         album.images.removeAll { $0.sha256 == sha256 }
-        dayEntry.albums[name] = album
-        monthEntry.days[day] = dayEntry
-        yearEntry.months[month] = monthEntry
-        catalog.years[year] = yearEntry
+
+        // Removing the last image empties the album; prune it and any now-empty
+        // day/month/year containers so catalog.json (shared with the CLI) doesn't
+        // accumulate ghost albums that the UI can never clear.
+        if album.images.isEmpty {
+            dayEntry.albums.removeValue(forKey: name)
+        } else {
+            dayEntry.albums[name] = album
+        }
+
+        if dayEntry.albums.isEmpty {
+            monthEntry.days.removeValue(forKey: day)
+        } else {
+            monthEntry.days[day] = dayEntry
+        }
+
+        if monthEntry.days.isEmpty {
+            yearEntry.months.removeValue(forKey: month)
+        } else {
+            yearEntry.months[month] = monthEntry
+        }
+
+        if yearEntry.months.isEmpty {
+            catalog.years.removeValue(forKey: year)
+        } else {
+            catalog.years[year] = yearEntry
+        }
+
         catalog.lastUpdated = .now
     }
 

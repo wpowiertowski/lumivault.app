@@ -34,7 +34,7 @@ actor EncryptionService {
         var derivedBytes = [UInt8](repeating: 0, count: 32)
         let passphraseData = Array(passphrase.utf8)
 
-        _ = salt.withUnsafeBytes { saltBuffer in
+        let status = salt.withUnsafeBytes { saltBuffer in
             CCKeyDerivationPBKDF(
                 CCPBKDFAlgorithm(kCCPBKDF2),
                 passphraseData, passphraseData.count,
@@ -44,6 +44,11 @@ actor EncryptionService {
                 &derivedBytes, 32
             )
         }
+
+        // On failure derivedBytes would stay all-zero — a fixed, attacker-known key.
+        // Our parameters are constant and valid, so this cannot fail in practice; trap
+        // loudly rather than ever proceed with a broken key if that invariant is violated.
+        precondition(status == CCCryptorStatus(kCCSuccess), "PBKDF2 key derivation failed (status \(status))")
 
         let key = SymmetricKey(data: derivedBytes)
 

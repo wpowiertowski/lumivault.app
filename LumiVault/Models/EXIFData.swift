@@ -41,7 +41,9 @@ struct EXIFData: Sendable {
     // MARK: - Formatted Strings
 
     var exposureString: String? {
-        guard let t = exposureTime else { return nil }
+        // Guard t > 0: a corrupt/zero ExposureTime tag would make Int(round(1.0 / t))
+        // evaluate Int(.infinity), which traps at runtime.
+        guard let t = exposureTime, t > 0 else { return nil }
         if t >= 1 { return "\(String(format: "%.1f", t))s" }
         let denominator = Int(round(1.0 / t))
         return "1/\(denominator)s"

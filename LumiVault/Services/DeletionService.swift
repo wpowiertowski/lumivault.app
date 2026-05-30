@@ -160,16 +160,19 @@ actor DeletionService {
                     result.errors.append("B2 delete failed: \(albumPath) — \(error.localizedDescription)")
                 }
             } else {
-                // Delete specific files by listing with their exact prefix
+                // Delete specific files. List by the file name as a prefix, but only delete
+                // the object whose name matches EXACTLY — a B2 prefix query also returns any
+                // object whose name merely starts with this one (e.g. its own `.par2`
+                // companions or an unrelated file with an extended name).
                 for image in images {
-                    let filePrefix = albumPath + "/" + image.filename
+                    let exactName = albumPath + "/" + image.filename
                     do {
                         let listings = try await b2Service.listAllFiles(
                             bucketId: credentials.bucketId,
                             credentials: credentials,
-                            prefix: filePrefix
+                            prefix: exactName
                         )
-                        for listing in listings {
+                        for listing in listings where listing.fileName == exactName {
                             try await b2Service.deleteFile(
                                 fileId: listing.fileId,
                                 fileName: listing.fileName,

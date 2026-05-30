@@ -58,9 +58,16 @@ final class SyncCoordinator: @unchecked Sendable {
     // MARK: - Public API
 
     func performSync() async {
-        let alreadySyncing = await MainActor.run { isSyncing }
-        guard let service = syncService, !alreadySyncing else { return }
-        await MainActor.run { isSyncing = true }
+        guard let service = syncService else { return }
+        // Claim the sync slot atomically: read-and-set in a single MainActor hop so two
+        // concurrent callers (launch sync, manual trigger, iCloud metadata callback) can't
+        // both pass the guard and run overlapping pull-merge-push cycles on catalog.json.
+        let claimed = await MainActor.run { () -> Bool in
+            guard !isSyncing else { return false }
+            isSyncing = true
+            return true
+        }
+        guard claimed else { return }
 
         await MainActor.run {
             syncStatus = .syncing
@@ -223,9 +230,12 @@ final class SyncCoordinator: @unchecked Sendable {
                                 existing.isEncrypted = isEncrypted
                                 existing.encryptionKeyId = catalogImage.encryptionKeyId
                                 existing.encryptionNonce = nonce
-                                if existing.album == nil {
-                                    existing.album = album
-                                }
+                                // Always point the record at the album it lives in per the
+                                // catalog being hydrated. Guarding on `album == nil` would
+                                // strand the record on a stale album when a restored catalog
+                                // re-dates/renames the album (new path → new AlbumRecord),
+                                // leaving the new album rendered empty.
+                                existing.album = album
                             } else {
                                 let record = ImageRecord(
                                     sha256: catalogImage.sha256,

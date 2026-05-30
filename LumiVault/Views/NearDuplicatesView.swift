@@ -211,50 +211,80 @@ struct NearDuplicatesView: View {
     }
 
     private func findNearDuplicates(_ images: [ImageRecord]) -> [NearDuplicateGroup] {
-        // Collect images that have perceptual hashes
-        let hashed = images.compactMap { image -> (ImageRecord, Data)? in
+        let items = images.compactMap { image -> NearDuplicateClustering.Item? in
             guard let hash = image.perceptualHash else { return nil }
-            return (image, hash)
+            return NearDuplicateClustering.Item(
+                sha256: image.sha256,
+                filename: image.filename,
+                sizeBytes: image.sizeBytes,
+                albumName: image.album?.name ?? "Unknown",
+                hash: hash
+            )
         }
+        return NearDuplicateClustering.groups(from: items, threshold: nearDuplicateThreshold)
+    }
+}
 
-        // Track which images are already grouped
+// MARK: - Clustering
+
+/// Pure, view-independent near-duplicate clustering, extracted so the grouping logic
+/// can be unit-tested without SwiftData / a live view.
+enum NearDuplicateClustering {
+    struct Item {
+        let sha256: String
+        let filename: String
+        let sizeBytes: Int64
+        let albumName: String
+        let hash: Data
+    }
+
+    static func groups(from items: [Item], threshold: Int) -> [NearDuplicateGroup] {
         var grouped = Set<String>()
         var result: [NearDuplicateGroup] = []
 
-        for i in 0..<hashed.count {
-            let (imageA, hashA) = hashed[i]
-            if grouped.contains(imageA.sha256) { continue }
+        for i in 0..<items.count {
+            let anchor = items[i]
+            if grouped.contains(anchor.sha256) { continue }
 
-            var members: [NearDuplicateGroup.Member] = []
+            // Grow the cluster transitively: a candidate joins if it is within the
+            // threshold of ANY current member, not just the anchor. This captures chains
+            // like A≈B, B≈C where A≉C, which an anchor-only comparison would drop.
+            var memberHashes: [Data] = [anchor.hash]
+            var members: [NearDuplicateGroup.Member] = [
+                NearDuplicateGroup.Member(
+                    sha256: anchor.sha256,
+                    filename: anchor.filename,
+                    sizeBytes: anchor.sizeBytes,
+                    albumName: anchor.albumName,
+                    distanceToFirst: 0
+                )
+            ]
 
-            for j in (i + 1)..<hashed.count {
-                let (imageB, hashB) = hashed[j]
-                if grouped.contains(imageB.sha256) { continue }
+            var addedMember = true
+            while addedMember {
+                addedMember = false
+                for j in (i + 1)..<items.count {
+                    let candidate = items[j]
+                    if grouped.contains(candidate.sha256) { continue }
+                    guard memberHashes.contains(where: {
+                        PerceptualHash.hammingDistance($0, candidate.hash) < threshold
+                    }) else { continue }
 
-                let distance = PerceptualHash.hammingDistance(hashA, hashB)
-                if distance < nearDuplicateThreshold {
-                    if members.isEmpty {
-                        members.append(NearDuplicateGroup.Member(
-                            sha256: imageA.sha256,
-                            filename: imageA.filename,
-                            sizeBytes: imageA.sizeBytes,
-                            albumName: imageA.album?.name ?? "Unknown",
-                            distanceToFirst: 0
-                        ))
-                        grouped.insert(imageA.sha256)
-                    }
                     members.append(NearDuplicateGroup.Member(
-                        sha256: imageB.sha256,
-                        filename: imageB.filename,
-                        sizeBytes: imageB.sizeBytes,
-                        albumName: imageB.album?.name ?? "Unknown",
-                        distanceToFirst: distance
+                        sha256: candidate.sha256,
+                        filename: candidate.filename,
+                        sizeBytes: candidate.sizeBytes,
+                        albumName: candidate.albumName,
+                        distanceToFirst: PerceptualHash.hammingDistance(anchor.hash, candidate.hash)
                     ))
-                    grouped.insert(imageB.sha256)
+                    memberHashes.append(candidate.hash)
+                    grouped.insert(candidate.sha256)
+                    addedMember = true
                 }
             }
 
             if members.count >= 2 {
+                grouped.insert(anchor.sha256)
                 result.append(NearDuplicateGroup(members: members))
             }
         }

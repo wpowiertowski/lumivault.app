@@ -240,6 +240,10 @@ struct AlbumExportSheet: View {
         for (volumeID, mountURL) in mountedVolumes {
             guard let loc = image.storageLocations.first(where: { $0.volumeID == volumeID }) else { continue }
             let candidateURL = mountURL.appendingPathComponent(loc.relativePath)
+            // Defense in depth: relativePath is reconstructed from catalog-derived components
+            // and is not run through isSafe, so refuse a value that resolves outside the volume
+            // (reading it would copy an arbitrary on-disk file into the export).
+            guard candidateURL.isDescendant(of: mountURL) else { continue }
             if fm.fileExists(atPath: candidateURL.path) {
                 sourceURL = candidateURL
                 break

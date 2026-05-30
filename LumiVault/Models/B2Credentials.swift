@@ -47,7 +47,10 @@ struct B2Credentials: Codable, Sendable {
     private static func migrateFromUserDefaultsIfNeeded() {
         guard let legacy = UserDefaults.standard.data(forKey: defaultsKey) else { return }
         if KeychainStore.get(account: keychainAccount) == nil {
-            try? KeychainStore.set(legacy, account: keychainAccount)
+            // Only scrub the legacy plaintext copy once it is safely in the Keychain.
+            // If the write fails (locked keychain, ACL error), keep UserDefaults intact
+            // so the credentials are not lost from both stores — retry on next launch.
+            guard (try? KeychainStore.set(legacy, account: keychainAccount)) != nil else { return }
         }
         UserDefaults.standard.removeObject(forKey: defaultsKey)
     }
