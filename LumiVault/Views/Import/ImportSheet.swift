@@ -21,8 +21,7 @@ struct ImportSheet: View {
     private let catalogService = CatalogService()
 
     private var b2Credentials: B2Credentials? {
-        UserDefaults.standard.data(forKey: B2Credentials.defaultsKey)
-            .flatMap { try? JSONDecoder().decode(B2Credentials.self, from: $0) }
+        B2Credentials.load()
     }
 
     private var connectedVolumes: [VolumeRecord] {

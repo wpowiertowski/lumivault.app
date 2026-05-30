@@ -157,12 +157,7 @@ struct VolumeSyncSheet: View {
         }
 
         // Load B2 credentials for fallback downloads
-        let b2Credentials: B2Credentials? = {
-            guard UserDefaults.standard.bool(forKey: "b2Enabled"),
-                  let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
-                  let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) else { return nil }
-            return creds
-        }()
+        let b2Credentials = UserDefaults.standard.bool(forKey: "b2Enabled") ? B2Credentials.load() : nil
         let b2Service = b2Credentials != nil ? B2Service() : nil
 
         let volumeID = volume.volumeID
@@ -209,6 +204,14 @@ struct VolumeSyncSheet: View {
                 let destFile = destBase.appendingPathComponent(snap.filename)
                 let relativePath = "\(snap.albumYear)/\(snap.albumMonth)/\(snap.albumDay)/\(snap.albumName)/\(snap.filename)"
                 let location = StorageLocation(volumeID: volumeID, relativePath: relativePath)
+
+                // Defense in depth: never write outside the volume root, even if a
+                // tampered catalog slipped a traversing component past ingestion.
+                guard destFile.isDescendant(of: volumeURL) else {
+                    errors.append("Refused to sync \(snap.filename): path resolves outside the volume.")
+                    processedImages += 1
+                    continue
+                }
 
                 // Already tracked on this volume — skip (fast check, no I/O)
                 if snap.storageLocations.contains(location) {

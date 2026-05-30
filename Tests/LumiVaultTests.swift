@@ -672,6 +672,102 @@ struct PerceptualHashTests {
         #expect(distance < 5)
         #expect(distance == 3)
     }
+
+    /// Hashes read back from SwiftData are often slices whose backing buffer is not
+    /// 8-byte aligned. An aligned `load(as: UInt64.self)` traps on those; this exercises
+    /// the unaligned path on both operands to guard against that regression.
+    @Test func hammingDistanceMisalignedBackingBuffer() {
+        // dropFirst() yields a Data slice starting at offset 1 — guaranteed misaligned
+        // for UInt64 relative to the (aligned) base allocation.
+        let payload: [UInt8] = [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0]
+        let misalignedA = Data([0x00] + payload).dropFirst()
+        let misalignedB = Data([0x00] + payload).dropFirst()
+        #expect(misalignedA.count == 8)
+        // Must not trap, and must equal the aligned result for the same bytes.
+        #expect(PerceptualHash.hammingDistance(Data(misalignedA), Data(misalignedB)) == 0)
+        #expect(PerceptualHash.hammingDistance(misalignedA, misalignedB) == 0)
+
+        let complement = Data(payload.map { ~$0 })
+        #expect(PerceptualHash.hammingDistance(misalignedA, complement) == 64)
+    }
+}
+
+// MARK: - EXIF Formatting Tests
+
+@Suite @MainActor
+struct EXIFDataFormattingTests {
+    @Test func exposureStringFormatsSubSecond() {
+        var exif = EXIFData()
+        exif.exposureTime = 1.0 / 250.0
+        #expect(exif.exposureString == "1/250s")
+    }
+
+    @Test func exposureStringFormatsLongExposure() {
+        var exif = EXIFData()
+        exif.exposureTime = 2.0
+        #expect(exif.exposureString == "2.0s")
+    }
+
+    @Test func exposureStringNilWhenAbsent() {
+        let exif = EXIFData()
+        #expect(exif.exposureString == nil)
+    }
+
+    /// A corrupt/zero ExposureTime tag previously evaluated Int(round(1.0/0)) = Int(.infinity),
+    /// which traps. It must now be treated as absent rather than crash the inspector.
+    @Test func exposureStringZeroDoesNotTrap() {
+        var exif = EXIFData()
+        exif.exposureTime = 0
+        #expect(exif.exposureString == nil)
+    }
+}
+
+// MARK: - Near-Duplicate Clustering Tests
+
+@Suite @MainActor
+struct NearDuplicateClusteringTests {
+    private func item(_ sha: String, _ bytes: [UInt8]) -> NearDuplicateClustering.Item {
+        var padded = bytes
+        padded.append(contentsOf: Array(repeating: 0, count: max(0, 8 - bytes.count)))
+        return NearDuplicateClustering.Item(
+            sha256: sha, filename: "\(sha).jpg", sizeBytes: 1, albumName: "A",
+            hash: Data(padded.prefix(8))
+        )
+    }
+
+    /// A≈B (dist 6) and B≈C (dist 6) but A≉C (dist 12). With an anchor-only comparison
+    /// C would be dropped from A's group; transitive growth must include all three.
+    @Test func clustersTransitiveChain() {
+        let a = item("a", [0x00])               // 0 bits
+        let b = item("b", [0x3F])               // 6 bits  -> dist(a,b)=6
+        let c = item("c", [0x3F, 0x3F])         // 12 bits -> dist(a,c)=12, dist(b,c)=6
+        let groups = NearDuplicateClustering.groups(from: [a, b, c], threshold: 10)
+        #expect(groups.count == 1)
+        let shas = Set(groups.first?.members.map(\.sha256) ?? [])
+        #expect(shas == ["a", "b", "c"])
+    }
+
+    @Test func separateClustersStaySeparate() {
+        let a = item("a", [0x00])
+        let b = item("b", [0x01])               // dist(a,b)=1
+        let x = item("x", [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
+        let y = item("y", [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE]) // dist(x,y)=1
+        let groups = NearDuplicateClustering.groups(from: [a, b, x, y], threshold: 10)
+        #expect(groups.count == 2)
+        #expect(groups.allSatisfy { $0.members.count == 2 })
+    }
+
+    @Test func noNearDuplicatesYieldsNoGroups() {
+        let a = item("a", [0x00])
+        let b = item("b", [0xFF, 0xFF, 0xFF])   // dist(a,b)=24, above threshold
+        let groups = NearDuplicateClustering.groups(from: [a, b], threshold: 10)
+        #expect(groups.isEmpty)
+    }
+
+    @Test func singletonNeverGroupsWithItself() {
+        let groups = NearDuplicateClustering.groups(from: [item("a", [0x00])], threshold: 10)
+        #expect(groups.isEmpty)
+    }
 }
 
 // MARK: - SwiftData Model Tests
@@ -979,6 +1075,20 @@ struct CatalogRemovalTests {
         let images = catalog.years["2025"]?.months["07"]?.days["15"]?.albums["Vacation"]?.images ?? []
         #expect(images.count == specs.count - 1)
         #expect(!images.contains { $0.sha256 == removed.sha256 })
+    }
+
+    @Test func removeImagePrunesEmptyAlbumAndContainers() async {
+        let service = CatalogService()
+        let spec = TestFixtures.files[0]
+        let image = CatalogImage(filename: spec.name, sha256: spec.sha256, sizeBytes: Int64(spec.size), par2Filename: spec.par2Name)
+        await service.addImage(image, toAlbum: "Solo", year: "2024", month: "12", day: "25")
+
+        // Removing the only image must not leave a ghost empty album behind, and the
+        // now-empty day/month/year containers should be pruned too (matching removeAlbum).
+        await service.removeImage(sha256: spec.sha256, fromAlbum: "Solo", year: "2024", month: "12", day: "25")
+
+        let catalog = await service.currentCatalog()
+        #expect(catalog.years["2024"] == nil)
     }
 }
 

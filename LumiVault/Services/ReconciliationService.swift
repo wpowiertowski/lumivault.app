@@ -337,6 +337,19 @@ actor ReconciliationService {
 
             let corruptedURL = corruptedVolume.mountURL.appendingPathComponent(relativePath)
 
+            // Defense in depth: a repair writes to corruptedURL; refuse if a tampered
+            // catalog's relativePath resolves outside the volume root.
+            guard corruptedURL.isDescendant(of: corruptedVolume.mountURL) else {
+                results.append(RepairResult(
+                    sha256: discrepancy.sha256,
+                    filename: discrepancy.filename,
+                    volumeID: corruptedVolumeID,
+                    outcome: .failed("Storage path resolves outside the volume")
+                ))
+                await MainActor.run { progress.processedItems = index + 1 }
+                continue
+            }
+
             // Strategy 1: Copy from a healthy volume
             var repaired = false
             for location in snapshot.storageLocations where location.volumeID != corruptedVolumeID {

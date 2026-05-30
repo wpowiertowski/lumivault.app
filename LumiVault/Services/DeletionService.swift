@@ -74,6 +74,15 @@ actor DeletionService {
         for (_, mountURL) in mountedVolumes {
             let albumDir = mountURL.appendingPathComponent(albumPath, isDirectory: true)
 
+            // Defense in depth: refuse to delete anything outside the volume root.
+            // `removeItem(at: albumDir)` below is recursive, so a traversing albumPath
+            // that slipped past catalog ingestion must not be acted on.
+            guard albumDir.isDescendant(of: mountURL), albumDir != mountURL else {
+                result.errors.append("Refused to delete: album path resolves outside the volume (\(albumPath)).")
+                await MainActor.run { progress.processedItems += 1 }
+                continue
+            }
+
             if entireAlbum {
                 // Remove the entire album directory
                 do {
@@ -94,6 +103,10 @@ actor DeletionService {
                 // Remove only specific files
                 for image in images {
                     let filePath = albumDir.appendingPathComponent(image.filename)
+                    guard filePath.isDescendant(of: albumDir) else {
+                        result.errors.append("Refused to delete \(image.filename): resolves outside the album directory.")
+                        continue
+                    }
                     if fm.fileExists(atPath: filePath.path) {
                         do {
                             try fm.removeItem(at: filePath)
@@ -147,16 +160,19 @@ actor DeletionService {
                     result.errors.append("B2 delete failed: \(albumPath) — \(error.localizedDescription)")
                 }
             } else {
-                // Delete specific files by listing with their exact prefix
+                // Delete specific files. List by the file name as a prefix, but only delete
+                // the object whose name matches EXACTLY — a B2 prefix query also returns any
+                // object whose name merely starts with this one (e.g. its own `.par2`
+                // companions or an unrelated file with an extended name).
                 for image in images {
-                    let filePrefix = albumPath + "/" + image.filename
+                    let exactName = albumPath + "/" + image.filename
                     do {
                         let listings = try await b2Service.listAllFiles(
                             bucketId: credentials.bucketId,
                             credentials: credentials,
-                            prefix: filePrefix
+                            prefix: exactName
                         )
-                        for listing in listings {
+                        for listing in listings where listing.fileName == exactName {
                             try await b2Service.deleteFile(
                                 fileId: listing.fileId,
                                 fileName: listing.fileName,

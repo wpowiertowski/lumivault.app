@@ -46,6 +46,7 @@
 		7606BCE424A01DC36A651519 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 06D0EEE7A6946D0748E5A6C4 /* Assets.xcassets */; };
 		7623A3D396C608719188049B /* AlbumRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = B389A2EDF5A08E2BE8AF007A /* AlbumRecord.swift */; };
 		7C25361151B59326946F5367 /* GamesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93793FFEB071EF35882DC3F8 /* GamesTests.swift */; };
+		7EEB4CB04BDC34F2AC287724 /* PathTraversalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 427BE50C00890CB41F4BAEDE /* PathTraversalTests.swift */; };
 		7FC9F2ECC3BB994D0D697082 /* PhotoGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A26A124182F5946F24CB1ADD /* PhotoGridView.swift */; };
 		82886ABBCFA8C5A3A14C30CD /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 012BE699987DA66C89CDC8BD /* Constants.swift */; };
 		85F07A3C43271A80A554C146 /* VolumeRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 669B957B8485AF442AEB2DA8 /* VolumeRecord.swift */; };
@@ -59,6 +60,7 @@
 		9BFF5B5CBEC8AF900FA3CBE5 /* SnakeGame.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26C10DEDAFFC8F77C0575005 /* SnakeGame.swift */; };
 		A1E3C9C6FEDD55A4C790841A /* ImageConversionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFA740881D64DEF9AAD992E7 /* ImageConversionService.swift */; };
 		AB0DD7ACC613A9C5169FA268 /* PerceptualHash.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F99517836AFD89561B41EE /* PerceptualHash.swift */; };
+		B02C0445DEF000B8DA4F0618 /* PathComponentValidation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7DCF4AB401E33135B55AC71 /* PathComponentValidation.swift */; };
 		B10D8A06390125F91AC69B08 /* MetadataInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47A770A92996FA81A51FB1A1 /* MetadataInspector.swift */; };
 		B542D45CC0A1415B717E4BFD /* PhotoGridItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BC6CF0468FF8B675E2B60E8 /* PhotoGridItem.swift */; };
 		B6087FD659F665B3227E6778 /* PhotosImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC1982FE3C2E560E783753AF /* PhotosImportService.swift */; };
@@ -77,6 +79,7 @@
 		E9CC0D815365176B7AC4CA64 /* LumiVaultUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C8416D7A7C9047F26714AD /* LumiVaultUITests.swift */; };
 		EDE76EA25C3EC99DAF2962EE /* LumiVaultApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 679368003A8DA83CBA994560 /* LumiVaultApp.swift */; };
 		EFB4150EB614969D580F2E58 /* EXIFData.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6826A2A2F1B0541A700F497 /* EXIFData.swift */; };
+		F2759FB7BA0E78562E78AA7B /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A48F2901101933C3AE10DDE /* KeychainStore.swift */; };
 		F450618261FF0A965EEC6385 /* GameStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6410C7BD0959F18315BC8076 /* GameStepView.swift */; };
 		F9138AD9D6AFD57B9F8F789D /* PipelineItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ACCA96E297825FB7AD6A91E /* PipelineItem.swift */; };
 		F92EA583B01D47B947517FEA /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 259FAF0AE3CB8F5152CD2AC6 /* SettingsView.swift */; };
@@ -133,6 +136,7 @@
 		36CC2F93A79D33C625E126E4 /* CatalogBackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogBackupService.swift; sourceTree = "<group>"; };
 		3ACCA96E297825FB7AD6A91E /* PipelineItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineItem.swift; sourceTree = "<group>"; };
 		42278B7E563F76C6F7FC1EE7 /* DeletionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionService.swift; sourceTree = "<group>"; };
+		427BE50C00890CB41F4BAEDE /* PathTraversalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathTraversalTests.swift; sourceTree = "<group>"; };
 		42A76C88D6D14F8411611A4C /* FlappyGame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlappyGame.swift; sourceTree = "<group>"; };
 		47A770A92996FA81A51FB1A1 /* MetadataInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataInspector.swift; sourceTree = "<group>"; };
 		4D306B41680CB9765C3B46CC /* ReconciliationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconciliationView.swift; sourceTree = "<group>"; };
@@ -148,6 +152,7 @@
 		78323BB35DE5C1DE3D74C325 /* IntegritySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegritySheet.swift; sourceTree = "<group>"; };
 		795EC7A08A0ABF43F828C239 /* AlbumDeletionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumDeletionSheet.swift; sourceTree = "<group>"; };
 		7FD4E291C18518482ADDCA6A /* AsyncSemaphore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncSemaphore.swift; sourceTree = "<group>"; };
+		8A48F2901101933C3AE10DDE /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		93793FFEB071EF35882DC3F8 /* GamesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamesTests.swift; sourceTree = "<group>"; };
 		937E65EE6EF8CEA2B9443D20 /* ImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportSheet.swift; sourceTree = "<group>"; };
 		93EA5474D335D73AA5521633 /* SyncServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncServiceTests.swift; sourceTree = "<group>"; };
@@ -179,6 +184,7 @@
 		E68790766AAC0D4983E632CB /* B2SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = B2SettingsView.swift; sourceTree = "<group>"; };
 		E69F5FC018A6F4282FD4B52D /* PhotosLibraryMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosLibraryMonitor.swift; sourceTree = "<group>"; };
 		E7C8416D7A7C9047F26714AD /* LumiVaultUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumiVaultUITests.swift; sourceTree = "<group>"; };
+		E7DCF4AB401E33135B55AC71 /* PathComponentValidation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathComponentValidation.swift; sourceTree = "<group>"; };
 		F4DA177B337BD6A1C2268C14 /* AsyncPrimitivesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncPrimitivesTests.swift; sourceTree = "<group>"; };
 		F90BF32093AC2357CD61747D /* Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalog.swift; sourceTree = "<group>"; };
 		FC1982FE3C2E560E783753AF /* PhotosImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosImportService.swift; sourceTree = "<group>"; };
@@ -294,6 +300,7 @@
 				9B11AF157144E4837D8EE913 /* B2ServiceNetworkTests.swift */,
 				93793FFEB071EF35882DC3F8 /* GamesTests.swift */,
 				D4F69A5682C9063F979E533C /* LumiVaultTests.swift */,
+				427BE50C00890CB41F4BAEDE /* PathTraversalTests.swift */,
 				93EA5474D335D73AA5521633 /* SyncServiceTests.swift */,
 				2CFB81A5F9B3F78322F61142 /* TestFixtures.swift */,
 			);
@@ -392,6 +399,8 @@
 				55BFD846559703686D7FA838 /* BookmarkResolver.swift */,
 				012BE699987DA66C89CDC8BD /* Constants.swift */,
 				A705C358860AAE79B6C774A6 /* GaloisField16.swift */,
+				8A48F2901101933C3AE10DDE /* KeychainStore.swift */,
+				E7DCF4AB401E33135B55AC71 /* PathComponentValidation.swift */,
 				12F99517836AFD89561B41EE /* PerceptualHash.swift */,
 			);
 			path = Utilities;
@@ -575,10 +584,12 @@
 				8E278B72DB5073512F515562 /* ImportSheet.swift in Sources */,
 				DCA7881A48055EE6FC8BC7A6 /* ImportTypes.swift in Sources */,
 				E7503627D9380F2FA62D1C7C /* IntegritySheet.swift in Sources */,
+				F2759FB7BA0E78562E78AA7B /* KeychainStore.swift in Sources */,
 				EDE76EA25C3EC99DAF2962EE /* LumiVaultApp.swift in Sources */,
 				B10D8A06390125F91AC69B08 /* MetadataInspector.swift in Sources */,
 				49EECE51F6F24EDA028977C2 /* MetalPAR2Service.swift in Sources */,
 				08BE30A1F1BE474DC9189428 /* NearDuplicatesView.swift in Sources */,
+				B02C0445DEF000B8DA4F0618 /* PathComponentValidation.swift in Sources */,
 				AB0DD7ACC613A9C5169FA268 /* PerceptualHash.swift in Sources */,
 				59544439E11F04EE2898B7E5 /* PhotoDetailView.swift in Sources */,
 				B542D45CC0A1415B717E4BFD /* PhotoGridItem.swift in Sources */,
@@ -625,6 +636,7 @@
 				62A3225E923219B9A991A8AF /* B2ServiceNetworkTests.swift in Sources */,
 				7C25361151B59326946F5367 /* GamesTests.swift in Sources */,
 				2AB3DBBB033427F0060FC5E2 /* LumiVaultTests.swift in Sources */,
+				7EEB4CB04BDC34F2AC287724 /* PathTraversalTests.swift in Sources */,
 				8CD050FBD82D0F256781112F /* SyncServiceTests.swift in Sources */,
 				27E6FC12E9C96DA903E62582 /* TestFixtures.swift in Sources */,
 			);

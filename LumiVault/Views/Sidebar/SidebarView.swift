@@ -201,11 +201,7 @@ struct SidebarView: View {
         let day = album.day
 
         // Load B2 credentials
-        var b2Credentials: B2Credentials?
-        if let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
-           let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) {
-            b2Credentials = creds
-        }
+        let b2Credentials = B2Credentials.load()
 
         // Resolve mounted volumes
         var mountedVolumes: [(volumeID: String, mountURL: URL)] = []

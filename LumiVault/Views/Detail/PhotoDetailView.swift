@@ -104,10 +104,7 @@ struct PhotoDetailView: View {
     }
 
     private static func loadB2Credentials() -> B2Credentials? {
-        guard let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey) else {
-            return nil
-        }
-        return try? JSONDecoder().decode(B2Credentials.self, from: data)
+        B2Credentials.load()
     }
 
     private func loadFullImage() async {

@@ -41,8 +41,7 @@ struct PhotosImportSheet: View {
     private let catalogService = CatalogService()
 
     private var hasB2: Bool {
-        UserDefaults.standard.data(forKey: B2Credentials.defaultsKey)
-            .flatMap { try? JSONDecoder().decode(B2Credentials.self, from: $0) } != nil
+        B2Credentials.isConfigured
     }
 
     private var connectedVolumes: [VolumeRecord] {

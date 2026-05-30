@@ -56,8 +56,10 @@ enum PerceptualHash {
     nonisolated static func hammingDistance(_ a: Data, _ b: Data) -> Int {
         guard a.count == 8, b.count == 8 else { return 64 }
 
-        let hashA = a.withUnsafeBytes { $0.load(as: UInt64.self) }
-        let hashB = b.withUnsafeBytes { $0.load(as: UInt64.self) }
+        // loadUnaligned: the Data may come from SwiftData-vended / sliced storage whose
+        // backing buffer is not 8-byte aligned; plain load(as:) would trap on misalignment.
+        let hashA = a.withUnsafeBytes { $0.loadUnaligned(as: UInt64.self) }
+        let hashB = b.withUnsafeBytes { $0.loadUnaligned(as: UInt64.self) }
         return (hashA ^ hashB).nonzeroBitCount
     }
 

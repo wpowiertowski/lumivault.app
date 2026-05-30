@@ -102,13 +102,11 @@ struct ReconciliationView: View {
     }
 
     private var hasB2Credentials: Bool {
-        UserDefaults.standard.data(forKey: B2Credentials.defaultsKey) != nil
+        B2Credentials.isConfigured
     }
 
     private func loadB2Credentials() -> B2Credentials? {
-        guard let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
-              let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) else { return nil }
-        return creds
+        B2Credentials.load()
     }
 
     // MARK: - Idle
@@ -237,12 +235,7 @@ struct ReconciliationView: View {
             return VolumeSnapshot(volumeID: volume.volumeID, label: volume.label, mountURL: url)
         }
 
-        var b2Creds: B2Credentials?
-        if b2Enabled,
-           let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
-           let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) {
-            b2Creds = creds
-        }
+        let b2Creds = b2Enabled ? B2Credentials.load() : nil
 
         let progress = self.progress
         let verifyHashes = self.verifyHashes
