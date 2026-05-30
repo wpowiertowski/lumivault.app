@@ -16,12 +16,39 @@ struct GeneralSettingsView: View {
                     .font(Constants.Design.monoBody)
                     .accessibilityIdentifier("general.catalogPath")
 
+                // The field above is the configured value. Under the App Sandbox a leading
+                // `~` expands into the app's container — not your home folder — so show the
+                // real file the app reads and writes to avoid hunting for ~/.lumivault.
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Actual location")
+                        .font(Constants.Design.monoCaption2)
+                        .foregroundStyle(.tertiary)
+                    HStack(spacing: 6) {
+                        Image(systemName: catalogExists ? "checkmark.circle.fill" : "questionmark.circle")
+                            .foregroundStyle(catalogExists ? Color.green : Color.secondary)
+                        Text(resolvedCatalogURL.path)
+                            .font(Constants.Design.monoCaption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .accessibilityIdentifier("general.resolvedPath")
+                    }
+                    Text(catalogExists
+                        ? "Catalog file present at this location."
+                        : "No catalog file here yet — it's created on first import or restore.")
+                        .font(Constants.Design.monoCaption2)
+                        .foregroundStyle(.tertiary)
+                }
+
                 HStack {
                     Button("Browse...") { chooseCatalogPath() }
                         .accessibilityIdentifier("general.browse")
-                    Spacer()
                     Button("Detect Existing") { detectExisting() }
                         .accessibilityIdentifier("general.detectExisting")
+                    Spacer()
+                    Button("Reveal in Finder") { revealInFinder() }
+                        .accessibilityIdentifier("general.reveal")
                 }
             }
 
@@ -76,6 +103,33 @@ struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+    }
+
+    /// The configured path expanded into the absolute file URL the app actually uses.
+    /// Mirrors `Constants.Paths.resolvedCatalogURL` but is derived from the bound
+    /// `catalogPath` so it updates live as the field is edited.
+    private var resolvedCatalogURL: URL {
+        URL(fileURLWithPath: (catalogPath as NSString).expandingTildeInPath)
+    }
+
+    private var catalogExists: Bool {
+        FileManager.default.fileExists(atPath: resolvedCatalogURL.path)
+    }
+
+    /// Reveal the resolved catalog file in Finder. If it doesn't exist yet, reveal the
+    /// deepest ancestor directory that does, so the user still lands in the right place.
+    private func revealInFinder() {
+        let fm = FileManager.default
+        let url = resolvedCatalogURL
+        if fm.fileExists(atPath: url.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            return
+        }
+        var dir = url.deletingLastPathComponent()
+        while dir.path != "/", !fm.fileExists(atPath: dir.path) {
+            dir = dir.deletingLastPathComponent()
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([dir])
     }
 
     private func chooseCatalogPath() {
