@@ -2,7 +2,6 @@ import SwiftUI
 
 struct GeneralSettingsView: View {
     @Environment(SyncCoordinator.self) private var syncCoordinator
-    @AppStorage("catalogPath") private var catalogPath = "~/.lumivault/catalog.json"
     @AppStorage("redundancyPercentage") private var redundancyPercentage = 10.0
     @AppStorage("thumbnailCacheLimit") private var thumbnailCacheLimit = 2.0 // GB
     @AppStorage("b2Enabled") private var b2Enabled = false
@@ -12,16 +11,36 @@ struct GeneralSettingsView: View {
     var body: some View {
         Form {
             Section("Catalog") {
-                TextField("Catalog Path", text: $catalogPath)
-                    .font(Constants.Design.monoBody)
-                    .accessibilityIdentifier("general.catalogPath")
+                // The catalog lives in the app's sandbox container and isn't user-relocatable
+                // (a path outside the container wouldn't survive relaunch without a
+                // security-scoped bookmark), so the location is shown read-only. Use the
+                // Restore Catalog actions below to bring in an external catalog.
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Location")
+                        .font(Constants.Design.monoCaption2)
+                        .foregroundStyle(.tertiary)
+                    HStack(spacing: 6) {
+                        Image(systemName: catalogExists ? "checkmark.circle.fill" : "questionmark.circle")
+                            .foregroundStyle(catalogExists ? Color.green : Color.secondary)
+                        Text(resolvedCatalogURL.path)
+                            .font(Constants.Design.monoCaption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .accessibilityIdentifier("general.resolvedPath")
+                    }
+                    Text(catalogExists
+                        ? "Catalog file present at this location."
+                        : "No catalog file here yet — it's created on first import or restore.")
+                        .font(Constants.Design.monoCaption2)
+                        .foregroundStyle(.tertiary)
+                }
 
                 HStack {
-                    Button("Browse...") { chooseCatalogPath() }
-                        .accessibilityIdentifier("general.browse")
                     Spacer()
-                    Button("Detect Existing") { detectExisting() }
-                        .accessibilityIdentifier("general.detectExisting")
+                    Button("Reveal in Finder") { revealInFinder() }
+                        .accessibilityIdentifier("general.reveal")
                 }
             }
 
@@ -78,20 +97,30 @@ struct GeneralSettingsView: View {
         .padding()
     }
 
-    private func chooseCatalogPath() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.allowedContentTypes = [.json]
-        if panel.runModal() == .OK, let url = panel.url {
-            catalogPath = url.path
-        }
+    /// The absolute file URL the app actually reads and writes — the single source of
+    /// truth used throughout the app.
+    private var resolvedCatalogURL: URL {
+        Constants.Paths.resolvedCatalogURL
     }
 
-    private func detectExisting() {
-        let defaultPath = NSString("~/.lumivault/catalog.json").expandingTildeInPath
-        if FileManager.default.fileExists(atPath: defaultPath) {
-            catalogPath = defaultPath
+    private var catalogExists: Bool {
+        FileManager.default.fileExists(atPath: resolvedCatalogURL.path)
+    }
+
+    /// Reveal the resolved catalog file in Finder. If it doesn't exist yet, reveal the
+    /// deepest ancestor directory that does, so the user still lands in the right place.
+    private func revealInFinder() {
+        let fm = FileManager.default
+        let url = resolvedCatalogURL
+        if fm.fileExists(atPath: url.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            return
         }
+        var dir = url.deletingLastPathComponent()
+        while dir.path != "/", !fm.fileExists(atPath: dir.path) {
+            dir = dir.deletingLastPathComponent()
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([dir])
     }
 
     private func restoreFromFile() {
