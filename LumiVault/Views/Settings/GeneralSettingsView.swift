@@ -2,7 +2,6 @@ import SwiftUI
 
 struct GeneralSettingsView: View {
     @Environment(SyncCoordinator.self) private var syncCoordinator
-    @AppStorage("catalogPath") private var catalogPath = "~/.lumivault/catalog.json"
     @AppStorage("redundancyPercentage") private var redundancyPercentage = 10.0
     @AppStorage("thumbnailCacheLimit") private var thumbnailCacheLimit = 2.0 // GB
     @AppStorage("b2Enabled") private var b2Enabled = false
@@ -12,15 +11,12 @@ struct GeneralSettingsView: View {
     var body: some View {
         Form {
             Section("Catalog") {
-                TextField("Catalog Path", text: $catalogPath)
-                    .font(Constants.Design.monoBody)
-                    .accessibilityIdentifier("general.catalogPath")
-
-                // The field above is the configured value. Under the App Sandbox a leading
-                // `~` expands into the app's container — not your home folder — so show the
-                // real file the app reads and writes to avoid hunting for ~/.lumivault.
+                // The catalog lives in the app's sandbox container and isn't user-relocatable
+                // (a path outside the container wouldn't survive relaunch without a
+                // security-scoped bookmark), so the location is shown read-only. Use the
+                // Restore Catalog actions below to bring in an external catalog.
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Actual location")
+                    Text("Location")
                         .font(Constants.Design.monoCaption2)
                         .foregroundStyle(.tertiary)
                     HStack(spacing: 6) {
@@ -42,10 +38,6 @@ struct GeneralSettingsView: View {
                 }
 
                 HStack {
-                    Button("Browse...") { chooseCatalogPath() }
-                        .accessibilityIdentifier("general.browse")
-                    Button("Detect Existing") { detectExisting() }
-                        .accessibilityIdentifier("general.detectExisting")
                     Spacer()
                     Button("Reveal in Finder") { revealInFinder() }
                         .accessibilityIdentifier("general.reveal")
@@ -105,11 +97,10 @@ struct GeneralSettingsView: View {
         .padding()
     }
 
-    /// The configured path expanded into the absolute file URL the app actually uses.
-    /// Mirrors `Constants.Paths.resolvedCatalogURL` but is derived from the bound
-    /// `catalogPath` so it updates live as the field is edited.
+    /// The absolute file URL the app actually reads and writes — the single source of
+    /// truth used throughout the app.
     private var resolvedCatalogURL: URL {
-        URL(fileURLWithPath: (catalogPath as NSString).expandingTildeInPath)
+        Constants.Paths.resolvedCatalogURL
     }
 
     private var catalogExists: Bool {
@@ -130,22 +121,6 @@ struct GeneralSettingsView: View {
             dir = dir.deletingLastPathComponent()
         }
         NSWorkspace.shared.activateFileViewerSelecting([dir])
-    }
-
-    private func chooseCatalogPath() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.allowedContentTypes = [.json]
-        if panel.runModal() == .OK, let url = panel.url {
-            catalogPath = url.path
-        }
-    }
-
-    private func detectExisting() {
-        let defaultPath = NSString("~/.lumivault/catalog.json").expandingTildeInPath
-        if FileManager.default.fileExists(atPath: defaultPath) {
-            catalogPath = defaultPath
-        }
     }
 
     private func restoreFromFile() {
