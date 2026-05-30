@@ -118,14 +118,11 @@ struct B2SettingsView: View {
             bucketId: bucketId.trimmingCharacters(in: .whitespacesAndNewlines),
             bucketName: bucketName.trimmingCharacters(in: .whitespacesAndNewlines)
         )
-        if let data = try? JSONEncoder().encode(credentials) {
-            UserDefaults.standard.set(data, forKey: B2Credentials.defaultsKey)
-        }
+        try? credentials.save()
     }
 
     private func loadCredentials() {
-        guard let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
-              let credentials = try? JSONDecoder().decode(B2Credentials.self, from: data) else { return }
+        guard let credentials = B2Credentials.load() else { return }
         keyId = credentials.applicationKeyId
         applicationKey = credentials.applicationKey
         bucketId = credentials.bucketId

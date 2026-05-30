@@ -144,6 +144,17 @@ struct AlbumExportSheet: View {
             let fm = FileManager.default
             let albumDir = destURL.appendingPathComponent(albumName, isDirectory: true)
 
+            // Defense in depth: the album name should already be validated at catalog
+            // ingestion, but never create/write outside the chosen destination.
+            guard albumDir.isDescendant(of: destURL) else {
+                await MainActor.run {
+                    errors.append("Refused to export: album name resolves outside the destination folder.")
+                    phase = .complete
+                }
+                for (_, url) in mountedVolumes { url.stopAccessingSecurityScopedResource() }
+                return
+            }
+
             do {
                 try fm.createDirectory(at: albumDir, withIntermediateDirectories: true)
             } catch {
@@ -216,6 +227,11 @@ struct AlbumExportSheet: View {
     ) async -> ImageExportResult {
         let destURL = albumDir.appendingPathComponent(image.filename)
         let fm = FileManager.default
+
+        // Defense in depth against a traversing filename escaping the album directory.
+        guard destURL.isDescendant(of: albumDir) else {
+            return .error("\(image.filename): refused — filename resolves outside the album directory.")
+        }
 
         if fm.fileExists(atPath: destURL.path) { return .skipped }
 
@@ -298,9 +314,7 @@ struct AlbumExportSheet: View {
     }
 
     private func loadB2Credentials() -> B2Credentials? {
-        guard let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
-              let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) else { return nil }
-        return creds
+        B2Credentials.load()
     }
 }
 

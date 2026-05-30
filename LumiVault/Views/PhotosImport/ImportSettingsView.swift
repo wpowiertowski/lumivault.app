@@ -130,8 +130,7 @@ struct ImportSettingsView: View {
                     .accessibilityIdentifier("importSettings.b2Upload")
                     .onChange(of: settings.uploadToB2) { _, enabled in
                         if enabled {
-                            if let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
-                               let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) {
+                            if let creds = B2Credentials.load() {
                                 settings.b2Credentials = creds
                             }
                         } else {
@@ -171,8 +170,7 @@ struct ImportSettingsView: View {
 
         // Enable B2 upload if credentials are configured
         if !settings.uploadToB2 && b2Enabled {
-            if let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
-               let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) {
+            if let creds = B2Credentials.load() {
                 settings.uploadToB2 = true
                 settings.b2Credentials = creds
             }

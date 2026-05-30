@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import SwiftData
+import os
 
 /// App-level coordinator that owns the shared CatalogService and SyncService,
 /// wires iCloud monitoring, and exposes sync state to SwiftUI views.
@@ -159,10 +160,22 @@ final class SyncCoordinator: @unchecked Sendable {
         guard let container = modelContainer else { return }
         let context = ModelContext(container)
 
+        var skippedCount = 0
+
         for (year, yearData) in catalog.years {
             for (month, monthData) in yearData.months {
                 for (day, dayData) in monthData.days {
                     for (albumName, catalogAlbum) in dayData.albums {
+                        // Reject tampered catalog entries whose path keys would escape the
+                        // album directory (path traversal). These keys are joined into
+                        // filesystem paths by export/sync/delete/reconcile flows.
+                        guard PathComponentValidation.isSafeAlbum(
+                            year: year, month: month, day: day, albumName: albumName
+                        ) else {
+                            skippedCount += catalogAlbum.images.count
+                            continue
+                        }
+
                         let lookupName = albumName
                         let lookupYear = year
                         let lookupMonth = month
@@ -188,6 +201,14 @@ final class SyncCoordinator: @unchecked Sendable {
                         }
 
                         for catalogImage in catalogAlbum.images {
+                            // Skip images whose filename/par2 name would traverse out of
+                            // the album directory.
+                            guard PathComponentValidation.isSafe(catalogImage.filename),
+                                  catalogImage.par2Filename.isEmpty
+                                    || PathComponentValidation.isSafe(catalogImage.par2Filename) else {
+                                skippedCount += 1
+                                continue
+                            }
                             let sha = catalogImage.sha256
                             let imageDescriptor = FetchDescriptor<ImageRecord>(
                                 predicate: #Predicate { $0.sha256 == sha }
@@ -227,6 +248,12 @@ final class SyncCoordinator: @unchecked Sendable {
         }
 
         try? context.save()
+
+        if skippedCount > 0 {
+            Logger(subsystem: "app.lumivault", category: "sync").warning(
+                "Skipped \(skippedCount, privacy: .public) catalog entr\(skippedCount == 1 ? "y" : "ies", privacy: .public) with unsafe path components during hydration."
+            )
+        }
     }
 
     enum RestoreSource {
@@ -304,8 +331,6 @@ final class SyncCoordinator: @unchecked Sendable {
     }
 
     private func loadB2Credentials() -> B2Credentials? {
-        guard let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
-              let credentials = try? JSONDecoder().decode(B2Credentials.self, from: data) else { return nil }
-        return credentials
+        B2Credentials.load()
     }
 }

@@ -96,11 +96,7 @@ struct PhotoGridView: View {
         let day = album.day
         let sha256 = image.sha256
 
-        var b2Credentials: B2Credentials?
-        if let data = UserDefaults.standard.data(forKey: B2Credentials.defaultsKey),
-           let creds = try? JSONDecoder().decode(B2Credentials.self, from: data) {
-            b2Credentials = creds
-        }
+        let b2Credentials = B2Credentials.load()
 
         var mountedVolumes: [(volumeID: String, mountURL: URL)] = []
         for vol in volumes {

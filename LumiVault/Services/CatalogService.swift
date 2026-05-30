@@ -123,16 +123,29 @@ actor CatalogService {
                     var localDay = localMonth.days[day] ?? CatalogDay(albums: [:])
 
                     for (albumName, remoteAlbum) in remoteDay.albums {
+                        // Drop tampered remote entries whose path keys/filenames would
+                        // traverse out of the album directory once joined into a path.
+                        guard PathComponentValidation.isSafeAlbum(
+                            year: year, month: month, day: day, albumName: albumName
+                        ) else { continue }
+                        let safeImages = remoteAlbum.images.filter {
+                            PathComponentValidation.isSafe($0.filename)
+                                && ($0.par2Filename.isEmpty
+                                    || PathComponentValidation.isSafe($0.par2Filename))
+                        }
+
                         if var localAlbum = localDay.albums[albumName] {
                             // Union images by SHA-256
                             let existingHashes = Set(localAlbum.images.map(\.sha256))
-                            for image in remoteAlbum.images where !existingHashes.contains(image.sha256) {
+                            for image in safeImages where !existingHashes.contains(image.sha256) {
                                 localAlbum.images.append(image)
                             }
                             localAlbum.addedAt = max(localAlbum.addedAt, remoteAlbum.addedAt)
                             localDay.albums[albumName] = localAlbum
                         } else {
-                            localDay.albums[albumName] = remoteAlbum
+                            var sanitizedAlbum = remoteAlbum
+                            sanitizedAlbum.images = safeImages
+                            localDay.albums[albumName] = sanitizedAlbum
                         }
                     }
 
