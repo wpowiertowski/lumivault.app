@@ -293,6 +293,13 @@ final class SyncCoordinator: @unchecked Sendable {
         try? await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
     }
 
+    /// Update an image's B2 fileId in the catalog and save. Used after the integrity
+    /// heal pass re-uploads a file that had gone missing from B2.
+    func updateImageB2FileId(sha256: String, b2FileId: String) async {
+        await catalogService.updateImageB2FileId(sha256: sha256, b2FileId: b2FileId)
+        try? await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
+    }
+
     func startMonitoring() async {
         guard let service = syncService else { return }
 

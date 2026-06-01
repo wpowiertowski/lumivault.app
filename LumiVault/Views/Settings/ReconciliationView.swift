@@ -5,13 +5,17 @@ struct ReconciliationView: View {
     @Query private var images: [ImageRecord]
     @Query private var volumes: [VolumeRecord]
     @AppStorage("b2Enabled") private var b2Enabled = false
+    @Environment(\.modelContext) private var modelContext
+    @Environment(SyncCoordinator.self) private var syncCoordinator
 
     @State private var progress = ReconciliationProgress()
     @State private var report: ReconciliationReport?
     @State private var repairResults: [RepairResult] = []
+    @State private var healResults: [HealResult] = []
     @State private var isScanning = false
     @State private var verifyHashes = false
     @State private var repairCorrupted = false
+    @State private var healMissing = false
     @State private var showingB2SyncSheet = false
     @State private var showingVolumeSyncSheet = false
     @State private var selectedVolume: VolumeRecord?
@@ -80,6 +84,12 @@ struct ReconciliationView: View {
                         .onChange(of: repairCorrupted) { _, newValue in
                             if newValue { verifyHashes = true }
                         }
+                    Toggle("Heal missing replicas", isOn: $healMissing)
+                        .font(Constants.Design.monoCaption)
+                        .toggleStyle(.checkbox)
+                        .disabled(isScanning)
+                        .help("When a file is missing from one storage but present in another (another volume or B2), copy it back so every storage target holds it.")
+                        .accessibilityIdentifier("integrity.healMissing")
                 }
                 Spacer()
                 Button(isScanning ? "Scanning..." : "Scan") { startScan() }
@@ -152,7 +162,7 @@ struct ReconciliationView: View {
 
     private func resultsList(_ report: ReconciliationReport) -> some View {
         Group {
-            if report.discrepancies.isEmpty && repairResults.isEmpty {
+            if report.discrepancies.isEmpty && repairResults.isEmpty && healResults.isEmpty {
                 VStack(spacing: 12) {
                     Spacer()
                     Image(systemName: "checkmark.circle")
@@ -174,6 +184,13 @@ struct ReconciliationView: View {
                         Section("Repairs") {
                             ForEach(repairResults, id: \.sha256) { result in
                                 RepairResultRow(result: result)
+                            }
+                        }
+                    }
+                    if !healResults.isEmpty {
+                        Section("Restored Replicas") {
+                            ForEach(Array(healResults.enumerated()), id: \.offset) { _, result in
+                                HealResultRow(result: result, volumeLabels: volumeLabelMap)
                             }
                         }
                     }
@@ -217,6 +234,7 @@ struct ReconciliationView: View {
         isScanning = true
         report = nil
         repairResults = []
+        healResults = []
         progress = ReconciliationProgress()
 
         let snapshots = images.map { image in
@@ -226,7 +244,8 @@ struct ReconciliationView: View {
                 par2Filename: image.par2Filename,
                 b2FileId: image.b2FileId,
                 storageLocations: image.storageLocations,
-                albumPath: image.album.map { "\($0.year)/\($0.month)/\($0.day)/\($0.name)" } ?? ""
+                albumPath: image.album.map { "\($0.year)/\($0.month)/\($0.day)/\($0.name)" } ?? "",
+                isEncrypted: image.isEncrypted
             )
         }
 
@@ -240,9 +259,10 @@ struct ReconciliationView: View {
         let progress = self.progress
         let verifyHashes = self.verifyHashes
         let shouldRepair = self.repairCorrupted
+        let shouldHeal = self.healMissing
 
         Task { @MainActor in
-            let result = await reconciliationService.reconcile(
+            var result = await reconciliationService.reconcile(
                 snapshots: snapshots,
                 volumes: volumeSnapshots,
                 b2Credentials: b2Creds,
@@ -261,6 +281,31 @@ struct ReconciliationView: View {
                 self.repairResults = repairs
             }
 
+            // Heal missing replicas: fan a file present in one storage back out to
+            // any storage that's missing it, then re-scan so the report reflects the
+            // restored state.
+            if shouldHeal {
+                let heals = await reconciliationService.healReplicas(
+                    discrepancies: result.discrepancies,
+                    snapshots: snapshots,
+                    volumes: volumeSnapshots,
+                    b2Credentials: b2Creds,
+                    progress: progress
+                )
+                self.healResults = heals
+                await applyB2WriteBacks(heals)
+
+                if heals.contains(where: { if case .failed = $0.outcome { return false } else { return true } }) {
+                    result = await reconciliationService.reconcile(
+                        snapshots: rebuildSnapshots(),
+                        volumes: volumeSnapshots,
+                        b2Credentials: b2Creds,
+                        verifyHashes: verifyHashes,
+                        progress: progress
+                    )
+                }
+            }
+
             // Stop accessing security-scoped resources
             for vs in volumeSnapshots {
                 vs.mountURL.stopAccessingSecurityScopedResource()
@@ -268,6 +313,35 @@ struct ReconciliationView: View {
 
             self.report = result
             self.isScanning = false
+        }
+    }
+
+    /// Persist new B2 fileIds produced by the heal pass to both SwiftData and the
+    /// shared catalog.json so a subsequent scan doesn't re-flag them as dangling.
+    private func applyB2WriteBacks(_ heals: [HealResult]) async {
+        for heal in heals {
+            guard case .restoredToB2(let newFileId, _) = heal.outcome else { continue }
+            if let record = images.first(where: { $0.sha256 == heal.sha256 }) {
+                record.b2FileId = newFileId
+            }
+            await syncCoordinator.updateImageB2FileId(sha256: heal.sha256, b2FileId: newFileId)
+        }
+        try? modelContext.save()
+    }
+
+    /// Rebuild image snapshots from the current SwiftData state (post write-back)
+    /// for the confirmation re-scan after healing.
+    private func rebuildSnapshots() -> [ImageSnapshot] {
+        images.map { image in
+            ImageSnapshot(
+                sha256: image.sha256,
+                filename: image.filename,
+                par2Filename: image.par2Filename,
+                b2FileId: image.b2FileId,
+                storageLocations: image.storageLocations,
+                albumPath: image.album.map { "\($0.year)/\($0.month)/\($0.day)/\($0.name)" } ?? "",
+                isEncrypted: image.isEncrypted
+            )
         }
     }
 
@@ -436,6 +510,58 @@ struct RepairResultRow: View {
         case .copiedFromVolume(let vid): "Repaired — copied from \(vid)"
         case .repairedViaPAR2: "Repaired — PAR2 recovery"
         case .failed(let reason): "Repair failed — \(reason)"
+        }
+    }
+}
+
+struct HealResultRow: View {
+    let result: HealResult
+    var volumeLabels: [String: String] = [:]
+
+    private func volumeName(_ vid: String) -> String { volumeLabels[vid] ?? vid }
+
+    private func sourceName(_ source: HealResult.Source) -> String {
+        switch source {
+        case .volume(let vid): volumeName(vid)
+        case .b2: "B2"
+        }
+    }
+
+    var body: some View {
+        HStack {
+            Image(systemName: iconName)
+                .foregroundStyle(iconColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(result.filename)
+                    .font(Constants.Design.monoBody)
+                    .lineLimit(1)
+                Text(description)
+                    .font(Constants.Design.monoCaption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var iconName: String {
+        switch result.outcome {
+        case .restoredToVolume, .restoredToB2: "checkmark.shield"
+        case .failed: "xmark.shield"
+        }
+    }
+
+    private var iconColor: Color {
+        switch result.outcome {
+        case .restoredToVolume, .restoredToB2: .green
+        case .failed: .red
+        }
+    }
+
+    private var description: String {
+        switch result.outcome {
+        case .restoredToVolume(let vid, let source): "Restored to \(volumeName(vid)) from \(sourceName(source))"
+        case .restoredToB2(_, let source): "Re-uploaded to B2 from \(sourceName(source))"
+        case .failed(let reason): "Heal failed — \(reason)"
         }
     }
 }

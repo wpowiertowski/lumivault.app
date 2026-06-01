@@ -9,6 +9,31 @@ struct ImageSnapshot: Sendable {
     let b2FileId: String?
     let storageLocations: [StorageLocation]
     let albumPath: String // "year/month/day/albumName"
+    /// Whether the stored bytes are AES-GCM encrypted. When true, a stored
+    /// replica's bytes hash to ciphertext (not `sha256`), so the heal pass can't
+    /// verify a source against `sha256` and instead trusts an intact replica.
+    let isEncrypted: Bool
+
+    /// `isEncrypted` defaults to false so existing callers/tests stay source-compatible.
+    /// Explicitly `nonisolated` to match the synthesized memberwise init it replaces
+    /// (a hand-written init would otherwise inherit MainActor default isolation).
+    nonisolated init(
+        sha256: String,
+        filename: String,
+        par2Filename: String,
+        b2FileId: String?,
+        storageLocations: [StorageLocation],
+        albumPath: String,
+        isEncrypted: Bool = false
+    ) {
+        self.sha256 = sha256
+        self.filename = filename
+        self.par2Filename = par2Filename
+        self.b2FileId = b2FileId
+        self.storageLocations = storageLocations
+        self.albumPath = albumPath
+        self.isEncrypted = isEncrypted
+    }
 }
 
 struct VolumeSnapshot: Sendable {
@@ -66,6 +91,7 @@ enum ReconciliationPhase: String, Sendable {
     case verifyingHashes = "Verifying file integrity"
     case scanningB2 = "Scanning B2"
     case repairing = "Repairing corrupted files"
+    case healing = "Restoring missing replicas"
     case resolving = "Resolving"
     case complete = "Complete"
 }
@@ -95,6 +121,30 @@ struct RepairResult: Sendable {
     enum Outcome: Sendable {
         case copiedFromVolume(String)
         case repairedViaPAR2
+        case failed(String)
+    }
+
+    let outcome: Outcome
+}
+
+// MARK: - Heal (restore missing replicas across storage targets)
+
+/// Result of healing a single missing replica: a file present in one storage
+/// (another volume or B2) is fanned back out to the storage that's missing it.
+struct HealResult: Sendable {
+    let sha256: String
+    let filename: String
+
+    /// Where the restored bytes were sourced from.
+    enum Source: Sendable {
+        case volume(String) // source volumeID
+        case b2
+    }
+
+    enum Outcome: Sendable {
+        case restoredToVolume(volumeID: String, source: Source)
+        /// Re-uploaded to B2. `newFileId` must be written back to the catalog/record.
+        case restoredToB2(newFileId: String, source: Source)
         case failed(String)
     }
 

@@ -968,6 +968,23 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         await MainActor.run { _ = progress.activeStages.remove(.par2) }
     }
 
+    /// Ensure `dest` is a faithful copy of `source`, replacing any pre-existing
+    /// file whose size doesn't match (stale, partial, zero-byte, or an unrelated
+    /// leftover). Throws if the copy ultimately fails so the caller records a real
+    /// per-volume error instead of a phantom success.
+    private nonisolated static func ensureFileMirrored(from source: URL, to dest: URL) throws {
+        let fm = FileManager.default
+        let sourceSize = (try fm.attributesOfItem(atPath: source.path)[.size] as? NSNumber)?.int64Value
+        if fm.fileExists(atPath: dest.path) {
+            let destSize = (try? fm.attributesOfItem(atPath: dest.path)[.size] as? NSNumber)?.int64Value
+            if let sourceSize, let destSize, destSize == sourceSize, destSize > 0 {
+                return // existing file matches the source — trust it
+            }
+            try fm.removeItem(at: dest) // mismatched/partial/empty — replace it
+        }
+        try fm.copyItem(at: source, to: dest)
+    }
+
     /// Copies files (and PAR2 companions) to external volumes. Per-file I/O
     /// runs off-main. Volume cleanup (lastSyncedAt + stop access) runs after
     /// the loop and is MainActor.run-non-cancellable so it always completes.
@@ -1012,10 +1029,14 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 do {
                     try FileManager.default.createDirectory(at: destBase, withIntermediateDirectories: true)
 
+                    // Mirror the image. Do NOT blindly trust a pre-existing file at the
+                    // destination: a stale/partial/wrong leftover (e.g. from a failed delete
+                    // or an interrupted run) would otherwise be silently kept while the
+                    // location is recorded as valid — the file then reads as "missing" on
+                    // verification even though B2 got a fresh copy. `ensureFileMirrored`
+                    // replaces any dest whose size doesn't match the source.
                     let dest = destBase.appendingPathComponent(snap.filename)
-                    if !FileManager.default.fileExists(atPath: dest.path) {
-                        try FileManager.default.copyItem(at: sourceFile, to: dest)
-                    }
+                    try Self.ensureFileMirrored(from: sourceFile, to: dest)
 
                     let relativePath = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)/\(snap.filename)"
                     let location = StorageLocation(volumeID: vol.volumeID, relativePath: relativePath)
@@ -1031,9 +1052,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                         )
                         for companion in companions {
                             let cdest = destBase.appendingPathComponent(companion.lastPathComponent)
-                            if !FileManager.default.fileExists(atPath: cdest.path) {
-                                try FileManager.default.copyItem(at: companion, to: cdest)
-                            }
+                            try Self.ensureFileMirrored(from: companion, to: cdest)
                         }
                     }
                 } catch {
@@ -1041,9 +1060,12 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 }
             }
 
-            // Mirror original behavior: mutableItem.error reflects the last per-volume failure.
-            if let lastErr = copyErrors.last {
-                mutableItem.error = lastErr
+            // Record copy failures WITHOUT blocking the independent B2 upload stage.
+            // External-volume mirroring and B2 upload are separate redundancy targets;
+            // a flaky/disconnected drive must not stop the file reaching B2 (and vice
+            // versa). Surfaced via `copyError` + progress.errors, never `item.error`.
+            if !copyErrors.isEmpty {
+                mutableItem.copyError = copyErrors.joined(separator: "; ")
             }
 
             let sha = snap.sha256

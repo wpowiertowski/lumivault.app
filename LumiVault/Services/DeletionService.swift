@@ -115,14 +115,15 @@ actor DeletionService {
                             result.errors.append("Volume remove failed: \(image.filename) — \(error.localizedDescription)")
                         }
                     }
-                    // Also remove all PAR2 companions (index + volume files)
-                    if !image.par2Filename.isEmpty {
-                        let par2Files = RedundancyService.companionFiles(
-                            forIndex: image.par2Filename, in: albumDir
-                        )
-                        for par2File in par2Files {
-                            try? fm.removeItem(at: par2File)
-                        }
+                    // Also remove all PAR2 companions (index + volume files). Derive the
+                    // index name from the image filename when the record's par2Filename is
+                    // empty — a re-synced "second copy" record never had its par2Filename
+                    // populated (the PAR2 stage skips duplicates), which would otherwise
+                    // orphan `<filename>.par2`/`.vol*.par2` on the volume after deletion.
+                    let par2Index = image.par2Filename.isEmpty ? image.filename + ".par2" : image.par2Filename
+                    let par2Files = RedundancyService.companionFiles(forIndex: par2Index, in: albumDir)
+                    for par2File in par2Files {
+                        try? fm.removeItem(at: par2File)
                     }
                 }
                 // Prune empty directories after individual file removal
@@ -183,11 +184,15 @@ actor DeletionService {
                     } catch {
                         result.errors.append("B2 delete failed: \(image.filename) — \(error.localizedDescription)")
                     }
-                    // Also delete all PAR2 companions (index + volume files) from B2
-                    if !image.par2Filename.isEmpty {
+                    // Also delete all PAR2 companions (index + volume files) from B2.
+                    // Derive the base name from the image filename when par2Filename is
+                    // empty (re-synced "second copy" records carry no par2Filename), so the
+                    // companions don't linger in the bucket after the image is deleted.
+                    do {
+                        let indexName = image.par2Filename.isEmpty ? image.filename + ".par2" : image.par2Filename
                         // Use base name (without .par2 extension) as prefix to match
                         // both the index file (.par2) and volume files (.vol0+N.par2)
-                        let baseName = String(image.par2Filename.dropLast(5)) // remove ".par2"
+                        let baseName = String(indexName.dropLast(5)) // remove ".par2"
                         let par2Prefix = albumPath + "/" + baseName
                         if let listings = try? await b2Service.listAllFiles(
                             bucketId: credentials.bucketId,
@@ -196,7 +201,7 @@ actor DeletionService {
                         ) {
                             for listing in listings {
                                 let name = listing.fileName.split(separator: "/").last.map(String.init) ?? listing.fileName
-                                let isIndex = name == image.par2Filename
+                                let isIndex = name == indexName
                                 let isVol = name.hasPrefix(baseName + ".vol") && name.hasSuffix(".par2")
                                 guard isIndex || isVol else { continue }
                                 try? await b2Service.deleteFile(

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 actor ReconciliationService {
     private let b2Service = B2Service()
@@ -417,5 +418,208 @@ actor ReconciliationService {
         }
 
         return results
+    }
+
+    // MARK: - Heal (restore missing replicas across storage targets)
+
+    /// Restore files that are present in one storage target but missing from
+    /// another, fanning each recovered file back out so every target that should
+    /// hold it does. Handles `.danglingLocation` (missing from a volume) and
+    /// `.danglingB2FileId` (missing from B2). This is pure file I/O + B2; the only
+    /// catalog mutation needed — a new B2 fileId after re-upload — is handed back to
+    /// the caller via `.restoredToB2(newFileId:)` for an on-MainActor write-back.
+    func healReplicas(
+        discrepancies: [Discrepancy],
+        snapshots: [ImageSnapshot],
+        volumes: [VolumeSnapshot],
+        b2Credentials: B2Credentials?,
+        progress: ReconciliationProgress
+    ) async -> [HealResult] {
+        let healable = discrepancies.filter {
+            switch $0.kind {
+            case .danglingLocation, .danglingB2FileId: return true
+            default: return false
+            }
+        }
+        guard !healable.isEmpty else { return [] }
+
+        await MainActor.run {
+            progress.phase = .healing
+            progress.totalItems = healable.count
+            progress.processedItems = 0
+        }
+
+        let snapshotsByHash = Dictionary(snapshots.map { ($0.sha256, $0) }, uniquingKeysWith: { first, _ in first })
+        let volumeMap = Dictionary(uniqueKeysWithValues: volumes.map { ($0.volumeID, $0) })
+        var results: [HealResult] = []
+
+        for (index, discrepancy) in healable.enumerated() {
+            if let snapshot = snapshotsByHash[discrepancy.sha256] {
+                switch discrepancy.kind {
+                case .danglingLocation(let volumeID):
+                    results.append(await healVolume(volumeID: volumeID, snapshot: snapshot, volumeMap: volumeMap, b2Credentials: b2Credentials))
+                case .danglingB2FileId:
+                    results.append(await healB2(snapshot: snapshot, volumeMap: volumeMap, b2Credentials: b2Credentials))
+                default:
+                    break
+                }
+            } else {
+                results.append(HealResult(sha256: discrepancy.sha256, filename: discrepancy.filename, outcome: .failed("No catalog entry for image")))
+            }
+            await MainActor.run { progress.processedItems = index + 1 }
+        }
+
+        return results
+    }
+
+    /// Restore a file missing from `targetVolumeID` — from a healthy sibling
+    /// volume if one holds it, otherwise by downloading from B2.
+    private func healVolume(
+        volumeID targetVolumeID: String,
+        snapshot: ImageSnapshot,
+        volumeMap: [String: VolumeSnapshot],
+        b2Credentials: B2Credentials?
+    ) async -> HealResult {
+        func fail(_ reason: String) -> HealResult {
+            HealResult(sha256: snapshot.sha256, filename: snapshot.filename, outcome: .failed(reason))
+        }
+
+        guard let targetVolume = volumeMap[targetVolumeID] else {
+            return fail("Target volume not connected")
+        }
+        guard let targetLocation = snapshot.storageLocations.first(where: { $0.volumeID == targetVolumeID }) else {
+            return fail("No recorded path for target volume")
+        }
+        let targetURL = targetVolume.mountURL.appendingPathComponent(targetLocation.relativePath)
+        // Defense in depth: a tampered catalog relativePath must not write outside the volume.
+        guard targetURL.isDescendant(of: targetVolume.mountURL) else {
+            return fail("Storage path resolves outside the volume")
+        }
+        let targetDir = targetURL.deletingLastPathComponent()
+
+        // Source 1: a sibling volume that already holds the file.
+        for location in snapshot.storageLocations where location.volumeID != targetVolumeID {
+            guard let sourceVolume = volumeMap[location.volumeID] else { continue }
+            let sourceURL = sourceVolume.mountURL.appendingPathComponent(location.relativePath)
+            guard FileManager.default.fileExists(atPath: sourceURL.path) else { continue }
+            if !snapshot.isEncrypted {
+                guard let sourceHash = try? await hasher.sha256(of: sourceURL),
+                      sourceHash == snapshot.sha256 else { continue }
+            }
+            do {
+                try Self.writeAtomicCopy(from: sourceURL, to: targetURL)
+                Self.restorePAR2BetweenVolumes(snapshot: snapshot, sourceDir: sourceURL.deletingLastPathComponent(), targetDir: targetDir)
+                return HealResult(sha256: snapshot.sha256, filename: snapshot.filename, outcome: .restoredToVolume(volumeID: targetVolumeID, source: .volume(location.volumeID)))
+            } catch { continue }
+        }
+
+        // Source 2: B2. Stored bytes mirror the on-volume representation (ciphertext
+        // when encrypted), so they can be written straight to the volume path.
+        if let credentials = b2Credentials, let fileId = snapshot.b2FileId {
+            do {
+                let data = try await b2Service.downloadFile(fileId: fileId, credentials: credentials)
+                if !snapshot.isEncrypted, Self.hexSHA256(data) != snapshot.sha256 {
+                    return fail("B2 copy failed integrity check")
+                }
+                try FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true)
+                try data.write(to: targetURL, options: .atomic)
+                await restorePAR2FromB2(snapshot: snapshot, targetDir: targetDir, credentials: credentials)
+                return HealResult(sha256: snapshot.sha256, filename: snapshot.filename, outcome: .restoredToVolume(volumeID: targetVolumeID, source: .b2))
+            } catch {
+                return fail("B2 restore failed: \(error.localizedDescription)")
+            }
+        }
+
+        return fail("No healthy source available")
+    }
+
+    /// Restore a file missing from B2 by re-uploading from a healthy local replica.
+    private func healB2(
+        snapshot: ImageSnapshot,
+        volumeMap: [String: VolumeSnapshot],
+        b2Credentials: B2Credentials?
+    ) async -> HealResult {
+        func fail(_ reason: String) -> HealResult {
+            HealResult(sha256: snapshot.sha256, filename: snapshot.filename, outcome: .failed(reason))
+        }
+        guard let credentials = b2Credentials else { return fail("B2 not configured") }
+
+        for location in snapshot.storageLocations {
+            guard let sourceVolume = volumeMap[location.volumeID] else { continue }
+            let sourceURL = sourceVolume.mountURL.appendingPathComponent(location.relativePath)
+            guard FileManager.default.fileExists(atPath: sourceURL.path) else { continue }
+            if !snapshot.isEncrypted {
+                guard let sourceHash = try? await hasher.sha256(of: sourceURL),
+                      sourceHash == snapshot.sha256 else { continue }
+            }
+            do {
+                let remotePath = "\(snapshot.albumPath)/\(snapshot.filename)"
+                let newFileId = try await b2Service.uploadImage(
+                    fileURL: sourceURL,
+                    remotePath: remotePath,
+                    sha256: snapshot.sha256,
+                    credentials: credentials
+                )
+                await uploadPAR2ToB2(snapshot: snapshot, sourceDir: sourceURL.deletingLastPathComponent(), credentials: credentials)
+                return HealResult(sha256: snapshot.sha256, filename: snapshot.filename, outcome: .restoredToB2(newFileId: newFileId, source: .volume(location.volumeID)))
+            } catch { continue }
+        }
+        return fail("No healthy local replica to re-upload")
+    }
+
+    // MARK: - Heal helpers
+
+    private nonisolated static func writeAtomicCopy(from source: URL, to dest: URL) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let data = try Data(contentsOf: source)
+        try data.write(to: dest, options: .atomic)
+    }
+
+    private nonisolated static func hexSHA256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Mirror PAR2 companions from a healthy volume dir into the target volume dir.
+    private nonisolated static func restorePAR2BetweenVolumes(snapshot: ImageSnapshot, sourceDir: URL, targetDir: URL) {
+        let indexName = snapshot.par2Filename.isEmpty ? snapshot.filename + ".par2" : snapshot.par2Filename
+        let fm = FileManager.default
+        for companion in RedundancyService.companionFiles(forIndex: indexName, in: sourceDir) {
+            let dest = targetDir.appendingPathComponent(companion.lastPathComponent)
+            guard !fm.fileExists(atPath: dest.path) else { continue }
+            try? fm.copyItem(at: companion, to: dest)
+        }
+    }
+
+    /// Download PAR2 companions for `snapshot` from B2 into `targetDir`.
+    private func restorePAR2FromB2(snapshot: ImageSnapshot, targetDir: URL, credentials: B2Credentials) async {
+        let indexName = snapshot.par2Filename.isEmpty ? snapshot.filename + ".par2" : snapshot.par2Filename
+        let baseName = String(indexName.dropLast(5)) // drop ".par2"
+        let prefix = "\(snapshot.albumPath)/\(baseName)"
+        guard let listings = try? await b2Service.listAllFiles(bucketId: credentials.bucketId, credentials: credentials, prefix: prefix) else { return }
+        let fm = FileManager.default
+        for listing in listings {
+            let name = listing.fileName.split(separator: "/").last.map(String.init) ?? listing.fileName
+            let isIndex = name == indexName
+            let isVol = name.hasPrefix(baseName + ".vol") && name.hasSuffix(".par2")
+            guard isIndex || isVol else { continue }
+            let dest = targetDir.appendingPathComponent(name)
+            guard !fm.fileExists(atPath: dest.path) else { continue }
+            if let data = try? await b2Service.downloadFile(fileId: listing.fileId, credentials: credentials) {
+                try? data.write(to: dest, options: .atomic)
+            }
+        }
+    }
+
+    /// Re-upload PAR2 companions for `snapshot` from a local volume dir to B2.
+    private func uploadPAR2ToB2(snapshot: ImageSnapshot, sourceDir: URL, credentials: B2Credentials) async {
+        let indexName = snapshot.par2Filename.isEmpty ? snapshot.filename + ".par2" : snapshot.par2Filename
+        for companion in RedundancyService.companionFiles(forIndex: indexName, in: sourceDir) {
+            let remoteName = "\(snapshot.albumPath)/\(companion.lastPathComponent)"
+            if let exists = try? await b2Service.fileExists(fileName: remoteName, bucketId: credentials.bucketId, credentials: credentials), exists {
+                continue
+            }
+            _ = try? await b2Service.uploadImage(fileURL: companion, remotePath: remoteName, sha256: "", credentials: credentials)
+        }
     }
 }
