@@ -617,6 +617,64 @@ struct RedundancyServiceTests {
         #expect(repairedData == originalData)
     }
 
+    @Test func par2LogicalNameOverridesCompanionNaming() async throws {
+        // When two distinct assets share an originalFilename, the import stage
+        // stores the second under a disambiguated name and passes it as
+        // `logicalName` so PAR2 companions match the *stored* name (not the
+        // staging file's name) while the recovery data still covers the bytes.
+        let service = RedundancyService()
+        let spec = TestFixtures.files[4] // city.heic, 3072 bytes
+        let root = try TestFixtures.materializeVolume(label: "par2-logical")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let dir = root.appendingPathComponent(spec.albumPath)
+        let fileURL = dir.appendingPathComponent(spec.name)
+        let logical = "city~deadbeef.heic"
+
+        let par2URL = try service.generatePAR2(for: fileURL, outputDirectory: dir, logicalName: logical)
+
+        // Index + companions are named after the logical name, not the file.
+        #expect(par2URL.lastPathComponent == "\(logical).par2")
+        let companions = RedundancyService.companionFiles(forIndex: par2URL.lastPathComponent, in: dir)
+        #expect(companions.allSatisfy { $0.lastPathComponent.hasPrefix(logical) })
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("\(spec.name).par2").path))
+
+        // Recovery data still covers the original bytes, so verify passes.
+        let isValid = try service.verify(par2URL: par2URL, originalFileURL: fileURL)
+        #expect(isValid)
+    }
+
+}
+
+// MARK: - Filename Disambiguation Tests
+
+@Suite @MainActor
+struct FilenameDisambiguationTests {
+    @Test func insertsShortHashBeforeExtension() {
+        let name = PipelinedImportCoordinator.disambiguatedFilename(
+            "IMG_1613.heic", sha256: "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+        )
+        #expect(name == "IMG_1613~a1b2c3d4.heic")
+    }
+
+    @Test func distinctShasYieldDistinctNamesForSameBase() {
+        let a = PipelinedImportCoordinator.disambiguatedFilename("IMG_1613.heic", sha256: "aaaaaaaa1111")
+        let b = PipelinedImportCoordinator.disambiguatedFilename("IMG_1613.heic", sha256: "bbbbbbbb2222")
+        #expect(a != b)
+        #expect(a == "IMG_1613~aaaaaaaa.heic")
+        #expect(b == "IMG_1613~bbbbbbbb.heic")
+    }
+
+    @Test func handlesNoExtension() {
+        let name = PipelinedImportCoordinator.disambiguatedFilename("IMG_1613", sha256: "0123456789ab")
+        #expect(name == "IMG_1613~01234567")
+    }
+
+    @Test func isDeterministicForSameInput() {
+        let first = PipelinedImportCoordinator.disambiguatedFilename("photo.jpg", sha256: "feedface0000")
+        let second = PipelinedImportCoordinator.disambiguatedFilename("photo.jpg", sha256: "feedface0000")
+        #expect(first == second)
+    }
 }
 
 // MARK: - PerceptualHash Tests

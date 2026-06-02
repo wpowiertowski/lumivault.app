@@ -216,13 +216,16 @@ struct AlbumResyncSheet: View {
         )
         nonisolated(unsafe) let resolvedAlbum = album
 
-        // Resolve volumes and B2 credentials for removals.
+        // Resolve currently-connected volumes. Needed for BOTH additions — the
+        // import pipeline mirrors new files to these via settings.targetVolumeIDs
+        // — and removals, which delete the dropped files from them. Resolving only
+        // when there were removals left an additions-only resync with an empty
+        // targetVolumeIDs, so added/duplicate photos reached B2 but never the
+        // external drives.
         var mountedVolumes: [(volumeID: String, mountURL: URL)] = []
-        if appliedDelta.removed.isEmpty == false {
-            for vol in volumes {
-                if let url = try? BookmarkResolver.resolveAndAccess(vol.bookmarkData) {
-                    mountedVolumes.append((vol.volumeID, url))
-                }
+        for vol in volumes {
+            if let url = try? BookmarkResolver.resolveAndAccess(vol.bookmarkData) {
+                mountedVolumes.append((vol.volumeID, url))
             }
         }
         let b2Credentials = B2Credentials.load()
