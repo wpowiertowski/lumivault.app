@@ -38,7 +38,7 @@ The `.xcodeproj` is gitignored — always regenerate from `project.yml` with `xc
 - Monospaced fonts from `Constants.Design` for all UI text
 - Accent color via `Constants.Design.accentColor`
 - SwiftData models: `ImageRecord`, `AlbumRecord`, `VolumeRecord`
-- Catalog JSON format must stay compatible with the existing CLI tool
+- Catalog JSON schema changes must stay backwards-compatible (older catalogs must still decode)
 
 ## Key Files
 
@@ -46,7 +46,7 @@ The `.xcodeproj` is gitignored — always regenerate from `project.yml` with `xc
 - `project.yml` — XcodeGen config, generates the .xcodeproj
 - `LumiVault/Info.plist` — privacy descriptions (Photos library access)
 - `LumiVault/LumiVault.entitlements` — sandbox, file access, bookmarks, Photos, network
-- `LumiVault/Models/Catalog.swift` — Codable structs mirroring catalog.json (must not break CLI compatibility)
+- `LumiVault/Models/Catalog.swift` — Codable structs mirroring catalog.json (keep schema backwards-compatible)
 
 ## Common Pitfalls
 
@@ -77,7 +77,7 @@ xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultTests -destination
 
 - New features affecting multiple files or services
 - Architectural changes or refactors
-- Changes to the catalog.json format (CLI compatibility risk)
+- Changes to the catalog.json format (backwards-compatibility risk)
 - New service actors or view hierarchies
 
 ### Avoid Over-Engineering
@@ -105,7 +105,7 @@ When asked to create a release:
 
 ## Project-Specific Rules
 
-- **catalog.json changes require extra care** — the format is shared with the CLI tool. Any schema change must be backwards-compatible.
+- **catalog.json changes require extra care** — the catalog is synced via iCloud and re-read across app versions, so any schema change must be backwards-compatible (older catalogs must still decode).
 - **Entitlements must match between Debug and Release** — both `.entitlements` files should stay in sync unless there's a specific reason to diverge.
 - **Regenerate .xcodeproj after structural changes** — if you add/remove/move Swift files or change `project.yml`, run `xcodegen generate` and verify the build.
 - **Privacy descriptions in Info.plist** — any new framework requiring user permission (e.g., Contacts, Location) needs a usage description added *before* the code ships.
