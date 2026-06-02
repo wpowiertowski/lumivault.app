@@ -34,7 +34,13 @@ struct PipelineItem: Sendable {
     var par2URL: URL?
     var storageLocations: [StorageLocation] = []
     var b2FileId: String?
+    /// Fatal, stage-blocking error from an *upstream* phase (hash/encrypt/PAR2).
+    /// When set, downstream copy/upload/catalog stages skip processing the item.
     var error: String?
+    /// Non-blocking error from the copy stage. Recorded separately from `error`
+    /// so that a failure mirroring to one storage target (external volumes) does
+    /// NOT prevent the independent target (B2 upload) from running.
+    var copyError: String?
 
     /// The filename to use for the stored file (converted name if conversion happened).
     nonisolated var activeFilename: String {

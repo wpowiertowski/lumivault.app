@@ -242,14 +242,20 @@ actor RedundancyService {
     /// Generate standard PAR2 2.0 files for the given file.
     /// Returns the URL of the index file (.par2). A companion volume file
     /// (.vol0+N.par2) is also created in the same directory.
+    /// `logicalName`, when provided, overrides the protected filename stored in
+    /// the PAR2 metadata and the generated index/volume names. The recovery data
+    /// is still computed from `fileURL`'s bytes — this only decouples the PAR2
+    /// naming from the staging file so companions match the *stored* image name
+    /// (which may be disambiguated to avoid same-filename collisions).
     nonisolated func generatePAR2(
         for fileURL: URL,
         outputDirectory: URL,
+        logicalName: String? = nil,
         onProgress: (@Sendable (Double) -> Void)? = nil,
         cancelFlag: OSAllocatedUnfairLock<Bool>? = nil
     ) throws -> URL {
         let data = try Data(contentsOf: fileURL)
-        let filename = fileURL.lastPathComponent
+        let filename = logicalName ?? fileURL.lastPathComponent
 
         // Block sizing — must be multiple of 4 for PAR2
         let blockSize = Self.computeBlockSize(dataSize: data.count)

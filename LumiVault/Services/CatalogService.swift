@@ -132,6 +132,34 @@ actor CatalogService {
         catalog.lastUpdated = .now
     }
 
+    /// Update the recorded B2 fileId for an image (matched by sha256) wherever it
+    /// appears in the catalog tree. Used after the heal pass re-uploads a file that
+    /// went missing from B2 and B2 assigns it a fresh fileId.
+    func updateImageB2FileId(sha256: String, b2FileId: String) {
+        var didChange = false
+        for (year, var yearEntry) in catalog.years {
+            for (month, var monthEntry) in yearEntry.months {
+                for (day, var dayEntry) in monthEntry.days {
+                    for (albumName, var album) in dayEntry.albums {
+                        var albumChanged = false
+                        for index in album.images.indices where album.images[index].sha256 == sha256 {
+                            album.images[index].b2FileId = b2FileId
+                            albumChanged = true
+                        }
+                        if albumChanged {
+                            dayEntry.albums[albumName] = album
+                            monthEntry.days[day] = dayEntry
+                            yearEntry.months[month] = monthEntry
+                            catalog.years[year] = yearEntry
+                            didChange = true
+                        }
+                    }
+                }
+            }
+        }
+        if didChange { catalog.lastUpdated = .now }
+    }
+
     // MARK: - Merge (iCloud Sync)
 
     func merge(remote: Catalog) -> Catalog {

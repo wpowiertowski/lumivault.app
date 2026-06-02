@@ -22,6 +22,21 @@ private final class RecordLookup: @unchecked Sendable {
     }
 }
 
+/// Tracks which stored filename is owned by which sha256 within the import's
+/// target album. Apple Photos lets two genuinely distinct assets (different
+/// edits/crops → different sha256) share one `originalFilename`; LumiVault keys
+/// storage paths (volume file, B2 key, PAR2 companions) off the filename, so
+/// without disambiguation they collide on a single slot. This registry lets the
+/// hashing stage give the *second* asset a deterministic, content-derived suffix.
+/// Lowercased keys also catch case-only differences on case-insensitive volumes.
+/// Accessed only on @MainActor, like RecordLookup.
+private final class FilenameRegistry: @unchecked Sendable {
+    /// lowercased stored filename -> sha256 that owns it
+    var owners: [String: String] = [:]
+    /// Existing album records are read in once, lazily, on first use.
+    var seeded = false
+}
+
 /// Sendable view of a resolved import-target volume — captures only the
 /// scalar fields the off-main copy stage needs. The companion `VolumeRecord`
 /// references stay behind a separate `UnsafeSendable` so post-loop cleanup
@@ -236,6 +251,9 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         // used by all downstream stages instead of PersistentIdentifier lookups
         // (which fail for unsaved/temporary records). All access is on @MainActor.
         let recordsBySHA = RecordLookup()
+        // Tracks stored filenames within the target album so two distinct assets
+        // that share an originalFilename get disambiguated instead of colliding.
+        let filenameRegistry = FilenameRegistry()
         let candidatesLock = OSAllocatedUnfairLock(initialState: nearDuplicateCandidates)
 
         // MARK: - Stage launches
@@ -271,6 +289,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 settings: settings,
                 ctx: ctx,
                 recordsBySHA: recordsBySHA,
+                filenameRegistry: filenameRegistry,
                 candidatesLock: candidatesLock,
                 progress: progress
             )
@@ -696,6 +715,71 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         await MainActor.run { _ = progress.activeStages.remove(.converting) }
     }
 
+    /// Deterministic collision-safe variant of `filename`, inserting a short hash
+    /// of the content before the extension: `IMG_1613.heic` -> `IMG_1613~a1b2c3d4.heic`.
+    /// Stable across imports because it's derived from the (unique) sha256, so a
+    /// re-import that dedups by sha reuses the same disambiguated name.
+    nonisolated static func disambiguatedFilename(_ filename: String, sha256: String) -> String {
+        let suffix = "~" + sha256.prefix(8)
+        let ns = filename as NSString
+        let ext = ns.pathExtension
+        let base = ns.deletingPathExtension
+        return ext.isEmpty ? "\(base)\(suffix)" : "\(base)\(suffix).\(ext)"
+    }
+
+    /// Resolve the stored filename for a brand-new record and record its ownership.
+    /// If the album already has a *different* asset (different sha256) under this
+    /// filename (case-insensitively), returns the disambiguated variant so the two
+    /// never share a storage path; otherwise returns `filename` unchanged.
+    @MainActor
+    private static func collisionFreeFilename(
+        _ filename: String,
+        sha256: String,
+        registry: FilenameRegistry,
+        settings: ImportSettings,
+        ctx: ModelContext
+    ) -> String {
+        seedRegistryIfNeeded(registry, settings: settings, ctx: ctx)
+        let key = filename.lowercased()
+        if let owner = registry.owners[key], owner != sha256 {
+            let resolved = disambiguatedFilename(filename, sha256: sha256)
+            registry.owners[resolved.lowercased()] = sha256
+            return resolved
+        }
+        registry.owners[key] = sha256
+        return filename
+    }
+
+    /// Seed the registry from the target album's existing records (pre-import
+    /// state) so a re-import collides a new asset against names already on disk,
+    /// not just names added earlier in this same run.
+    @MainActor
+    private static func seedRegistryIfNeeded(
+        _ registry: FilenameRegistry,
+        settings: ImportSettings,
+        ctx: ModelContext
+    ) {
+        guard !registry.seeded else { return }
+        registry.seeded = true
+        let albumName = settings.albumName
+        let albumYear = settings.year
+        let albumMonth = settings.month
+        let albumDay = settings.day
+        let descriptor = FetchDescriptor<AlbumRecord>(
+            predicate: #Predicate {
+                $0.name == albumName && $0.year == albumYear &&
+                $0.month == albumMonth && $0.day == albumDay
+            }
+        )
+        guard let album = try? ctx.fetch(descriptor).first else { return }
+        for image in album.images {
+            let key = image.filename.lowercased()
+            if registry.owners[key] == nil {
+                registry.owners[key] = image.sha256
+            }
+        }
+    }
+
     /// Hash + dedup. SHA-256 runs on the hasher actor; perceptual hash and
     /// near-dup scan run off-main. SwiftData fetch+insert is batched into one
     /// MainActor.run per item to preserve fetch-then-insert atomicity.
@@ -705,6 +789,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         settings: ImportSettings,
         ctx: UnsafeSendable<ModelContext>,
         recordsBySHA: RecordLookup,
+        filenameRegistry: FilenameRegistry,
         candidatesLock: OSAllocatedUnfairLock<[(sha256: String, filename: String, hash: Data)]>,
         progress: PhotosImportProgress
     ) async {
@@ -795,11 +880,19 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                     let activeFilename = item.activeFilename
                     let pHashCopy = pHash
                     let matchToAppend = nearDupMatch
-                    await MainActor.run {
+                    // Resolve a collision-free stored name (disambiguated if a
+                    // different asset already owns this filename in the album) and
+                    // use it for both the record and the snapshot so every
+                    // downstream stage keys off one consistent name.
+                    let storedFilename = await MainActor.run { () -> String in
                         let modelContext = ctx.value
+                        let resolvedName = Self.collisionFreeFilename(
+                            activeFilename, sha256: hash,
+                            registry: filenameRegistry, settings: settings, ctx: modelContext
+                        )
                         let record = ImageRecord(
                             sha256: hash,
-                            filename: activeFilename,
+                            filename: resolvedName,
                             sizeBytes: size,
                             phAssetLocalIdentifier: phAssetId
                         )
@@ -813,10 +906,11 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                         }
                         modelContext.insert(record)
                         recordsBySHA[hash] = record
+                        return resolvedName
                     }
                     mutableItem.snapshot = ImageRecordSnapshot(
                         sha256: hash,
-                        filename: activeFilename,
+                        filename: storedFilename,
                         sizeBytes: size,
                         isNew: true
                     )
@@ -935,6 +1029,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 let par2URL = try self.redundancyService.generatePAR2(
                     for: item.activeFileURL,
                     outputDirectory: staging,
+                    logicalName: snap.filename,
                     onProgress: { fraction in
                         Task { @MainActor in
                             progress.par2FileFraction = fraction
@@ -966,6 +1061,26 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             await outputCh.send(mutableItem)
         }
         await MainActor.run { _ = progress.activeStages.remove(.par2) }
+    }
+
+    /// Ensure `dest` is a faithful copy of `source`, replacing any pre-existing
+    /// file whose size doesn't match (stale, partial, or zero-byte leftover).
+    /// Storage paths are now disambiguated per asset (see `collisionFreeFilename`),
+    /// so `dest` belongs to exactly one record — a size mismatch means a damaged
+    /// copy of *this* file to replace, never a different asset to clobber. Throws
+    /// if the copy ultimately fails so the caller records a real per-volume error
+    /// instead of a phantom success.
+    private nonisolated static func ensureFileMirrored(from source: URL, to dest: URL) throws {
+        let fm = FileManager.default
+        let sourceSize = (try fm.attributesOfItem(atPath: source.path)[.size] as? NSNumber)?.int64Value
+        if fm.fileExists(atPath: dest.path) {
+            let destSize = (try? fm.attributesOfItem(atPath: dest.path)[.size] as? NSNumber)?.int64Value
+            if let sourceSize, let destSize, destSize == sourceSize, destSize > 0 {
+                return // existing file matches the source — trust it
+            }
+            try fm.removeItem(at: dest) // mismatched/partial/empty — replace it
+        }
+        try fm.copyItem(at: source, to: dest)
     }
 
     /// Copies files (and PAR2 companions) to external volumes. Per-file I/O
@@ -1012,10 +1127,14 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 do {
                     try FileManager.default.createDirectory(at: destBase, withIntermediateDirectories: true)
 
+                    // Mirror the image. Do NOT blindly trust a pre-existing file at the
+                    // destination: a stale/partial/wrong leftover (e.g. from a failed delete
+                    // or an interrupted run) would otherwise be silently kept while the
+                    // location is recorded as valid — the file then reads as "missing" on
+                    // verification even though B2 got a fresh copy. `ensureFileMirrored`
+                    // replaces any dest whose size doesn't match the source.
                     let dest = destBase.appendingPathComponent(snap.filename)
-                    if !FileManager.default.fileExists(atPath: dest.path) {
-                        try FileManager.default.copyItem(at: sourceFile, to: dest)
-                    }
+                    try Self.ensureFileMirrored(from: sourceFile, to: dest)
 
                     let relativePath = "\(settings.year)/\(settings.month)/\(settings.day)/\(settings.albumName)/\(snap.filename)"
                     let location = StorageLocation(volumeID: vol.volumeID, relativePath: relativePath)
@@ -1031,9 +1150,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                         )
                         for companion in companions {
                             let cdest = destBase.appendingPathComponent(companion.lastPathComponent)
-                            if !FileManager.default.fileExists(atPath: cdest.path) {
-                                try FileManager.default.copyItem(at: companion, to: cdest)
-                            }
+                            try Self.ensureFileMirrored(from: companion, to: cdest)
                         }
                     }
                 } catch {
@@ -1041,9 +1158,12 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 }
             }
 
-            // Mirror original behavior: mutableItem.error reflects the last per-volume failure.
-            if let lastErr = copyErrors.last {
-                mutableItem.error = lastErr
+            // Record copy failures WITHOUT blocking the independent B2 upload stage.
+            // External-volume mirroring and B2 upload are separate redundancy targets;
+            // a flaky/disconnected drive must not stop the file reaching B2 (and vice
+            // versa). Surfaced via `copyError` + progress.errors, never `item.error`.
+            if !copyErrors.isEmpty {
+                mutableItem.copyError = copyErrors.joined(separator: "; ")
             }
 
             let sha = snap.sha256
