@@ -244,7 +244,10 @@ struct AlbumResyncSheet: View {
         settings.nearDuplicateThreshold = UserDefaults.standard.object(forKey: "importNearDuplicateThreshold") as? Int ?? Constants.Dedup.nearDuplicateThreshold
         settings.generatePAR2 = UserDefaults.standard.object(forKey: "importGeneratePAR2") as? Bool ?? true
 
-        let capturedMounted = mountedVolumes
+        // The library is always a removal target (so deleted files don't linger), but it is NOT
+        // added to settings.targetVolumeIDs above — runImportPipeline already mirrors additions to
+        // it unconditionally.
+        let capturedMounted = [StorageResolver.libraryMounted()] + mountedVolumes
         let capturedCreds = b2Credentials
 
         resyncTask = Task { @MainActor in

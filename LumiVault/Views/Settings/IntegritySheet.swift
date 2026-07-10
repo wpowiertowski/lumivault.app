@@ -202,13 +202,15 @@ struct IntegritySheet: View {
     private func runVerification() async {
         let snapshots = makeSnapshots()
         let volumeSnapshots = resolveVolumeSnapshots()
+        // Include the local library as a first-class verify/repair target.
+        let allTargets = [StorageResolver.librarySnapshot()] + volumeSnapshots
 
         // Per-album/-image verify stays scoped to volumes: passing B2 credentials
         // here would make `diffB2` treat every B2 object outside this subset as an
         // orphan. B2 is still usable as a heal *source* via `runHeal()`.
         let result = await reconciliationService.reconcile(
             snapshots: snapshots,
-            volumes: volumeSnapshots,
+            volumes: allTargets,
             b2Credentials: nil,
             verifyHashes: true,
             scanOrphans: false,
@@ -219,7 +221,7 @@ struct IntegritySheet: View {
         let repairs = await reconciliationService.repairCorruptedFiles(
             discrepancies: result.discrepancies,
             snapshots: snapshots,
-            volumes: volumeSnapshots,
+            volumes: allTargets,
             progress: progress
         )
 
@@ -241,12 +243,14 @@ struct IntegritySheet: View {
 
         let snapshots = makeSnapshots()
         let volumeSnapshots = resolveVolumeSnapshots()
+        // Include the local library as a first-class heal target/source.
+        let allTargets = [StorageResolver.librarySnapshot()] + volumeSnapshots
         let b2Creds = b2Enabled ? B2Credentials.load() : nil
 
         let heals = await reconciliationService.healReplicas(
             discrepancies: report.discrepancies,
             snapshots: snapshots,
-            volumes: volumeSnapshots,
+            volumes: allTargets,
             b2Credentials: b2Creds,
             progress: progress
         )
@@ -264,7 +268,7 @@ struct IntegritySheet: View {
         // Re-verify so the report reflects the restored state.
         let result = await reconciliationService.reconcile(
             snapshots: makeSnapshots(),
-            volumes: volumeSnapshots,
+            volumes: allTargets,
             b2Credentials: nil,
             verifyHashes: true,
             scanOrphans: false,

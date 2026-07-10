@@ -111,12 +111,11 @@ struct PhotoDetailView: View {
         var accessedAnyVolume = false
 
         for location in image.storageLocations {
-            guard let volume = volumes.first(where: { $0.volumeID == location.volumeID }),
-                  let mountURL = try? BookmarkResolver.resolveAndAccess(volume.bookmarkData) else {
+            guard let (mountURL, scoped) = StorageResolver.resolveMount(for: location, volumes: volumes) else {
                 continue
             }
             accessedAnyVolume = true
-            defer { mountURL.stopAccessingSecurityScopedResource() }
+            defer { if scoped { mountURL.stopAccessingSecurityScopedResource() } }
 
             let fileURL = mountURL.appendingPathComponent(location.relativePath)
 

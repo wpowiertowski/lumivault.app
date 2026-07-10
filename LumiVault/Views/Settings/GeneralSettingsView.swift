@@ -10,11 +10,11 @@ struct GeneralSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Catalog") {
-                // The catalog lives in the app's sandbox container and isn't user-relocatable
-                // (a path outside the container wouldn't survive relaunch without a
-                // security-scoped bookmark), so the location is shown read-only. Use the
-                // Restore Catalog actions below to bring in an external catalog.
+            Section("Library") {
+                // catalog.json and its recovery sidecars live in ~/Pictures/LumiVault, a
+                // user-accessible folder reachable directly via the Pictures entitlement.
+                // Images are archived to volumes/B2 and land here only via the explicit
+                // no-storage fallback in the import flow.
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Location")
                         .font(Constants.Design.monoCaption2)
@@ -22,7 +22,7 @@ struct GeneralSettingsView: View {
                     HStack(spacing: 6) {
                         Image(systemName: catalogExists ? "checkmark.circle.fill" : "questionmark.circle")
                             .foregroundStyle(catalogExists ? Color.green : Color.secondary)
-                        Text(resolvedCatalogURL.path)
+                        Text(libraryURL.path)
                             .font(Constants.Design.monoCaption)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
@@ -31,8 +31,8 @@ struct GeneralSettingsView: View {
                             .accessibilityIdentifier("general.resolvedPath")
                     }
                     Text(catalogExists
-                        ? "Catalog file present at this location."
-                        : "No catalog file here yet — it's created on first import or restore.")
+                        ? "Your catalog and its recovery files live here."
+                        : "Empty for now — the catalog is created on your first import.")
                         .font(Constants.Design.monoCaption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -97,8 +97,12 @@ struct GeneralSettingsView: View {
         .padding()
     }
 
-    /// The absolute file URL the app actually reads and writes — the single source of
-    /// truth used throughout the app.
+    /// The user-accessible library folder (`~/Pictures/LumiVault`).
+    private var libraryURL: URL {
+        Constants.Paths.libraryURL
+    }
+
+    /// The catalog file the app actually reads and writes (inside the library by default).
     private var resolvedCatalogURL: URL {
         Constants.Paths.resolvedCatalogURL
     }
@@ -107,20 +111,16 @@ struct GeneralSettingsView: View {
         FileManager.default.fileExists(atPath: resolvedCatalogURL.path)
     }
 
-    /// Reveal the resolved catalog file in Finder. If it doesn't exist yet, reveal the
-    /// deepest ancestor directory that does, so the user still lands in the right place.
+    /// Reveal the catalog in Finder if it exists, otherwise reveal the library folder
+    /// (created on demand) so the user still lands in the right place.
     private func revealInFinder() {
         let fm = FileManager.default
-        let url = resolvedCatalogURL
-        if fm.fileExists(atPath: url.path) {
-            NSWorkspace.shared.activateFileViewerSelecting([url])
+        if fm.fileExists(atPath: resolvedCatalogURL.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([resolvedCatalogURL])
             return
         }
-        var dir = url.deletingLastPathComponent()
-        while dir.path != "/", !fm.fileExists(atPath: dir.path) {
-            dir = dir.deletingLastPathComponent()
-        }
-        NSWorkspace.shared.activateFileViewerSelecting([dir])
+        try? fm.createDirectory(at: libraryURL, withIntermediateDirectories: true)
+        NSWorkspace.shared.activateFileViewerSelecting([libraryURL])
     }
 
     private func restoreFromFile() {

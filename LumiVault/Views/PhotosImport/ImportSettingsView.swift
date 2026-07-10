@@ -106,6 +106,17 @@ struct ImportSettingsView: View {
                 }
             }
 
+            Section("Local Library") {
+                HStack(spacing: 6) {
+                    Image(systemName: "internaldrive")
+                    Text("~/Pictures/LumiVault")
+                        .font(Constants.Design.monoBody)
+                }
+                Text("Holds your catalog and its recovery files. Images are archived to the volumes and cloud storage selected below — they're kept in the library only if no destination is available.")
+                    .font(Constants.Design.monoCaption)
+                    .foregroundStyle(.tertiary)
+            }
+
             Section("External Volumes") {
                 if volumes.isEmpty {
                     Text("No volumes configured. Add volumes in Settings.")

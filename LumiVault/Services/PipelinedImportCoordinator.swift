@@ -175,8 +175,36 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         let encryptionKeyAvailable = await encryptionService.isKeyAvailable
         let needsEncryption = settings.encryptFiles && encryptionKeyAvailable
         let needsPAR2 = settings.generatePAR2
-        let needsCopy = !settings.targetVolumeIDs.isEmpty
         let needsUpload = settings.uploadToB2 && settings.b2Credentials != nil
+
+        // Resolve copy destinations up front — the channel wiring below depends on them.
+        // Images are archived only to the selected volumes (and B2); the library holds just
+        // the catalog. When no volume is reachable and B2 is off, the library steps in as a
+        // fallback destination so files still land somewhere durable — the import UI warns
+        // and gets the user's consent before this case is reached.
+        var resolvedVolumes: [ResolvedVolume] = []
+        var volumeRecords: [(volumeID: String, record: VolumeRecord)] = []
+        let volumeDescriptor = FetchDescriptor<VolumeRecord>()
+        let allVolumes = try modelContext.fetch(volumeDescriptor)
+        for vol in allVolumes where settings.targetVolumeIDs.contains(vol.volumeID) {
+            do {
+                let (url, refreshed) = try BookmarkResolver.resolveAccessAndRefresh(vol.bookmarkData)
+                if let refreshed { vol.bookmarkData = refreshed }
+                resolvedVolumes.append(ResolvedVolume(volumeID: vol.volumeID, label: vol.label, url: url))
+                volumeRecords.append((vol.volumeID, vol))
+            } catch {
+                progress.errors.append("Cannot access volume: \(vol.label) — \(error.localizedDescription)")
+            }
+        }
+        if resolvedVolumes.isEmpty && !needsUpload {
+            StorageResolver.ensureLibraryExists()
+            resolvedVolumes = [ResolvedVolume(
+                volumeID: Constants.Storage.libraryVolumeID,
+                label: Constants.Storage.libraryLabel,
+                url: Constants.Paths.libraryURL
+            )]
+        }
+        let needsCopy = !resolvedVolumes.isEmpty
 
         await MainActor.run {
             progress.phase = .importing
@@ -217,26 +245,6 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         // Encryption key (captured once)
         let encKey = needsEncryption ? await encryptionService.cachedKey : nil
         let encKeyId = needsEncryption ? await encryptionService.cachedKeyId : nil
-
-        // Resolve volumes once. Capture Sendable scalars for the off-main copy
-        // stage; keep the @Model references behind UnsafeSendable for the
-        // post-loop cleanup that mutates lastSyncedAt.
-        var resolvedVolumes: [ResolvedVolume] = []
-        var volumeRecords: [(volumeID: String, record: VolumeRecord)] = []
-        if needsCopy {
-            let volumeDescriptor = FetchDescriptor<VolumeRecord>()
-            let allVolumes = try modelContext.fetch(volumeDescriptor)
-            for vol in allVolumes where settings.targetVolumeIDs.contains(vol.volumeID) {
-                do {
-                    let (url, refreshed) = try BookmarkResolver.resolveAccessAndRefresh(vol.bookmarkData)
-                    if let refreshed { vol.bookmarkData = refreshed }
-                    resolvedVolumes.append(ResolvedVolume(volumeID: vol.volumeID, label: vol.label, url: url))
-                    volumeRecords.append((vol.volumeID, vol))
-                } catch {
-                    progress.errors.append("Cannot access volume: \(vol.label) — \(error.localizedDescription)")
-                }
-            }
-        }
 
         // Wrap non-Sendable values for Task capture. Always read inside MainActor.run.
         let ctx = UnsafeSendable(value: modelContext)
@@ -1193,7 +1201,8 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             }
             _ = progress.activeStages.remove(.copying)
         }
-        for vol in resolvedVolumes {
+        // The library URL was never security-scope-accessed, so skip it here.
+        for vol in resolvedVolumes where vol.volumeID != Constants.Storage.libraryVolumeID {
             vol.url.stopAccessingSecurityScopedResource()
         }
     }

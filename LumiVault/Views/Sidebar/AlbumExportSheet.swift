@@ -126,11 +126,13 @@ struct AlbumExportSheet: View {
         let snapshots = album.images.map { ExportImageSnapshot(from: $0) }
         totalImages = snapshots.count
 
-        // Resolve mounted volumes on MainActor
-        let mountedVolumes: [(volumeID: String, mountURL: URL)] = volumes.compactMap { vol in
-            guard let url = try? BookmarkResolver.resolveAndAccess(vol.bookmarkData) else { return nil }
-            return (vol.volumeID, url)
-        }
+        // Resolve mounted volumes on MainActor. The local library is prepended as the primary
+        // source (no security scope needed) so export can pull from ~/Pictures/LumiVault.
+        let mountedVolumes: [(volumeID: String, mountURL: URL)] =
+            [StorageResolver.libraryMounted()] + volumes.compactMap { vol in
+                guard let url = try? BookmarkResolver.resolveAndAccess(vol.bookmarkData) else { return nil }
+                return (vol.volumeID, url)
+            }
 
         let b2Credentials = loadB2Credentials()
         let encKey = await encryptionService.cachedKey
@@ -151,7 +153,7 @@ struct AlbumExportSheet: View {
                     errors.append("Refused to export: album name resolves outside the destination folder.")
                     phase = .complete
                 }
-                for (_, url) in mountedVolumes { url.stopAccessingSecurityScopedResource() }
+                for (volumeID, url) in mountedVolumes where volumeID != Constants.Storage.libraryVolumeID { url.stopAccessingSecurityScopedResource() }
                 return
             }
 
@@ -162,7 +164,7 @@ struct AlbumExportSheet: View {
                     errors.append("Failed to create destination folder: \(error.localizedDescription)")
                     phase = .complete
                 }
-                for (_, url) in mountedVolumes { url.stopAccessingSecurityScopedResource() }
+                for (volumeID, url) in mountedVolumes where volumeID != Constants.Storage.libraryVolumeID { url.stopAccessingSecurityScopedResource() }
                 return
             }
 
@@ -198,7 +200,7 @@ struct AlbumExportSheet: View {
                 }
             }
 
-            for (_, url) in mountedVolumes { url.stopAccessingSecurityScopedResource() }
+            for (volumeID, url) in mountedVolumes where volumeID != Constants.Storage.libraryVolumeID { url.stopAccessingSecurityScopedResource() }
 
             await MainActor.run {
                 phase = .complete

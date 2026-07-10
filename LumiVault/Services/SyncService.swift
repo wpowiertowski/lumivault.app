@@ -17,9 +17,8 @@ actor SyncService {
             self.usesICloud = true
         } else {
             #if DEBUG
-            // Fall back to local directory when iCloud is unavailable (e.g. no provisioning profile)
-            let fallbackPath = NSString(string: Constants.Paths.defaultCatalog).expandingTildeInPath
-            self.syncURL = URL(fileURLWithPath: fallbackPath)
+            // Fall back to the local catalog location when iCloud is unavailable (e.g. no provisioning profile)
+            self.syncURL = Constants.Paths.resolvedCatalogURL
             self.usesICloud = false
             #else
             // In release, set a dummy URL — isICloudAvailable will be false

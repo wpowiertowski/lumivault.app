@@ -60,8 +60,7 @@ struct PhotoGridItem: View {
         var didAttemptGeneration = false
 
         for location in locations {
-            guard let volume = volumes.first(where: { $0.volumeID == location.volumeID }),
-                  let mountURL = try? BookmarkResolver.resolveAndAccess(volume.bookmarkData) else {
+            guard let (mountURL, scoped) = StorageResolver.resolveMount(for: location, volumes: volumes) else {
                 continue
             }
             let fileURL = mountURL.appendingPathComponent(location.relativePath)
@@ -78,12 +77,12 @@ struct PhotoGridItem: View {
                 } else {
                     try await thumbnailService.generateThumbnail(for: fileURL, sha256: sha256)
                 }
-                mountURL.stopAccessingSecurityScopedResource()
+                if scoped { mountURL.stopAccessingSecurityScopedResource() }
                 thumbnail = await thumbnailService.thumbnail(for: sha256, size: .grid)
                 image.thumbnailState = .generated
                 return
             } catch {
-                mountURL.stopAccessingSecurityScopedResource()
+                if scoped { mountURL.stopAccessingSecurityScopedResource() }
                 continue
             }
         }

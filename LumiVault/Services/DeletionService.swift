@@ -59,6 +59,9 @@ actor DeletionService {
         progress: DeletionProgress,
         entireAlbum: Bool = true
     ) async -> DeletionResult {
+        // The local library is included in `mountedVolumes` by the production callers (deletion /
+        // resync flows) via `StorageResolver.libraryMounted()`, so this service stays a pure
+        // function of its inputs and unit tests never touch the real `~/Pictures/LumiVault`.
         var result = DeletionResult()
         let fm = FileManager.default
 
