@@ -307,8 +307,11 @@ final class SyncCoordinator: @unchecked Sendable {
     func startMonitoring() async {
         guard let service = syncService else { return }
 
-        await service.startMonitoring {
-            Task { @MainActor [weak self] in
+        // [weak self] must be on the outer closure: an inner-only weak capture
+        // conflicts with the outer closure's implicit strong capture of self,
+        // which newer Swift toolchains reject outright.
+        await service.startMonitoring { [weak self] in
+            Task { @MainActor in
                 await self?.performSync()
             }
         }
