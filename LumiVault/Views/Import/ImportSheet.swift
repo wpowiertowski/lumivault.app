@@ -33,8 +33,14 @@ struct ImportSheet: View {
         }
     }
 
+    @State private var storageWarningAcknowledged = false
+
     private var hasStorage: Bool {
         b2Credentials != nil || !connectedVolumes.isEmpty
+    }
+
+    private var showingStorageWarning: Bool {
+        !hasStorage && !storageWarningAcknowledged
     }
 
     var body: some View {
@@ -42,17 +48,20 @@ struct ImportSheet: View {
             Text("Import Photos")
                 .font(Constants.Design.monoTitle3)
 
-            if !hasStorage {
+            if showingStorageWarning {
                 ContentUnavailableView {
-                    Label("No Storage Configured", systemImage: "externaldrive.trianglebadge.exclamationmark")
+                    Label("No Archive Storage Configured", systemImage: "externaldrive.trianglebadge.exclamationmark")
                 } description: {
-                    Text("Connect an external volume or configure Backblaze B2 in Settings before importing.")
+                    Text("LumiVault archives photos to external volumes and Backblaze B2, but none are set up yet. Add them in Settings first — or continue without them, and your photos will be stored in the library at ~/Pictures/LumiVault until you add archive storage.")
                 } actions: {
                     Button("Open Settings...") {
                         dismiss()
                         openSettings()
                     }
                     .buttonStyle(.borderedProminent)
+                    Button("Continue Without Archive Storage") {
+                        storageWarningAcknowledged = true
+                    }
                 }
             } else if didComplete {
                 completeView
@@ -75,7 +84,7 @@ struct ImportSheet: View {
 
                 Spacer()
 
-                if hasStorage && !isProcessing && !didComplete {
+                if !showingStorageWarning && !isProcessing && !didComplete {
                     Button("Choose Files...") { chooseFiles() }
                         .accessibilityIdentifier("import.chooseFiles")
 

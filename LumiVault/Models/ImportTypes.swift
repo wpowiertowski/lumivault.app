@@ -149,7 +149,7 @@ enum ImportPhase: String, Sendable {
     case hashing = "Hashing & finding duplicates"
     case encrypting = "Encrypting files"
     case par2 = "Generating PAR2 recovery data"
-    case copying = "Copying to external volumes"
+    case copying = "Copying to storage"
     case uploading = "Uploading to B2"
     case cataloging = "Processing images"
     case complete = "Complete"

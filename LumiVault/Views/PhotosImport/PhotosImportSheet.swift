@@ -29,8 +29,25 @@ struct PhotosImportSheet: View {
     @State private var catalogAlbumCounts: [String: Int] = [:]
     @State private var pendingImports: [PendingAlbumImport] = []
     @State private var isComputingDates = false
+    @State private var storageWarningAcknowledged = false
 
     private var isMultiAlbum: Bool { selectedAlbumIds.count > 1 }
+
+    /// Whether any real archive destination (connected volume or B2) is available.
+    /// When false, the user must acknowledge the library-fallback warning before importing.
+    private var hasStorage: Bool {
+        if B2Credentials.isConfigured { return true }
+        return volumes.contains { volume in
+            (try? BookmarkResolver.resolveAndAccess(volume.bookmarkData)).map {
+                $0.stopAccessingSecurityScopedResource()
+                return true
+            } ?? false
+        }
+    }
+
+    private var showingStorageWarning: Bool {
+        step == .pickAlbum && !hasStorage && !storageWarningAcknowledged
+    }
 
     private var visibleSteps: [ImportStep] {
         isMultiAlbum
@@ -39,23 +56,6 @@ struct PhotosImportSheet: View {
     }
 
     private let catalogService = CatalogService()
-
-    private var hasB2: Bool {
-        B2Credentials.isConfigured
-    }
-
-    private var connectedVolumes: [VolumeRecord] {
-        volumes.filter { volume in
-            (try? BookmarkResolver.resolveAndAccess(volume.bookmarkData)).map {
-                $0.stopAccessingSecurityScopedResource()
-                return true
-            } ?? false
-        }
-    }
-
-    private var hasStorage: Bool {
-        hasB2 || !connectedVolumes.isEmpty
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -67,27 +67,27 @@ struct PhotosImportSheet: View {
 
             // Content
             Group {
-                if !hasStorage && step == .pickAlbum {
-                    storageRequiredView
-                } else {
-                    switch step {
-                    case .pickAlbum:
+                switch step {
+                case .pickAlbum:
+                    if showingStorageWarning {
+                        storageWarningView
+                    } else {
                         albumPickerStep
-                    case .configure:
-                        configureStep
-                    case .confirmDates:
-                        confirmDatesStep
-                    case .importing:
-                        if showingGames {
-                            GameStepView(progress: gameProgress) {
-                                showingGames = false
-                            }
-                        } else {
-                            importingStep
-                        }
-                    case .complete:
-                        completeStep
                     }
+                case .configure:
+                    configureStep
+                case .confirmDates:
+                    confirmDatesStep
+                case .importing:
+                    if showingGames {
+                        GameStepView(progress: gameProgress) {
+                            showingGames = false
+                        }
+                    } else {
+                        importingStep
+                    }
+                case .complete:
+                    completeStep
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -107,7 +107,7 @@ struct PhotosImportSheet: View {
 
                 switch step {
                 case .pickAlbum:
-                    if hasStorage {
+                    if !showingStorageWarning {
                         Button("Next") { goToSettings() }
                             .keyboardShortcut(.defaultAction)
                             .disabled(selectedAlbumIds.isEmpty)
@@ -190,17 +190,22 @@ struct PhotosImportSheet: View {
 
     // MARK: - Steps
 
-    private var storageRequiredView: some View {
+    private var storageWarningView: some View {
         ContentUnavailableView {
-            Label("No Storage Configured", systemImage: "externaldrive.trianglebadge.exclamationmark")
+            Label("No Archive Storage Configured", systemImage: "externaldrive.trianglebadge.exclamationmark")
         } description: {
-            Text("Connect an external volume or configure Backblaze B2 in Settings before importing.")
+            Text("LumiVault archives photos to external volumes and Backblaze B2, but none are set up yet. Add them in Settings first — or continue without them, and your photos will be stored in the library at ~/Pictures/LumiVault until you add archive storage.")
         } actions: {
             Button("Open Settings...") {
                 dismiss()
                 openSettings()
             }
             .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("import.openSettings")
+            Button("Continue Without Archive Storage") {
+                storageWarningAcknowledged = true
+            }
+            .accessibilityIdentifier("import.continueWithoutStorage")
         }
     }
 
@@ -437,7 +442,7 @@ struct PhotosImportSheet: View {
                         .foregroundStyle(.red)
                 }
                 if progress.filesCopied > 0 {
-                    Text("\(progress.filesCopied) copied to volumes")
+                    Text("\(progress.filesCopied) copied to storage")
                 }
                 if progress.filesUploaded > 0 {
                     Text("\(progress.filesUploaded) uploaded to B2")

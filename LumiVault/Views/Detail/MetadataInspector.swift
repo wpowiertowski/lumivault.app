@@ -200,6 +200,8 @@ struct MetadataInspector: View {
     }
 
     private func isVolumeConnected(_ volumeID: String) -> Bool {
+        // The local library is always available (direct Pictures-entitlement path).
+        if volumeID == Constants.Storage.libraryVolumeID { return true }
         guard let volume = volumes.first(where: { $0.volumeID == volumeID }) else {
             return false
         }
@@ -210,7 +212,8 @@ struct MetadataInspector: View {
     }
 
     private func volumeLabel(for volumeID: String) -> String {
-        volumes.first(where: { $0.volumeID == volumeID })?.label ?? volumeID
+        if volumeID == Constants.Storage.libraryVolumeID { return Constants.Storage.libraryLabel }
+        return volumes.first(where: { $0.volumeID == volumeID })?.label ?? volumeID
     }
 
     private func hasExifContent(_ exif: EXIFData) -> Bool {

@@ -5,6 +5,10 @@ actor ReconciliationService {
     private let b2Service = B2Service()
     private let hasher = HasherService()
 
+    // The local library is included as a `VolumeSnapshot` by the production call sites (the
+    // Integrity views) via `StorageResolver.librarySnapshot()`, so this service stays a pure
+    // function of its inputs and unit tests never touch the real `~/Pictures/LumiVault`.
+
     // MARK: - Full Reconciliation
 
     func reconcile(

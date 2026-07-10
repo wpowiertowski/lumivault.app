@@ -253,6 +253,8 @@ struct ReconciliationView: View {
             guard let url = try? BookmarkResolver.resolveAndAccess(volume.bookmarkData) else { return nil }
             return VolumeSnapshot(volumeID: volume.volumeID, label: volume.label, mountURL: url)
         }
+        // Include the local library as a first-class reconcile/repair/heal target.
+        let allTargets = [StorageResolver.librarySnapshot()] + volumeSnapshots
 
         let b2Creds = b2Enabled ? B2Credentials.load() : nil
 
@@ -264,7 +266,7 @@ struct ReconciliationView: View {
         Task { @MainActor in
             var result = await reconciliationService.reconcile(
                 snapshots: snapshots,
-                volumes: volumeSnapshots,
+                volumes: allTargets,
                 b2Credentials: b2Creds,
                 verifyHashes: verifyHashes,
                 progress: progress
@@ -275,7 +277,7 @@ struct ReconciliationView: View {
                 let repairs = await reconciliationService.repairCorruptedFiles(
                     discrepancies: result.discrepancies,
                     snapshots: snapshots,
-                    volumes: volumeSnapshots,
+                    volumes: allTargets,
                     progress: progress
                 )
                 self.repairResults = repairs
@@ -288,7 +290,7 @@ struct ReconciliationView: View {
                 let heals = await reconciliationService.healReplicas(
                     discrepancies: result.discrepancies,
                     snapshots: snapshots,
-                    volumes: volumeSnapshots,
+                    volumes: allTargets,
                     b2Credentials: b2Creds,
                     progress: progress
                 )
@@ -298,7 +300,7 @@ struct ReconciliationView: View {
                 if heals.contains(where: { if case .failed = $0.outcome { return false } else { return true } }) {
                     result = await reconciliationService.reconcile(
                         snapshots: rebuildSnapshots(),
-                        volumes: volumeSnapshots,
+                        volumes: allTargets,
                         b2Credentials: b2Creds,
                         verifyHashes: verifyHashes,
                         progress: progress
@@ -384,10 +386,40 @@ struct ReconciliationView: View {
 
 // MARK: - Subviews
 
+/// Full-detail popover shown when an integrity row is double-clicked. Rows truncate
+/// their text to one line, and the Settings window is fixed-size, so this is the
+/// only place long paths/hashes are readable (and selectable) in full.
+struct IssueDetailPopover: View {
+    let title: String
+    let fields: [(label: String, value: String)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(Constants.Design.monoHeadline)
+                .textSelection(.enabled)
+            ForEach(Array(fields.enumerated()), id: \.offset) { _, field in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(field.label.uppercased())
+                        .font(Constants.Design.monoCaption2)
+                        .foregroundStyle(.tertiary)
+                    Text(field.value)
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 400, alignment: .leading)
+    }
+}
+
 struct DiscrepancyRow: View {
     let discrepancy: Discrepancy
     var repairResult: RepairResult? = nil
     var volumeLabels: [String: String] = [:]
+    @State private var showingDetails = false
 
     private func volumeName(_ vid: String) -> String {
         volumeLabels[vid] ?? vid
@@ -413,6 +445,34 @@ struct DiscrepancyRow: View {
                 }
             }
         }
+        .help(description)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { showingDetails = true }
+        .popover(isPresented: $showingDetails) {
+            IssueDetailPopover(title: discrepancy.filename, fields: detailFields)
+        }
+    }
+
+    private var detailFields: [(label: String, value: String)] {
+        var fields: [(String, String)] = [("Issue", detailDescription)]
+        if case .orphanOnVolume(_, let path) = discrepancy.kind {
+            fields.append(("Path on volume", path))
+        }
+        if !discrepancy.sha256.isEmpty {
+            fields.append(("SHA-256", discrepancy.sha256))
+        }
+        if let repair = repairResult {
+            fields.append(("Repair", repairDescription(repair)))
+        }
+        return fields
+    }
+
+    /// Like `description`, but without abbreviations — full hashes for mismatches.
+    private var detailDescription: String {
+        if case .hashMismatch(let vid, let expected, let actual) = discrepancy.kind {
+            return "Hash mismatch on \(volumeName(vid)).\nExpected: \(expected)\nActual: \(actual)"
+        }
+        return description
     }
 
     private var iconName: String {
@@ -474,6 +534,7 @@ struct DiscrepancyRow: View {
 
 struct RepairResultRow: View {
     let result: RepairResult
+    @State private var showingDetails = false
 
     var body: some View {
         HStack {
@@ -488,6 +549,15 @@ struct RepairResultRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+        }
+        .help(description)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { showingDetails = true }
+        .popover(isPresented: $showingDetails) {
+            IssueDetailPopover(title: result.filename, fields: [
+                ("Result", description),
+                ("SHA-256", result.sha256),
+            ])
         }
     }
 
@@ -517,6 +587,7 @@ struct RepairResultRow: View {
 struct HealResultRow: View {
     let result: HealResult
     var volumeLabels: [String: String] = [:]
+    @State private var showingDetails = false
 
     private func volumeName(_ vid: String) -> String { volumeLabels[vid] ?? vid }
 
@@ -540,6 +611,15 @@ struct HealResultRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+        }
+        .help(description)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { showingDetails = true }
+        .popover(isPresented: $showingDetails) {
+            IssueDetailPopover(title: result.filename, fields: [
+                ("Result", description),
+                ("SHA-256", result.sha256),
+            ])
         }
     }
 

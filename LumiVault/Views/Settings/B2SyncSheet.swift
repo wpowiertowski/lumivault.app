@@ -144,19 +144,21 @@ struct B2SyncSheet: View {
         alreadyInB2Count = 0
         errors = []
 
-        // Resolve volume bookmarks
+        // Resolve volume bookmarks, plus the local library as a source for files that live
+        // only in ~/Pictures/LumiVault (the primary copy).
         var resolvedVolumes: [String: URL] = [:]
         for volume in volumes {
             if let url = try? BookmarkResolver.resolveAndAccess(volume.bookmarkData) {
                 resolvedVolumes[volume.volumeID] = url
             }
         }
+        resolvedVolumes[Constants.Storage.libraryVolumeID] = Constants.Paths.libraryURL
 
         let b2Service = B2Service()
 
         Task { @MainActor in
             defer {
-                for (_, url) in resolvedVolumes {
+                for (volumeID, url) in resolvedVolumes where volumeID != Constants.Storage.libraryVolumeID {
                     url.stopAccessingSecurityScopedResource()
                 }
             }

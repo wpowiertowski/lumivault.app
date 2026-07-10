@@ -181,7 +181,10 @@ struct VolumeSyncSheet: View {
             )
         }
         let skippedNoAlbum = images.count - snapshots.count
-        let sourceVolumePaths: [(volumeID: String, url: URL)] = sourceVolumes.map { ($0.0.volumeID, $0.1) }
+        // Include the local library as a source — many files live only in ~/Pictures/LumiVault
+        // (the primary copy). The target is always a real volume, so the library is a distinct source.
+        let sourceVolumePaths: [(volumeID: String, url: URL)] =
+            sourceVolumes.map { ($0.0.volumeID, $0.1) } + [StorageResolver.libraryMounted()]
 
         Task { @MainActor in
             defer {

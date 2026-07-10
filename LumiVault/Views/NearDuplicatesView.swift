@@ -174,7 +174,7 @@ struct NearDuplicatesView: View {
             let service = DeletionService()
             let result = await service.deleteImageFiles(
                 images: [input],
-                mountedVolumes: mountedVolumes,
+                mountedVolumes: [StorageResolver.libraryMounted()] + mountedVolumes,
                 b2Credentials: b2Credentials,
                 progress: progress,
                 entireAlbum: false

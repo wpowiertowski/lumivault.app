@@ -165,7 +165,7 @@ private struct FirstLaunchView: View {
                     welcomeSection(
                         icon: "archivebox",
                         title: "What LumiVault Does",
-                        body: "LumiVault archives albums from your Photos library onto external drives and Backblaze B2 cloud storage. Every file is checked for duplicates via SHA-256 and protected with PAR2 error correction so your photos survive bit rot and storage failures."
+                        body: "LumiVault archives albums from your Photos library onto external drives and Backblaze B2 cloud storage, indexed by a catalog kept in **~/Pictures/LumiVault**. Every file is checked for duplicates via SHA-256 and protected with PAR2 error correction so your photos survive bit rot and storage failures."
                     )
 
                     welcomeSection(
@@ -180,7 +180,11 @@ private struct FirstLaunchView: View {
                             )
                             setupStep(
                                 number: "2",
-                                text: "Configure **Backblaze B2** credentials for off-site cloud backup. B2 gives you a second copy in case your drive is lost or damaged."
+                                text: "Configure **Backblaze B2** credentials for off-site cloud backup, in case your drive is lost or damaged."
+                            )
+                            setupStep(
+                                number: "3",
+                                text: "No storage yet? You can still import \u{2014} photos are kept in your library folder until you add a volume or B2."
                             )
                         }
                     }
@@ -188,7 +192,7 @@ private struct FirstLaunchView: View {
                     welcomeSection(
                         icon: "doc.zipper",
                         title: "Files You'll See",
-                        body: "On your volumes, each photo is stored alongside PAR2 parity files:"
+                        body: "In your archive storage, each photo is stored alongside PAR2 parity files:"
                     ) {
                         VStack(alignment: .leading, spacing: 6) {
                             fileRow(name: "IMG_1234.jpg", desc: "Your archived photo")

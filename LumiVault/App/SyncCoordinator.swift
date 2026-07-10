@@ -26,6 +26,10 @@ final class SyncCoordinator: @unchecked Sendable {
     // MARK: - Setup
 
     func setup() async {
+        // Move a pre-existing catalog out of the sandbox container into the user-accessible
+        // library, one time, before anything reads it.
+        migrateLegacyCatalogIfNeeded()
+
         // Load local catalog
         let catalogURL = Constants.Paths.resolvedCatalogURL
 
@@ -329,6 +333,30 @@ final class SyncCoordinator: @unchecked Sendable {
     }
 
     // MARK: - Helpers
+
+    /// One-time migration: relocate `catalog.json` and its `.sha256`/`.par2`/`.vol*.par2` sidecars
+    /// from the legacy container path (`~/.lumivault/`) into the user-accessible library
+    /// (`~/Pictures/LumiVault/`). No-op when an explicit `catalogPath` override is set, when the
+    /// library already has a catalog, or when there's nothing to migrate.
+    private func migrateLegacyCatalogIfNeeded() {
+        let fm = FileManager.default
+        StorageResolver.ensureLibraryExists()
+
+        guard UserDefaults.standard.string(forKey: "catalogPath") == nil else { return }
+
+        let target = Constants.Paths.libraryURL.appendingPathComponent("catalog.json")
+        let legacy = Constants.Paths.legacyContainerCatalogURL
+        guard !fm.fileExists(atPath: target.path), fm.fileExists(atPath: legacy.path) else { return }
+
+        let legacyDir = legacy.deletingLastPathComponent()
+        let targetDir = target.deletingLastPathComponent()
+        let names = (try? fm.contentsOfDirectory(atPath: legacyDir.path)) ?? []
+        for name in names where name == "catalog.json" || name.hasPrefix("catalog.json.") {
+            let to = targetDir.appendingPathComponent(name)
+            guard !fm.fileExists(atPath: to.path) else { continue }
+            try? fm.moveItem(at: legacyDir.appendingPathComponent(name), to: to)
+        }
+    }
 
     /// Resolve all VolumeRecord bookmarks into VolumeSnapshot values.
     /// Must be called on MainActor (accesses SwiftData).
