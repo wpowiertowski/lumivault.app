@@ -3,6 +3,7 @@ import SwiftUI
 struct B2SettingsView: View {
     @AppStorage("b2Enabled") private var b2Enabled = false
     @AppStorage("b2BucketName") private var bucketName = ""
+    @AppStorage(B2Credentials.syncViaICloudKeychainKey) private var syncCredentialsViaICloud = false
     @State private var keyId = ""
     @State private var applicationKey = ""
     @State private var bucketId = ""
@@ -42,6 +43,15 @@ struct B2SettingsView: View {
                     SecureField("Application Key", text: $applicationKey)
                         .font(Constants.Design.monoBody)
                         .accessibilityIdentifier("b2.appKey")
+
+                    Toggle("Sync credentials via iCloud Keychain", isOn: $syncCredentialsViaICloud)
+                        .onChange(of: syncCredentialsViaICloud) { _, enabled in
+                            B2Credentials.setSyncViaICloudKeychain(enabled)
+                        }
+                        .accessibilityIdentifier("b2.syncCredentials")
+                    Text("When enabled, your B2 application key is stored in iCloud Keychain so your other Macs can upload and download without re-entering it. When disabled, it stays on this Mac only.")
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(.tertiary)
                 }
 
                 Section("Bucket") {

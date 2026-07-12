@@ -12,6 +12,24 @@ struct B2Credentials: Codable, Sendable {
     /// Keychain account under which the credentials blob is stored.
     private static let keychainAccount = "b2.credentials"
 
+    /// When true, credentials are stored as an iCloud Keychain (synchronizable) item so
+    /// the user's other Macs can read them. Off by default: device-only storage is the
+    /// hardened baseline, syncing a bucket-wide bearer secret is a deliberate opt-in.
+    static let syncViaICloudKeychainKey = "b2SyncCredentialsViaICloud"
+
+    static var syncViaICloudKeychain: Bool {
+        UserDefaults.standard.bool(forKey: syncViaICloudKeychainKey)
+    }
+
+    /// Toggle iCloud Keychain sync, migrating any stored credentials to the new mode.
+    static func setSyncViaICloudKeychain(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: syncViaICloudKeychainKey)
+        guard let existing = load(),
+              let data = try? JSONEncoder().encode(existing) else { return }
+        KeychainStore.delete(account: keychainAccount)
+        try? KeychainStore.set(data, account: keychainAccount, synchronizable: enabled)
+    }
+
     // MARK: - Persistence (Keychain-backed)
 
     /// Load credentials from the Keychain, migrating any legacy UserDefaults copy first.
@@ -30,10 +48,13 @@ struct B2Credentials: Codable, Sendable {
         return KeychainStore.get(account: keychainAccount) != nil
     }
 
-    /// Persist these credentials to the Keychain.
+    /// Persist these credentials to the Keychain, honoring the iCloud Keychain opt-in.
     func save() throws {
         let data = try JSONEncoder().encode(self)
-        try KeychainStore.set(data, account: Self.keychainAccount)
+        // Remove the other-mode variant first so stale device-only credentials can't
+        // shadow (or survive alongside) the synced item.
+        KeychainStore.delete(account: Self.keychainAccount)
+        try KeychainStore.set(data, account: Self.keychainAccount, synchronizable: Self.syncViaICloudKeychain)
     }
 
     /// Remove stored credentials from both the Keychain and any legacy UserDefaults copy.

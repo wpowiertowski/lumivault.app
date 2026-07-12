@@ -187,7 +187,10 @@ final class MetadataQueryHolder {
         stop()
 
         let query = NSMetadataQuery()
-        query.predicate = NSPredicate(format: "%K == 'catalog.json'", NSMetadataItemFSNameKey)
+        // settings.json shares the container and the same change-driven sync cycle.
+        query.predicate = NSPredicate(
+            format: "%K IN %@", NSMetadataItemFSNameKey, ["catalog.json", "settings.json"]
+        )
         query.searchScopes = [NSMetadataQueryUbiquitousDataScope]
 
         NotificationCenter.default.addObserver(

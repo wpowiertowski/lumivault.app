@@ -4,11 +4,18 @@ import SwiftData
 struct VolumesSettingsView: View {
     @Query private var volumes: [VolumeRecord]
     @Environment(\.modelContext) private var modelContext
+    @Environment(SyncCoordinator.self) private var syncCoordinator
     @State private var showingSyncAlert = false
     @State private var showingSyncSheet = false
     @State private var newlyAddedVolume: VolumeRecord?
     @State private var volumeToRemove: VolumeRecord?
     @State private var showingRemoveConfirmation = false
+
+    /// Volumes registered on the user's other Macs (via synced settings) but not here.
+    private var remoteOnlyVolumes: [VolumeIdentity] {
+        let localIDs = Set(volumes.map(\.volumeID))
+        return SyncedSettings.knownRemoteVolumes().filter { !localIDs.contains($0.volumeID) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -61,6 +68,31 @@ struct VolumesSettingsView: View {
                     }
                     .onDelete(perform: deleteVolumes)
                 }
+            }
+
+            if !remoteOnlyVolumes.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Registered on your other Macs")
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(.secondary)
+                    ForEach(remoteOnlyVolumes, id: \.volumeID) { identity in
+                        HStack {
+                            Image(systemName: "externaldrive.badge.icloud")
+                                .foregroundStyle(.secondary)
+                            Text(identity.label)
+                                .font(Constants.Design.monoBody)
+                            Spacer()
+                            Button("Locate...") { locateVolume(identity) }
+                                .accessibilityIdentifier("volumes.locate.\(identity.volumeID)")
+                        }
+                    }
+                    Text("Connect the drive and click Locate to use the same replica set on this Mac.")
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
             }
 
             Divider()
@@ -120,6 +152,34 @@ struct VolumesSettingsView: View {
 
             newlyAddedVolume = volume
             showingSyncAlert = true
+            Task { await syncCoordinator.syncSettings() }
+        }
+    }
+
+    /// Register a volume known from another Mac under its existing `volumeID`, so
+    /// catalog `storageLocations` recorded elsewhere resolve on this Mac too.
+    private func locateVolume(_ identity: VolumeIdentity) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.message = "Select the location of \"\(identity.label)\" on this Mac"
+
+        if panel.runModal() == .OK, let url = panel.url {
+            guard let bookmark = try? url.bookmarkData(
+                options: .withSecurityScope,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            ) else { return }
+
+            let volume = VolumeRecord(
+                volumeID: identity.volumeID,
+                label: identity.label,
+                mountPoint: url.path,
+                bookmarkData: bookmark
+            )
+            modelContext.insert(volume)
+            try? modelContext.save()
+            Task { await syncCoordinator.syncSettings() }
         }
     }
 
@@ -128,6 +188,7 @@ struct VolumesSettingsView: View {
         modelContext.delete(volume)
         try? modelContext.save()
         volumeToRemove = nil
+        Task { await syncCoordinator.syncSettings() }
     }
 
     private func deleteVolumes(at offsets: IndexSet) {
@@ -135,5 +196,6 @@ struct VolumesSettingsView: View {
             modelContext.delete(volumes[index])
         }
         try? modelContext.save()
+        Task { await syncCoordinator.syncSettings() }
     }
 }

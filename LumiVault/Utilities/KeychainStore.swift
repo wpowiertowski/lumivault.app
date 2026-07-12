@@ -6,7 +6,8 @@ import Security
 /// Used for Backblaze B2 credentials, which are long-lived bearer secrets that grant
 /// read/write/delete on the bucket. The Keychain keeps them out of the app's
 /// world-readable (to the user's own uid) preferences plist and gates access via the
-/// system. Items are scoped to this device and never synced to iCloud.
+/// system. Items are device-scoped by default; passing `synchronizable: true` stores
+/// the item in iCloud Keychain so the user's other Macs can read it (opt-in).
 enum KeychainStore {
     enum KeychainError: Error {
         case unexpectedStatus(OSStatus)
@@ -14,17 +15,23 @@ enum KeychainStore {
 
     private static let service = "app.lumivault.credentials"
 
-    /// Store (or replace) `data` under `account`. Idempotent.
-    static func set(_ data: Data, account: String) throws {
+    /// Store (or replace) `data` under `account`. Idempotent within one `synchronizable`
+    /// mode; the query only matches items of the same mode, so callers switching modes
+    /// must `delete` first (see `B2Credentials.setSyncViaICloudKeychain`).
+    static func set(_ data: Data, account: String, synchronizable: Bool = false) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account
+            kSecAttrAccount as String: account,
+            kSecAttrSynchronizable as String: synchronizable
         ]
 
         let attributes: [String: Any] = [
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            // ThisDeviceOnly accessibility is incompatible with iCloud Keychain sync.
+            kSecAttrAccessible as String: synchronizable
+                ? kSecAttrAccessibleAfterFirstUnlock
+                : kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
 
         let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
@@ -40,12 +47,14 @@ enum KeychainStore {
         throw KeychainError.unexpectedStatus(updateStatus)
     }
 
-    /// Fetch the data stored under `account`, or nil if absent.
+    /// Fetch the data stored under `account`, or nil if absent. Matches both device-only
+    /// and iCloud-synced items, so a credential saved on another Mac is found here.
     static func get(account: String) -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
@@ -56,12 +65,14 @@ enum KeychainStore {
         return item as? Data
     }
 
-    /// Remove the item stored under `account`. No-op if absent.
+    /// Remove the item stored under `account` — both device-only and synced variants.
+    /// No-op if absent.
     static func delete(account: String) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account
+            kSecAttrAccount as String: account,
+            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny
         ]
         SecItemDelete(query as CFDictionary)
     }

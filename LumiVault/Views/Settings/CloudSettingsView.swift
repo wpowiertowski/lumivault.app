@@ -7,7 +7,7 @@ struct CloudSettingsView: View {
     var body: some View {
         Form {
             Section("iCloud Sync") {
-                Toggle("Enable iCloud catalog sync", isOn: $iCloudSyncEnabled)
+                Toggle("Enable iCloud sync", isOn: $iCloudSyncEnabled)
                     .onChange(of: iCloudSyncEnabled) { _, enabled in
                         Task { await syncCoordinator.onSyncToggleChanged(enabled: enabled) }
                     }
@@ -22,7 +22,7 @@ struct CloudSettingsView: View {
                 }
 
                 if iCloudSyncEnabled {
-                    Text("Your catalog.json will be synced via the iCloud app container, enabling access from all your Macs.")
+                    Text("Your catalog and settings (import defaults, B2 configuration, encryption setup, volume list) are synced via the iCloud app container, enabling access from all your Macs.")
                         .font(Constants.Design.monoCaption)
                         .foregroundStyle(.secondary)
 
