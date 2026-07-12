@@ -21,8 +21,10 @@ actor EncryptionService {
     private(set) var cachedKeyId: String?
 
     private static let pbkdf2Iterations: UInt32 = 600_000
-    private static let saltKey = "encryption.salt"
-    private static let keyIdKey = "encryption.keyId"
+    // Internal (not private): SyncedSettings reads/writes these keys directly so the
+    // salt and keyId can travel to other Macs via settings.json.
+    nonisolated static let saltDefaultsKey = "encryption.salt"
+    nonisolated static let keyIdDefaultsKey = "encryption.keyId"
     private static let infoString = "LumiVault-file-encryption-v1"
 
     var isKeyAvailable: Bool { cachedKey != nil }
@@ -72,23 +74,23 @@ actor EncryptionService {
     // MARK: - Salt Management
 
     nonisolated static func getOrCreateSalt() -> Data {
-        if let existing = UserDefaults.standard.data(forKey: saltKey) {
+        if let existing = UserDefaults.standard.data(forKey: saltDefaultsKey) {
             return existing
         }
         var salt = Data(count: 32)
         salt.withUnsafeMutableBytes { buffer in
             _ = SecRandomCopyBytes(kSecRandomDefault, 32, buffer.baseAddress!)
         }
-        UserDefaults.standard.set(salt, forKey: saltKey)
+        UserDefaults.standard.set(salt, forKey: saltDefaultsKey)
         return salt
     }
 
     nonisolated static func storedKeyId() -> String? {
-        UserDefaults.standard.string(forKey: keyIdKey)
+        UserDefaults.standard.string(forKey: keyIdDefaultsKey)
     }
 
     nonisolated static func storeKeyId(_ keyId: String) {
-        UserDefaults.standard.set(keyId, forKey: keyIdKey)
+        UserDefaults.standard.set(keyId, forKey: keyIdDefaultsKey)
     }
 
     // MARK: - Encrypt / Decrypt Data

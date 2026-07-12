@@ -16,7 +16,10 @@ final class SyncCoordinator: @unchecked Sendable {
     private let catalogService = CatalogService()
     private let backupService = CatalogBackupService()
     private var syncService: SyncService?
+    private let settingsSyncService = SettingsSyncService()
     private var isSyncing = false
+    private var settingsPushDebounce: Task<Void, Never>?
+    private var defaultsObserver: NSObjectProtocol?
     var modelContainer: ModelContainer?
 
     enum SyncStatus: Sendable {
@@ -57,6 +60,27 @@ final class SyncCoordinator: @unchecked Sendable {
             await performSync()
             await startMonitoring()
         }
+
+        // Push local preference changes (import defaults, B2, encryption, …) to the
+        // synced settings document. Debounced; syncSettings() is a no-op when nothing
+        // in the document actually changed, so unrelated defaults writes are cheap.
+        await MainActor.run {
+            defaultsObserver = NotificationCenter.default.addObserver(
+                forName: UserDefaults.didChangeNotification,
+                object: UserDefaults.standard,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.settingsPushDebounce?.cancel()
+                    self.settingsPushDebounce = Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        guard !Task.isCancelled else { return }
+                        await self.syncSettings()
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Public API
@@ -80,6 +104,12 @@ final class SyncCoordinator: @unchecked Sendable {
 
         do {
             try await service.sync()
+            // Rebuild SwiftData from the merged catalog so @Query-backed views reflect
+            // albums/images that arrived from other Macs. Without this, a second Mac
+            // pulls catalog.json but the sidebar and grid stay empty.
+            let merged = await catalogService.currentCatalog()
+            await MainActor.run { hydrateSwiftData(from: merged) }
+            await syncSettings()
             await MainActor.run {
                 syncStatus = .synced
                 lastSyncedAt = .now
@@ -304,6 +334,23 @@ final class SyncCoordinator: @unchecked Sendable {
         try? await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
     }
 
+    /// Sync the settings document (import defaults, B2/encryption config, volume
+    /// identities). Safe to call often — pushes only when the document content changed.
+    /// Views call this after mutating state that lives outside UserDefaults (volumes).
+    func syncSettings() async {
+        let enabled = await MainActor.run {
+            UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
+        }
+        guard enabled, isICloudAvailable else { return }
+
+        let localVolumes = await MainActor.run { localVolumeIdentities() }
+        do {
+            try await settingsSyncService.sync(localVolumes: localVolumes)
+        } catch {
+            print("[SettingsSync] \(error.localizedDescription)")
+        }
+    }
+
     func startMonitoring() async {
         guard let service = syncService else { return }
 
@@ -376,6 +423,15 @@ final class SyncCoordinator: @unchecked Sendable {
                 mountURL: url
             )
         }
+    }
+
+    /// This Mac's registered volumes as identities for the synced settings document.
+    /// Must be called on MainActor (accesses SwiftData).
+    private func localVolumeIdentities() -> [VolumeIdentity] {
+        guard let container = modelContainer else { return [] }
+        let context = ModelContext(container)
+        guard let volumes = try? context.fetch(FetchDescriptor<VolumeRecord>()) else { return [] }
+        return volumes.map { VolumeIdentity(volumeID: $0.volumeID, label: $0.label) }
     }
 
     private func loadB2Credentials() -> B2Credentials? {

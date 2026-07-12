@@ -83,8 +83,24 @@ struct PhotoGridItem: View {
                 return
             } catch {
                 if scoped { mountURL.stopAccessingSecurityScopedResource() }
+                // A locked encryption key fails every source identically — stay
+                // `.pending` and retry after the user unlocks in Settings.
+                if error is EncryptionService.EncryptionError { return }
                 continue
             }
+        }
+
+        // Records hydrated from a synced catalog carry no storageLocations (those are
+        // local-only state). All storage targets share the year/month/day/album layout,
+        // so probe the library and every registered volume at the derived path and
+        // re-record any location where the file actually lives.
+        if await regenerateFromDerivedPath(sha256: sha256, isEncrypted: isEncrypted, nonce: nonce, known: locations) {
+            return
+        }
+
+        // Last resort: pull the original from B2 and thumbnail it locally.
+        if await regenerateFromB2(sha256: sha256, isEncrypted: isEncrypted, nonce: nonce) {
+            return
         }
 
         // Only flag `.failed` if we actually reached a mounted volume and generation threw.
@@ -92,5 +108,78 @@ struct PhotoGridItem: View {
         if didAttemptGeneration {
             image.thumbnailState = .failed
         }
+    }
+
+    /// Probe the library and registered volumes at `year/month/day/album/filename`.
+    /// Returns true when a thumbnail was generated; also records the discovered
+    /// location so detail view, verify, and delete flows can use it.
+    private func regenerateFromDerivedPath(
+        sha256: String, isEncrypted: Bool, nonce: Data?, known: [StorageLocation]
+    ) async -> Bool {
+        guard let album = image.album else { return false }
+        let relativePath = "\(album.year)/\(album.month)/\(album.day)/\(album.name)/\(image.filename)"
+
+        var candidates = [StorageLocation(volumeID: Constants.Storage.libraryVolumeID, relativePath: relativePath)]
+        candidates += volumes.map { StorageLocation(volumeID: $0.volumeID, relativePath: relativePath) }
+
+        for candidate in candidates where !known.contains(candidate) {
+            guard let (mountURL, scoped) = StorageResolver.resolveMount(for: candidate, volumes: volumes) else {
+                continue
+            }
+            defer { if scoped { mountURL.stopAccessingSecurityScopedResource() } }
+
+            let fileURL = mountURL.appendingPathComponent(candidate.relativePath)
+            guard FileManager.default.fileExists(atPath: fileURL.path) else { continue }
+
+            do {
+                if isEncrypted, let nonce {
+                    try await thumbnailService.generateThumbnail(
+                        fromEncryptedFileAt: fileURL,
+                        nonce: nonce,
+                        sha256: sha256,
+                        encryption: encryptionService
+                    )
+                } else {
+                    try await thumbnailService.generateThumbnail(for: fileURL, sha256: sha256)
+                }
+            } catch {
+                if error is EncryptionService.EncryptionError { return false }
+                continue
+            }
+
+            image.storageLocations.append(candidate)
+            thumbnail = await thumbnailService.thumbnail(for: sha256, size: .grid)
+            image.thumbnailState = .generated
+            return true
+        }
+        return false
+    }
+
+    /// Download the original from B2 and thumbnail it. Network failures leave the
+    /// state `.pending` so the grid retries on a later appearance.
+    private func regenerateFromB2(sha256: String, isEncrypted: Bool, nonce: Data?) async -> Bool {
+        guard let fileId = image.b2FileId,
+              let credentials = B2Credentials.load() else { return false }
+
+        guard let raw = await B2ThumbnailFetcher.shared.fetchOriginal(fileId: fileId, credentials: credentials) else {
+            return false
+        }
+
+        let plaintext: Data
+        if isEncrypted, let nonce {
+            guard let decrypted = try? await encryptionService.decryptData(raw, nonce: nonce, sha256: sha256) else {
+                return false
+            }
+            plaintext = decrypted
+        } else {
+            plaintext = raw
+        }
+
+        guard (try? await thumbnailService.generateThumbnail(from: plaintext, sha256: sha256)) != nil else {
+            return false
+        }
+        thumbnail = await thumbnailService.thumbnail(for: sha256, size: .grid)
+        image.thumbnailState = .generated
+        return true
     }
 }
