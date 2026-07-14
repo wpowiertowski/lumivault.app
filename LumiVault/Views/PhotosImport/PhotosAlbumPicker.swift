@@ -8,9 +8,10 @@ private enum AlbumSortOrder: String, CaseIterable {
 }
 
 enum AlbumSyncStatus {
-    /// Album exists in catalog with matching image count.
+    /// Every Photos asset in the album is accounted for in the catalog.
     case synced
-    /// Album exists in catalog but image counts differ.
+    /// Album exists in catalog but some Photos assets aren't imported yet
+    /// (or were removed from Photos).
     case needsUpdate(catalogCount: Int)
     /// Album not found in catalog.
     case notSynced
@@ -19,6 +20,12 @@ enum AlbumSyncStatus {
 struct PhotosAlbumPicker: View {
     @Binding var selectedAlbumIds: Set<String>
     let catalogAlbumCounts: [String: Int]
+    /// Photos-album localIdentifier → number of Photos assets the catalog
+    /// accounts for (tracked asset ids + legacy images without ids). Byte-
+    /// identical duplicates in Photos dedup to one stored image, so this can
+    /// exceed the raw image count — comparing raw counts would flag such
+    /// albums as out of sync forever.
+    let catalogTrackedAssetCounts: [String: Int]
     @State private var albums: [PhotosAlbum] = []
     @State private var searchText = ""
     @State private var sortOrder: AlbumSortOrder = .name
@@ -158,6 +165,13 @@ struct PhotosAlbumPicker: View {
     }
 
     private func syncStatus(for album: PhotosAlbum) -> AlbumSyncStatus {
+        // Asset-id tracking is the source of truth when available; the raw
+        // image count only decides for albums imported before id tracking.
+        if let tracked = catalogTrackedAssetCounts[album.id] {
+            return tracked == album.assetCount
+                ? .synced
+                : .needsUpdate(catalogCount: catalogAlbumCounts[album.title] ?? tracked)
+        }
         guard let catalogCount = catalogAlbumCounts[album.title] else {
             return .notSynced
         }

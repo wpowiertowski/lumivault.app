@@ -78,7 +78,13 @@ enum ImageConversionService {
 
         guard let data = outputData else { return asset }
 
+        // Each conversion writes into its own subdirectory. Same-named assets
+        // (a Photos image duplicated with a different edit keeps its original
+        // filename) would otherwise overwrite each other's converted output
+        // while earlier items are still being hashed downstream — collapsing
+        // two distinct images into one record.
         let convertedDir = staging.appendingPathComponent("converted", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: convertedDir, withIntermediateDirectories: true)
         let outputURL = convertedDir.appendingPathComponent(outputFilename)
         do {

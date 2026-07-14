@@ -29,6 +29,30 @@ final class ImageRecord {
     var encryptionKeyId: String?
     var encryptionNonce: Data?
     var phAssetLocalIdentifier: String?
+    /// All Photos asset ids backed by this image. Byte-identical duplicates in
+    /// Photos collapse to one stored image, so one record can be backed by
+    /// several assets. `phAssetLocalIdentifier` remains as the legacy
+    /// single-id field for records created before multi-asset tracking.
+    var phAssetLocalIdentifiers: [String] = []
+
+    /// Every Photos asset id that maps to this image, folding in the legacy
+    /// single-id field.
+    var allPHAssetIdentifiers: [String] {
+        guard let legacy = phAssetLocalIdentifier, !phAssetLocalIdentifiers.contains(legacy) else {
+            return phAssetLocalIdentifiers
+        }
+        return phAssetLocalIdentifiers + [legacy]
+    }
+
+    /// Record that `id` is a Photos asset backing this image.
+    func trackPHAsset(_ id: String) {
+        if phAssetLocalIdentifier == nil {
+            phAssetLocalIdentifier = id
+        }
+        if !allPHAssetIdentifiers.contains(id) {
+            phAssetLocalIdentifiers.append(id)
+        }
+    }
 
     init(
         sha256: String,
@@ -62,5 +86,6 @@ final class ImageRecord {
         self.encryptionKeyId = encryptionKeyId
         self.encryptionNonce = encryptionNonce
         self.phAssetLocalIdentifier = phAssetLocalIdentifier
+        self.phAssetLocalIdentifiers = phAssetLocalIdentifier.map { [$0] } ?? []
     }
 }
