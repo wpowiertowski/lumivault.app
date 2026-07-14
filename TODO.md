@@ -63,6 +63,18 @@ Source: TEST-PLAN.md "Manual Test Cases NOT Automated"
 
 ---
 
+## Performance
+
+- [ ] **Background ModelActor for the Photos library monitor** — move the
+  remaining O(catalog) SwiftData faulting in `PhotosLibraryMonitor` (and the
+  import sheet's `trackedAssetCounts()`) off the MainActor onto a read-only
+  `@ModelActor`, exchanging `PersistentIdentifier`-based snapshots across
+  actor boundaries. Scoped plan: [PLAN-photos-monitor-modelactor.md](PLAN-photos-monitor-modelactor.md).
+  Follow-up to PR #47; do the §5 step-1 spike first (macro vs
+  `SWIFT_DEFAULT_ISOLATION: MainActor`).
+
+---
+
 ## Code Quality
 
 Nothing pending.
