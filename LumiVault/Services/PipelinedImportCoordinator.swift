@@ -824,8 +824,11 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 let existing: (filename: String, sizeBytes: Int64)? = try await MainActor.run {
                     let modelContext = ctx.value
                     if let batchRecord = recordsBySHA[hash] {
-                        if batchRecord.phAssetLocalIdentifier == nil, let id = phAssetId {
-                            batchRecord.phAssetLocalIdentifier = id
+                        // Track every backing asset id — byte-identical Photos
+                        // duplicates map many assets to one record, and album
+                        // diffs would re-add untracked ids forever.
+                        if let id = phAssetId {
+                            batchRecord.trackPHAsset(id)
                         }
                         return (batchRecord.filename, batchRecord.sizeBytes)
                     }
@@ -834,8 +837,8 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                     )
                     let dbResults = try modelContext.fetch(descriptor)
                     if let dbRecord = dbResults.first {
-                        if dbRecord.phAssetLocalIdentifier == nil, let id = phAssetId {
-                            dbRecord.phAssetLocalIdentifier = id
+                        if let id = phAssetId {
+                            dbRecord.trackPHAsset(id)
                         }
                         recordsBySHA[hash] = dbRecord
                         return (dbRecord.filename, dbRecord.sizeBytes)

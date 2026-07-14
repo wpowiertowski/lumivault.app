@@ -10,10 +10,10 @@ import SwiftData
 struct AlbumDelta: @unchecked Sendable {
     /// Assets present in Photos that we have not yet imported.
     let added: [PHAsset]
-    /// Catalog images whose source PHAsset is no longer in the album.
-    /// Only includes images with a non-nil `phAssetLocalIdentifier`.
+    /// Catalog images none of whose backing PHAssets are still in the album.
+    /// Only includes images with at least one tracked asset id.
     let removed: [ImageRecord]
-    /// Catalog images that lack a `phAssetLocalIdentifier` and therefore can't
+    /// Catalog images that lack any tracked PHAsset id and therefore can't
     /// participate in deletion detection. Surfaced for honest UI messaging.
     let untrackable: [ImageRecord]
     /// True if Photos no longer has this album at all (user deleted it).
@@ -100,7 +100,7 @@ final class PhotosLibraryMonitor: NSObject, PHPhotoLibraryChangeObserver {
             return AlbumDelta(
                 added: [],
                 removed: [],
-                untrackable: album.images.filter { $0.phAssetLocalIdentifier == nil },
+                untrackable: album.images.filter { $0.allPHAssetIdentifiers.isEmpty },
                 albumMissing: true
             )
         }
@@ -131,13 +131,17 @@ final class PhotosLibraryMonitor: NSObject, PHPhotoLibraryChangeObserver {
         photoIds: Set<String>,
         catalogImages: [ImageRecord]
     ) -> (addedIds: Set<String>, removed: [ImageRecord], untrackable: [ImageRecord]) {
-        let catalogIds = Set(catalogImages.compactMap(\.phAssetLocalIdentifier))
+        // One record can be backed by several PHAssets (byte-identical
+        // duplicates in Photos dedup to one stored image), so diff against
+        // the union of all tracked ids.
+        let catalogIds = Set(catalogImages.flatMap(\.allPHAssetIdentifiers))
         let addedIds = photoIds.subtracting(catalogIds)
         let removed = catalogImages.filter { record in
-            guard let id = record.phAssetLocalIdentifier else { return false }
-            return !photoIds.contains(id)
+            let ids = record.allPHAssetIdentifiers
+            guard !ids.isEmpty else { return false }
+            return photoIds.isDisjoint(with: ids)
         }
-        let untrackable = catalogImages.filter { $0.phAssetLocalIdentifier == nil }
+        let untrackable = catalogImages.filter { $0.allPHAssetIdentifiers.isEmpty }
         return (addedIds, removed, untrackable)
     }
 }

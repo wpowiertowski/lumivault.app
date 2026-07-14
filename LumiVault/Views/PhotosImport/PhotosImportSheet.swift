@@ -27,6 +27,7 @@ struct PhotosImportSheet: View {
     @Environment(\.encryptionService) private var encryptionService
     @Query private var volumes: [VolumeRecord]
     @State private var catalogAlbumCounts: [String: Int] = [:]
+    @State private var catalogTrackedAssetCounts: [String: Int] = [:]
     @State private var pendingImports: [PendingAlbumImport] = []
     @State private var isComputingDates = false
     @State private var storageWarningAcknowledged = false
@@ -151,6 +152,7 @@ struct PhotosImportSheet: View {
         .frame(width: 600, height: 500)
         .task {
             catalogAlbumCounts = await syncCoordinator.catalogAlbumCounts()
+            catalogTrackedAssetCounts = trackedAssetCounts()
         }
         .task(id: step) {
             // Watchdog: if the import has been running for 30 seconds and
@@ -188,6 +190,33 @@ struct PhotosImportSheet: View {
         }
     }
 
+    /// Per Photos album (by localIdentifier): how many Photos assets the
+    /// catalog accounts for — the union of tracked asset ids plus legacy
+    /// images without ids. Distinct from the raw image count because
+    /// byte-identical Photos duplicates dedup to one stored image.
+    private func trackedAssetCounts() -> [String: Int] {
+        let descriptor = FetchDescriptor<AlbumRecord>(
+            predicate: #Predicate { $0.photosAlbumLocalIdentifier != nil }
+        )
+        guard let albums = try? modelContext.fetch(descriptor) else { return [:] }
+        var counts: [String: Int] = [:]
+        for album in albums {
+            guard let photosAlbumId = album.photosAlbumLocalIdentifier else { continue }
+            var trackedIds = Set<String>()
+            var untracked = 0
+            for image in album.images {
+                let ids = image.allPHAssetIdentifiers
+                if ids.isEmpty {
+                    untracked += 1
+                } else {
+                    trackedIds.formUnion(ids)
+                }
+            }
+            counts[photosAlbumId] = trackedIds.count + untracked
+        }
+        return counts
+    }
+
     // MARK: - Steps
 
     private var storageWarningView: some View {
@@ -221,7 +250,11 @@ struct PhotosImportSheet: View {
                 .foregroundStyle(.tertiary)
                 .padding(.horizontal)
 
-            PhotosAlbumPicker(selectedAlbumIds: $selectedAlbumIds, catalogAlbumCounts: catalogAlbumCounts)
+            PhotosAlbumPicker(
+                selectedAlbumIds: $selectedAlbumIds,
+                catalogAlbumCounts: catalogAlbumCounts,
+                catalogTrackedAssetCounts: catalogTrackedAssetCounts
+            )
         }
     }
 

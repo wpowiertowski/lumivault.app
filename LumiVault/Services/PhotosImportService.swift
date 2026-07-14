@@ -1,5 +1,6 @@
 import Foundation
 import Photos
+import UniformTypeIdentifiers
 import os
 
 struct PhotosAlbum: Identifiable, Sendable {
@@ -171,12 +172,79 @@ actor PhotosImportService {
         // Use the original resource's filename (fullSizePhoto always reports "FullSizeRender.jpeg")
         let originalResource = resources.first(where: { $0.type == .photo })
         let filename = originalResource?.originalFilename ?? resource.originalFilename
+
+        // Edited asset whose rendered version isn't available as a resource
+        // (typical when the edit was made on another device and iCloud hasn't
+        // materialized the render locally). Exporting the `.photo` original
+        // would silently drop the edit — and collapse differently-edited
+        // duplicates into one SHA-256 — so render the current version instead.
+        if resource.type != .fullSizePhoto,
+           resources.contains(where: { $0.type == .adjustmentData }) {
+            return try await importRenderedAsset(asset, originalFilename: filename, to: directory)
+        }
+
         let destURL = directory.appendingPathComponent(filename)
 
         // Handle filename collisions
         let finalURL = uniqueURL(for: destURL)
 
         try await writeResourceWithRetry(resource, to: finalURL, filename: filename, callbacks: callbacks)
+
+        return ImportedAsset(
+            fileURL: finalURL,
+            originalFilename: filename,
+            creationDate: asset.creationDate,
+            phAssetLocalIdentifier: asset.localIdentifier
+        )
+    }
+
+    /// Export an edited asset by rendering its current version through
+    /// PHImageManager. Used when the `.fullSizePhoto` resource is missing, so
+    /// the edit exists only as adjustment data.
+    private func importRenderedAsset(
+        _ asset: PHAsset,
+        originalFilename: String,
+        to directory: URL
+    ) async throws -> ImportedAsset {
+        // Same assetsd budget concern as writeResource — serialize the request.
+        await Self.gate.wait()
+        defer {
+            Task.detached { await Self.gate.signal() }
+        }
+
+        let options = PHImageRequestOptions()
+        options.version = .current
+        options.deliveryMode = .highQualityFormat
+        options.isNetworkAccessAllowed = true
+
+        let resumed = OSAllocatedUnfairLock(initialState: false)
+        let (data, dataUTI): (Data, String?) = try await withCheckedThrowingContinuation { continuation in
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, uti, _, info in
+                if (info?[PHImageResultIsDegradedKey] as? Bool) == true { return }
+                let firstResult = resumed.withLock { done -> Bool in
+                    if done { return false }
+                    done = true
+                    return true
+                }
+                guard firstResult else { return }
+                if let data {
+                    continuation.resume(returning: (data, uti))
+                } else if let error = info?[PHImageErrorKey] as? Error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(throwing: PhotosImportError.exportFailed)
+                }
+            }
+        }
+
+        // The render's format can differ from the original (e.g. HEIC original,
+        // JPEG render) — keep the original stem but correct the extension.
+        var filename = originalFilename
+        if let dataUTI, let ext = UTType(dataUTI)?.preferredFilenameExtension {
+            filename = (originalFilename as NSString).deletingPathExtension + "." + ext
+        }
+        let finalURL = uniqueURL(for: directory.appendingPathComponent(filename))
+        try data.write(to: finalURL, options: .atomic)
 
         return ImportedAsset(
             fileURL: finalURL,

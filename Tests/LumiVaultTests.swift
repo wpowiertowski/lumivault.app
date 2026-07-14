@@ -2017,6 +2017,39 @@ struct ImageConversionTests {
         #expect(rep.pixelsHigh <= 25)
     }
 
+    @Test func convertKeepsSameNamedDuplicatesDistinct() async throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-conv-dup-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmpDir) }
+
+        // Two distinct images that share an original filename — like a Photos
+        // asset duplicated with a different crop. The export step uniquifies
+        // only the on-disk temp name, not `originalFilename`.
+        let firstURL = tmpDir.appendingPathComponent("IMG_0001.png")
+        let secondURL = tmpDir.appendingPathComponent("IMG_0001_1.png")
+        try TestFixtures.createTinyJPEG(at: firstURL, width: 100, height: 100)
+        try TestFixtures.createTinyJPEG(at: secondURL, width: 60, height: 60)
+
+        let staging = tmpDir.appendingPathComponent("staging", isDirectory: true)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        let first = ImageConversionService.convertImage(
+            asset: ImportedAsset(fileURL: firstURL, originalFilename: "IMG_0001.png", creationDate: nil),
+            format: ImageFormat.jpeg, quality: 0.85, maxDimension: MaxDimension.original, staging: staging
+        )
+        let second = ImageConversionService.convertImage(
+            asset: ImportedAsset(fileURL: secondURL, originalFilename: "IMG_0001.png", creationDate: nil),
+            format: ImageFormat.jpeg, quality: 0.85, maxDimension: MaxDimension.original, staging: staging
+        )
+
+        // The second conversion must not overwrite the first one's output.
+        #expect(first.fileURL != second.fileURL)
+        let firstData = try Data(contentsOf: first.fileURL)
+        let secondData = try Data(contentsOf: second.fileURL)
+        #expect(firstData != secondData)
+    }
+
     @Test func convertOriginalFormatReturnsUnchanged() async throws {
         let fm = FileManager.default
         let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-conv-noop-\(UUID().uuidString)")
@@ -2389,6 +2422,55 @@ struct PhotosLibraryMonitorDiffTests {
         #expect(parts.removed.isEmpty)
         #expect(parts.untrackable.isEmpty)
     }
+
+    @Test func diffTreatsCollapsedDuplicateAssetsAsSynced() {
+        // Two byte-identical Photos assets dedup to one record — neither id
+        // may be reported as "added" or the album gets flagged forever.
+        let collapsed = makeImage(sha: "dup", phId: "id-1")
+        collapsed.trackPHAsset("id-2")
+
+        let parts = PhotosLibraryMonitor.computeDeltaParts(
+            photoIds: ["id-1", "id-2"],
+            catalogImages: [collapsed]
+        )
+
+        #expect(parts.addedIds.isEmpty)
+        #expect(parts.removed.isEmpty)
+        #expect(parts.untrackable.isEmpty)
+    }
+
+    @Test func diffKeepsRecordWhileAnyTrackedAssetRemains() {
+        let collapsed = makeImage(sha: "dup", phId: "id-1")
+        collapsed.trackPHAsset("id-2")
+
+        let partial = PhotosLibraryMonitor.computeDeltaParts(
+            photoIds: ["id-2"],
+            catalogImages: [collapsed]
+        )
+        #expect(partial.removed.isEmpty)
+
+        let gone = PhotosLibraryMonitor.computeDeltaParts(
+            photoIds: [],
+            catalogImages: [collapsed]
+        )
+        #expect(gone.removed.map(\.sha256) == ["dup"])
+    }
+
+    @Test func diffFoldsLegacyScalarIdIntoTracking() {
+        // Records persisted before the multi-id field existed have only the
+        // legacy scalar populated.
+        let legacy = makeImage(sha: "old", phId: "id-legacy")
+        legacy.phAssetLocalIdentifiers = []
+
+        let parts = PhotosLibraryMonitor.computeDeltaParts(
+            photoIds: ["id-legacy"],
+            catalogImages: [legacy]
+        )
+
+        #expect(parts.addedIds.isEmpty)
+        #expect(parts.removed.isEmpty)
+        #expect(parts.untrackable.isEmpty)
+    }
 }
 
 // MARK: - SwiftData Schema Migration Smoke Test
@@ -2444,5 +2526,42 @@ struct PhotosSyncSchemaTests {
 
         #expect(album.photosAlbumLocalIdentifier == "PH-album-1")
         #expect(image.phAssetLocalIdentifier == "PH-asset-1")
+        #expect(image.allPHAssetIdentifiers == ["PH-asset-1"])
+    }
+
+    @Test func trackPHAssetAccumulatesDistinctIds() {
+        let image = ImageRecord(
+            sha256: "x",
+            filename: "x.jpg",
+            sizeBytes: 1,
+            phAssetLocalIdentifier: "id-1"
+        )
+        image.trackPHAsset("id-2")
+        image.trackPHAsset("id-1")
+        image.trackPHAsset("id-2")
+
+        #expect(image.allPHAssetIdentifiers.sorted() == ["id-1", "id-2"])
+        #expect(image.phAssetLocalIdentifier == "id-1")
+    }
+
+    @Test func multipleTrackedAssetIdsPersist() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(
+            for: ImageRecord.self, AlbumRecord.self, VolumeRecord.self,
+            configurations: config
+        )
+        let context = container.mainContext
+
+        let image = ImageRecord(
+            sha256: "cafebabe",
+            filename: "dup.jpg",
+            sizeBytes: 1,
+            phAssetLocalIdentifier: "PH-asset-1"
+        )
+        image.trackPHAsset("PH-asset-2")
+        context.insert(image)
+        try context.save()
+
+        #expect(image.allPHAssetIdentifiers.sorted() == ["PH-asset-1", "PH-asset-2"])
     }
 }
