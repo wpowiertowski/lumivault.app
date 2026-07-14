@@ -2456,6 +2456,27 @@ struct PhotosLibraryMonitorDiffTests {
         #expect(gone.removed.map(\.sha256) == ["dup"])
     }
 
+    @Test func deltaCoreReturnsIndicesForRemovedAndUntrackable() {
+        let parts = PhotosLibraryMonitor.computeDeltaCore(
+            photoIds: ["id-a", "id-new"],
+            imageAssetIds: [["id-a", "id-a2"], ["id-gone"], []]
+        )
+        #expect(parts.addedIds == ["id-new"])
+        #expect(parts.removedIndices == [1])
+        #expect(parts.untrackableIndices == [2])
+    }
+
+    @Test func deltaContentComparisonSkipsNoOpUpdates() {
+        let record = makeImage(sha: "a", phId: "id-a")
+        let first = AlbumDelta(added: [], removed: [record], untrackable: [], albumMissing: false)
+        let same = AlbumDelta(added: [], removed: [record], untrackable: [], albumMissing: false)
+        let different = AlbumDelta(added: [], removed: [], untrackable: [record], albumMissing: false)
+
+        #expect(first.hasSameContent(as: same))
+        #expect(!first.hasSameContent(as: different))
+        #expect(!first.hasSameContent(as: AlbumDelta(added: [], removed: [record], untrackable: [], albumMissing: true)))
+    }
+
     @Test func diffFoldsLegacyScalarIdIntoTracking() {
         // Records persisted before the multi-id field existed have only the
         // legacy scalar populated.

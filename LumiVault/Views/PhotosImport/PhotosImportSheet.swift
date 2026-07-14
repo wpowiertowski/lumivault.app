@@ -24,6 +24,7 @@ struct PhotosImportSheet: View {
     @State private var showingGames = false
     @State private var gameProgress = GameProgressMirror()
     @Environment(SyncCoordinator.self) private var syncCoordinator
+    @Environment(PhotosLibraryMonitor.self) private var photosMonitor
     @Environment(\.encryptionService) private var encryptionService
     @Query private var volumes: [VolumeRecord]
     @State private var catalogAlbumCounts: [String: Int] = [:]
@@ -152,8 +153,14 @@ struct PhotosImportSheet: View {
         .frame(width: 600, height: 500)
         .task {
             catalogAlbumCounts = await syncCoordinator.catalogAlbumCounts()
-            catalogTrackedAssetCounts = trackedAssetCounts()
+            catalogTrackedAssetCounts = await trackedAssetCounts()
         }
+        // Library-monitor rechecks are pointless while this sheet is up: the
+        // import mutates the same model context the diff reads, and iCloud
+        // downloads during export make Photos post change notifications
+        // continuously. The deferred recheck fires on dismiss.
+        .onAppear { photosMonitor.pause() }
+        .onDisappear { photosMonitor.resume() }
         .task(id: step) {
             // Watchdog: if the import has been running for 30 seconds and
             // progress is still under 40%, surface the easter-egg games offer.
@@ -194,7 +201,7 @@ struct PhotosImportSheet: View {
     /// catalog accounts for — the union of tracked asset ids plus legacy
     /// images without ids. Distinct from the raw image count because
     /// byte-identical Photos duplicates dedup to one stored image.
-    private func trackedAssetCounts() -> [String: Int] {
+    private func trackedAssetCounts() async -> [String: Int] {
         let descriptor = FetchDescriptor<AlbumRecord>(
             predicate: #Predicate { $0.photosAlbumLocalIdentifier != nil }
         )
@@ -213,6 +220,9 @@ struct PhotosImportSheet: View {
                 }
             }
             counts[photosAlbumId] = trackedIds.count + untracked
+            // Faulting every album's images is a full catalog scan — yield
+            // between albums so the sheet stays responsive while it runs.
+            await Task.yield()
         }
         return counts
     }

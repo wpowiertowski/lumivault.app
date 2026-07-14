@@ -206,6 +206,9 @@ struct AlbumResyncSheet: View {
 
     private func startResync() {
         isResyncing = true
+        // Defer full library rechecks while the resync pipeline runs; the
+        // targeted recheck below refreshes this album once it finishes.
+        photosMonitor.pause()
 
         nonisolated(unsafe) let ctx = modelContext
         let appliedDelta = AlbumDelta(
@@ -281,6 +284,7 @@ struct AlbumResyncSheet: View {
             }
 
             await syncCoordinator.pushAfterLocalChange(reloadFromDisk: false)
+            photosMonitor.resume()
             photosMonitor.clearDelta(for: resolvedAlbum)
             await photosMonitor.recheck(album: resolvedAlbum)
 
