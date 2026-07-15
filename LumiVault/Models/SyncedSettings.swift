@@ -132,7 +132,12 @@ nonisolated extension SyncedSettings {
         }
 
         var hosts = remote?.volumesByHost ?? [:]
-        hosts[deviceID] = localVolumes
+        // Deterministic order: [VolumeIdentity] compares order-sensitively in
+        // contentEquals, and callers fetch volumes with no guaranteed order.
+        // Unordered input made repeated captures compare "changed", so every
+        // sync pass rewrote settings.json — which re-triggered the metadata
+        // query and the next sync pass, forever, on a single Mac.
+        hosts[deviceID] = localVolumes.sorted { $0.volumeID < $1.volumeID }
         doc.volumesByHost = hosts
 
         return doc
@@ -166,6 +171,7 @@ nonisolated extension SyncedSettings {
             .values.flatMap(\.self)
         var seen = Set<String>()
         let unique = remoteVolumes.filter { seen.insert($0.volumeID).inserted }
+            .sorted { $0.volumeID < $1.volumeID }
         if let data = try? JSONEncoder().encode(unique) {
             defaults.set(data, forKey: Self.knownRemoteVolumesDefaultsKey)
         }

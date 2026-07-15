@@ -435,7 +435,10 @@ final class SyncCoordinator: @unchecked Sendable {
     private func localVolumeIdentities() -> [VolumeIdentity] {
         guard let container = modelContainer else { return [] }
         let context = ModelContext(container)
-        guard let volumes = try? context.fetch(FetchDescriptor<VolumeRecord>()) else { return [] }
+        // Sorted: an unspecified fetch order flip-flops the synced settings
+        // document's content comparison (see SyncedSettings.capture).
+        let descriptor = FetchDescriptor<VolumeRecord>(sortBy: [SortDescriptor(\.volumeID)])
+        guard let volumes = try? context.fetch(descriptor) else { return [] }
         return volumes.map { VolumeIdentity(volumeID: $0.volumeID, label: $0.label) }
     }
 
