@@ -11,12 +11,10 @@ actor CatalogBackupService {
 
         let data: Data
         do {
-            data = try await MainActor.run {
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                encoder.dateEncodingStrategy = .iso8601
-                return try encoder.encode(catalog)
-            }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            data = try encoder.encode(catalog)
         } catch {
             return ["Failed to encode catalog: \(error.localizedDescription)"]
         }
@@ -77,12 +75,10 @@ actor CatalogBackupService {
     func backupToB2(catalog: Catalog, credentials: B2Credentials) async -> String? {
         let data: Data
         do {
-            data = try await MainActor.run {
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                encoder.dateEncodingStrategy = .iso8601
-                return try encoder.encode(catalog)
-            }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            data = try encoder.encode(catalog)
         } catch {
             return "Failed to encode catalog: \(error.localizedDescription)"
         }
@@ -165,11 +161,9 @@ actor CatalogBackupService {
         }
 
         let data = try Data(contentsOf: catalogURL)
-        return try await MainActor.run {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            return try decoder.decode(Catalog.self, from: data)
-        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(Catalog.self, from: data)
     }
 
     /// Restore catalog from B2.
@@ -180,21 +174,17 @@ actor CatalogBackupService {
             credentials: credentials
         )
 
-        return try await MainActor.run {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            return try decoder.decode(Catalog.self, from: data)
-        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(Catalog.self, from: data)
     }
 
     /// Restore catalog from a local file URL.
     func restoreFromFile(url: URL) async throws -> Catalog {
         let data = try Data(contentsOf: url)
-        return try await MainActor.run {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            return try decoder.decode(Catalog.self, from: data)
-        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(Catalog.self, from: data)
     }
 
     // MARK: - Helpers

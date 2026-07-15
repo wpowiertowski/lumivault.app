@@ -64,6 +64,46 @@ struct SettingsSyncServiceTests {
         #expect(doc.importDetectNearDuplicates == nil)
     }
 
+    @Test func captureNormalizesVolumeOrderSoRepeatedSyncsSettle() async throws {
+        // [VolumeIdentity] compares order-sensitively in contentEquals, and
+        // volume fetch order is unspecified. Unsorted input made every sync
+        // pass see "changed" content and rewrite settings.json — re-triggering
+        // the metadata query in an endless single-Mac loop.
+        let (_, defaults) = makeDefaults()
+        let v1 = VolumeIdentity(volumeID: "vol-a", label: "Archive A")
+        let v2 = VolumeIdentity(volumeID: "vol-b", label: "Archive B")
+
+        let first = SyncedSettings.capture(
+            defaults: defaults, localVolumes: [v1, v2], deviceID: "dev-1", remote: nil
+        )
+        let reordered = SyncedSettings.capture(
+            defaults: defaults, localVolumes: [v2, v1], deviceID: "dev-1", remote: first
+        )
+
+        #expect(reordered.contentEquals(first))
+    }
+
+    @Test func repeatedSyncWithReorderedVolumesDoesNotRewriteDocument() async throws {
+        let syncURL = makeSyncURL()
+        defer { try? FileManager.default.removeItem(at: syncURL.deletingLastPathComponent()) }
+        let (suiteName, _) = makeDefaults()
+
+        let v1 = VolumeIdentity(volumeID: "vol-a", label: "Archive A")
+        let v2 = VolumeIdentity(volumeID: "vol-b", label: "Archive B")
+
+        let service = SettingsSyncService(syncURL: syncURL, defaultsSuiteName: suiteName)
+        try await service.sync(localVolumes: [v1, v2])
+        let dateAfterFirst = try FileManager.default
+            .attributesOfItem(atPath: syncURL.path)[.modificationDate] as? Date
+
+        // Same volumes, opposite order — must be a no-op, not a rewrite.
+        try await service.sync(localVolumes: [v2, v1])
+        let dateAfterSecond = try FileManager.default
+            .attributesOfItem(atPath: syncURL.path)[.modificationDate] as? Date
+
+        #expect(dateAfterFirst == dateAfterSecond)
+    }
+
     // MARK: - Pull / apply
 
     @Test func pullAppliesNewerRemoteToDefaults() async throws {

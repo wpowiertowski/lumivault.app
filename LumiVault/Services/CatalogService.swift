@@ -15,12 +15,14 @@ actor CatalogService {
         }
     }
 
+    /// Persist the catalog plus its .sha256/.par2 sidecars. Runs on this
+    /// actor's executor — Catalog is nonisolated, so the JSON encode, hashing,
+    /// and PAR2 generation stay off the main thread. `lastUpdated` is NOT
+    /// bumped here: every mutating operation already bumps it, and bumping on
+    /// save made each sync produce "new" content, fueling a cross-Mac
+    /// push ping-pong that hung the UI on every iCloud round-trip.
     func save(to url: URL) async throws {
-        catalog.lastUpdated = .now
-        let catalogToSave = catalog
-        try await MainActor.run {
-            try catalogToSave.save(to: url)
-        }
+        try catalog.save(to: url)
     }
 
     func currentCatalog() -> Catalog {
