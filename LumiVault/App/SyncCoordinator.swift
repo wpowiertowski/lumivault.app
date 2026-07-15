@@ -240,6 +240,10 @@ final class SyncCoordinator: @unchecked Sendable {
         }
 
         var skippedCount = 0
+        // Track what the (post-merge) catalog contains so tombstone-driven
+        // deletions below never touch a path/sha the catalog still holds.
+        var catalogAlbumKeys = Set<String>()
+        var catalogSHAs = Set<String>()
 
         for (year, yearData) in catalog.years {
             for (month, monthData) in yearData.months {
@@ -256,6 +260,7 @@ final class SyncCoordinator: @unchecked Sendable {
                         }
 
                         let albumKey = "\(year)/\(month)/\(day)/\(albumName)"
+                        catalogAlbumKeys.insert(albumKey)
                         let album: AlbumRecord
                         if let existing = albumsByKey[albumKey] {
                             album = existing
@@ -280,6 +285,7 @@ final class SyncCoordinator: @unchecked Sendable {
                                 skippedCount += 1
                                 continue
                             }
+                            catalogSHAs.insert(catalogImage.sha256)
                             let nonce = catalogImage.encryptionNonce.flatMap { Data(base64Encoded: $0) }
                             let isEncrypted = catalogImage.encryptionAlgorithm != nil
                             if let existing = imagesBySHA[catalogImage.sha256] {
@@ -315,6 +321,33 @@ final class SyncCoordinator: @unchecked Sendable {
                         }
                     }
                 }
+            }
+        }
+
+        // Reflect deletions that arrived via merge: remove SwiftData records a
+        // tombstone marks deleted, so a peer's deletion actually clears from the
+        // sidebar/grid. Gated on the catalog no longer holding the item and on
+        // the record predating the deletion, so an in-flight local import (a
+        // fresh record not yet in the catalog) is never nuked.
+        for tombstone in catalog.deletions ?? [] {
+            if let sha = tombstone.sha256 {
+                guard !catalogSHAs.contains(sha),
+                      let record = imagesBySHA[sha],
+                      record.addedAt <= tombstone.deletedAt else { continue }
+                context.delete(record)
+                imagesBySHA.removeValue(forKey: sha)
+            } else {
+                guard !catalogAlbumKeys.contains(tombstone.albumKey),
+                      let album = albumsByKey[tombstone.albumKey],
+                      album.addedAt <= tombstone.deletedAt else { continue }
+                // Delete images that live only in this album; images re-parented
+                // to a surviving album were already updated above.
+                for image in album.images where !catalogSHAs.contains(image.sha256) {
+                    context.delete(image)
+                    imagesBySHA.removeValue(forKey: image.sha256)
+                }
+                context.delete(album)
+                albumsByKey.removeValue(forKey: tombstone.albumKey)
             }
         }
 
