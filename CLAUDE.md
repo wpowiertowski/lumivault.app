@@ -28,7 +28,7 @@ The `.xcodeproj` is gitignored — always regenerate from `project.yml` with `xc
 - **Zero third-party dependencies** — only Apple frameworks
 - Services are **actors** (CatalogService, HasherService, ThumbnailService, B2Service, etc.)
 - Views use **@Observable** and **@Query** (SwiftData), not ObservableObject/Combine
-- All Codable conformances are MainActor-isolated due to default isolation — decode/encode via `MainActor.run {}` when called from non-MainActor actors
+- Codable conformances are MainActor-isolated due to default isolation — decode/encode via `MainActor.run {}` when called from non-MainActor actors. Exception: the `Catalog` structs (Catalog.swift) are `nonisolated` so sync/backup can encode/decode and write sidecars off the main thread — a full-catalog encode on the MainActor caused visible UI hangs
 - Use `nonisolated` for static utility methods that need to be called across isolation boundaries (e.g., PerceptualHash, BookmarkResolver)
 
 ## Code Conventions
@@ -51,7 +51,7 @@ The `.xcodeproj` is gitignored — always regenerate from `project.yml` with `xc
 ## Common Pitfalls
 
 - `ModelContext` is not Sendable — don't pass it across actor boundaries. Keep SwiftData operations on MainActor.
-- When adding new Codable types, their conformances are MainActor-isolated by default. Use `await MainActor.run { }` to encode/decode from actor contexts.
+- When adding new Codable types, their conformances are MainActor-isolated by default. Use `await MainActor.run { }` to encode/decode from actor contexts — or mark the type `nonisolated` (like the `Catalog` structs) when it's a plain value type that services must encode off-main.
 - `DuplicateResult` enum cannot be Sendable because it contains `ImageRecord` (a SwiftData @Model class).
 - XcodeGen: use `platform: macOS` (scalar), not `platform: [macOS]` (array) — array form appends `_macOS` suffix to target names and breaks test dependencies.
 - Always add privacy usage descriptions to Info.plist before accessing protected resources (Photos, etc.).

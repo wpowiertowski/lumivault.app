@@ -65,25 +65,23 @@ actor SyncService {
 
     // MARK: - Encoding
 
-    private func encodeCatalog(_ catalog: Catalog) async throws -> Data {
-        try await MainActor.run {
-            let encoder = JSONEncoder()
-            // sortedKeys keeps the output deterministic so byte comparisons
-            // ("did the merge change anything?") are meaningful. prettyPrinted
-            // was dropped — it inflated encode time and file size for a
-            // machine-consumed file.
-            encoder.outputFormatting = [.sortedKeys]
-            encoder.dateEncodingStrategy = .iso8601
-            return try encoder.encode(catalog)
-        }
+    // Catalog is nonisolated, so encode/decode run on this actor's executor —
+    // a full-catalog encode used to hang the main thread for hundreds of ms.
+    private func encodeCatalog(_ catalog: Catalog) throws -> Data {
+        let encoder = JSONEncoder()
+        // sortedKeys keeps the output deterministic so byte comparisons
+        // ("did the merge change anything?") are meaningful. prettyPrinted
+        // was dropped — it inflated encode time and file size for a
+        // machine-consumed file.
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(catalog)
     }
 
-    private func decodeCatalog(_ data: Data) async throws -> Catalog {
-        try await MainActor.run {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            return try decoder.decode(Catalog.self, from: data)
-        }
+    private func decodeCatalog(_ data: Data) throws -> Catalog {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(Catalog.self, from: data)
     }
 
     // MARK: - Push (local → sync target)
@@ -92,7 +90,7 @@ actor SyncService {
         guard isICloudAvailable else { throw SyncError.iCloudUnavailable }
 
         let catalog = await catalogService.currentCatalog()
-        let data = try await encodeCatalog(catalog)
+        let data = try encodeCatalog(catalog)
 
         // Skip the write when the sync target already holds these exact
         // bytes — every write re-triggers the metadata query watching the
@@ -159,15 +157,16 @@ actor SyncService {
         guard isICloudAvailable else { throw SyncError.iCloudUnavailable }
 
         guard let data = try readSyncTarget() else { return nil }
-        let remote = try await decodeCatalog(data)
+        let remote = try decodeCatalog(data)
         return await catalogService.merge(remote: remote)
     }
 
     // MARK: - Sync (pull, merge, push-if-changed)
 
-    /// Pull-merge-push. Returns `true` when the sync target held content that
-    /// differed from our last push — i.e. changes from another Mac that the
-    /// caller should re-hydrate SwiftData from.
+    /// Pull-merge-push. Returns `true` when the merge actually changed the
+    /// local catalog — i.e. content arrived from another Mac that the caller
+    /// should re-hydrate SwiftData from. Byte differences that merge away
+    /// (format or timestamp churn from another Mac) report `false`.
     ///
     /// Pushes only when the merge produced bytes that differ from the sync
     /// target, and recognizes metadata-query echoes of our own writes, so a
@@ -191,9 +190,10 @@ actor SyncService {
             return false
         }
 
-        let remote = try await decodeCatalog(remoteData)
+        let localData = try encodeCatalog(await catalogService.currentCatalog())
+        let remote = try decodeCatalog(remoteData)
         let merged = await catalogService.merge(remote: remote)
-        let mergedData = try await encodeCatalog(merged)
+        let mergedData = try encodeCatalog(merged)
 
         if mergedData != remoteData {
             try writeSyncTarget(mergedData)
@@ -203,9 +203,15 @@ actor SyncService {
             lastPushedData = remoteData
         }
 
-        // Save the merged catalog locally (outside the watched container).
-        try await catalogService.save(to: localCatalogURL)
-        return true
+        let localChanged = mergedData != localData
+        if localChanged {
+            // Save the merged catalog locally (outside the watched container).
+            // Skipped when the merge was a no-op — the save regenerates the
+            // .sha256/.par2 sidecars, which is pointless work for unchanged
+            // content.
+            try await catalogService.save(to: localCatalogURL)
+        }
+        return localChanged
     }
 
     // MARK: - NSMetadataQuery Monitoring

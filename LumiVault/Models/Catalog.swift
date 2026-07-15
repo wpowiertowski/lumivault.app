@@ -3,7 +3,7 @@ import CryptoKit
 
 // MARK: - catalog.json Codable Structs
 
-struct Catalog: Codable, Sendable {
+nonisolated struct Catalog: Codable, Sendable {
     var version: Int
     var lastUpdated: Date
     var years: [String: CatalogYear]
@@ -15,19 +15,19 @@ struct Catalog: Codable, Sendable {
     }
 }
 
-struct CatalogYear: Codable, Sendable {
+nonisolated struct CatalogYear: Codable, Sendable {
     var months: [String: CatalogMonth]
 }
 
-struct CatalogMonth: Codable, Sendable {
+nonisolated struct CatalogMonth: Codable, Sendable {
     var days: [String: CatalogDay]
 }
 
-struct CatalogDay: Codable, Sendable {
+nonisolated struct CatalogDay: Codable, Sendable {
     var albums: [String: CatalogAlbum]
 }
 
-struct CatalogAlbum: Codable, Sendable {
+nonisolated struct CatalogAlbum: Codable, Sendable {
     var addedAt: Date
     var images: [CatalogImage]
 
@@ -37,7 +37,7 @@ struct CatalogAlbum: Codable, Sendable {
     }
 }
 
-struct CatalogImage: Codable, Sendable {
+nonisolated struct CatalogImage: Codable, Sendable {
     var filename: String
     var sha256: String
     var sizeBytes: Int64
@@ -64,7 +64,7 @@ struct CatalogImage: Codable, Sendable {
 
 // MARK: - Encoder/Decoder Helpers
 
-extension Catalog {
+nonisolated extension Catalog {
     static func load(from url: URL) throws -> Catalog {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
