@@ -189,16 +189,29 @@ actor CatalogService {
                         }
 
                         if var localAlbum = localDay.albums[albumName] {
-                            // Union images by SHA-256
-                            let existingHashes = Set(localAlbum.images.map(\.sha256))
-                            for image in safeImages where !existingHashes.contains(image.sha256) {
-                                localAlbum.images.append(image)
+                            // Union images by SHA-256. For an image present on both
+                            // sides, reconcile field-by-field with a commutative rule
+                            // so both Macs converge on identical content (otherwise a
+                            // differing field — e.g. a healed b2FileId — ping-pongs
+                            // forever). Sort by sha256 so the merged array is canonical
+                            // regardless of which side contributed which image.
+                            var imagesBySHA = Dictionary(
+                                localAlbum.images.map { ($0.sha256, $0) },
+                                uniquingKeysWith: { $0.reconciled(with: $1) }
+                            )
+                            for image in safeImages {
+                                if let existing = imagesBySHA[image.sha256] {
+                                    imagesBySHA[image.sha256] = existing.reconciled(with: image)
+                                } else {
+                                    imagesBySHA[image.sha256] = image
+                                }
                             }
+                            localAlbum.images = imagesBySHA.values.sorted { $0.sha256 < $1.sha256 }
                             localAlbum.addedAt = max(localAlbum.addedAt, remoteAlbum.addedAt)
                             localDay.albums[albumName] = localAlbum
                         } else {
                             var sanitizedAlbum = remoteAlbum
-                            sanitizedAlbum.images = safeImages
+                            sanitizedAlbum.images = safeImages.sorted { $0.sha256 < $1.sha256 }
                             localDay.albums[albumName] = sanitizedAlbum
                         }
                     }

@@ -28,7 +28,10 @@ struct PhotosImportSheet: View {
     @Environment(\.encryptionService) private var encryptionService
     @Query private var volumes: [VolumeRecord]
     @State private var catalogAlbumCounts: [String: Int] = [:]
-    @State private var catalogTrackedAssetCounts: [String: Int] = [:]
+    /// Every Photos asset id tracked anywhere in the catalog. The picker
+    /// intersects each album's live asset ids with this to compute sync status
+    /// correctly even when duplicates dedup across albums.
+    @State private var globalTrackedIds: Set<String> = []
     @State private var pendingImports: [PendingAlbumImport] = []
     @State private var isComputingDates = false
     @State private var storageWarningAcknowledged = false
@@ -152,8 +155,12 @@ struct PhotosImportSheet: View {
         }
         .frame(width: 600, height: 500)
         .task {
-            catalogAlbumCounts = await syncCoordinator.catalogAlbumCounts()
-            catalogTrackedAssetCounts = await trackedAssetCounts()
+            // Overlap the two loads — catalogAlbumCounts runs on the catalog
+            // actor, the tracked-id scan on the model context.
+            async let counts = syncCoordinator.catalogAlbumCounts()
+            async let tracked = allTrackedAssetIds()
+            catalogAlbumCounts = await counts
+            globalTrackedIds = await tracked
         }
         // Library-monitor rechecks are pointless while this sheet is up: the
         // import mutates the same model context the diff reads, and iCloud
@@ -197,34 +204,16 @@ struct PhotosImportSheet: View {
         }
     }
 
-    /// Per Photos album (by localIdentifier): how many Photos assets the
-    /// catalog accounts for — the union of tracked asset ids plus legacy
-    /// images without ids. Distinct from the raw image count because
-    /// byte-identical Photos duplicates dedup to one stored image.
-    private func trackedAssetCounts() async -> [String: Int] {
-        let descriptor = FetchDescriptor<AlbumRecord>(
-            predicate: #Predicate { $0.photosAlbumLocalIdentifier != nil }
-        )
-        guard let albums = try? modelContext.fetch(descriptor) else { return [:] }
-        var counts: [String: Int] = [:]
-        for album in albums {
-            guard let photosAlbumId = album.photosAlbumLocalIdentifier else { continue }
-            var trackedIds = Set<String>()
-            var untracked = 0
-            for image in album.images {
-                let ids = image.allPHAssetIdentifiers
-                if ids.isEmpty {
-                    untracked += 1
-                } else {
-                    trackedIds.formUnion(ids)
-                }
-            }
-            counts[photosAlbumId] = trackedIds.count + untracked
-            // Faulting every album's images is a full catalog scan — yield
-            // between albums so the sheet stays responsive while it runs.
-            await Task.yield()
+    /// Every Photos asset id tracked by any image in the catalog. A single
+    /// fetch of all records, unioning their tracked ids — no per-album
+    /// relationship faulting.
+    private func allTrackedAssetIds() async -> Set<String> {
+        guard let records = try? modelContext.fetch(FetchDescriptor<ImageRecord>()) else { return [] }
+        var ids = Set<String>()
+        for record in records {
+            ids.formUnion(record.allPHAssetIdentifiers)
         }
-        return counts
+        return ids
     }
 
     // MARK: - Steps
@@ -263,7 +252,7 @@ struct PhotosImportSheet: View {
             PhotosAlbumPicker(
                 selectedAlbumIds: $selectedAlbumIds,
                 catalogAlbumCounts: catalogAlbumCounts,
-                catalogTrackedAssetCounts: catalogTrackedAssetCounts
+                globalTrackedIds: globalTrackedIds
             )
         }
     }

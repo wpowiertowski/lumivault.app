@@ -19,17 +19,37 @@ struct AlbumDelta: @unchecked Sendable {
     /// True if Photos no longer has this album at all (user deleted it).
     let albumMissing: Bool
 
+    /// Content signature captured at construction, while the `ImageRecord`s are
+    /// still valid. `hasSameContent` compares these instead of reading `.sha256`
+    /// off the record instances — a cached delta may reference records that were
+    /// deleted from the model context by the time a later recheck compares
+    /// against it, and touching a deleted SwiftData `@Model` is a hard crash.
+    private let addedIds: [String]
+    private let removedSHAs: [String]
+    private let untrackableSHAs: [String]
+
+    init(added: [PHAsset], removed: [ImageRecord], untrackable: [ImageRecord], albumMissing: Bool) {
+        self.added = added
+        self.removed = removed
+        self.untrackable = untrackable
+        self.albumMissing = albumMissing
+        self.addedIds = added.map(\.localIdentifier)
+        self.removedSHAs = removed.map(\.sha256)
+        self.untrackableSHAs = untrackable.map(\.sha256)
+    }
+
     var isEmpty: Bool {
         added.isEmpty && removed.isEmpty && !albumMissing
     }
 
     /// True when `other` describes the same additions/removals — used to skip
-    /// no-op `deltas` writes that would re-render observing views.
+    /// no-op `deltas` writes that would re-render observing views. Compares the
+    /// signatures captured at construction, never the (possibly deleted) records.
     func hasSameContent(as other: AlbumDelta) -> Bool {
         albumMissing == other.albumMissing &&
-        added.map(\.localIdentifier) == other.added.map(\.localIdentifier) &&
-        removed.map(\.sha256) == other.removed.map(\.sha256) &&
-        untrackable.map(\.sha256) == other.untrackable.map(\.sha256)
+        addedIds == other.addedIds &&
+        removedSHAs == other.removedSHAs &&
+        untrackableSHAs == other.untrackableSHAs
     }
 }
 
@@ -57,13 +77,21 @@ final class PhotosLibraryMonitor: NSObject, PHPhotoLibraryChangeObserver {
     private var registered = false
     /// Trailing-edge debounce for photo-library change bursts.
     @ObservationIgnored private var pendingRecheck: Task<Void, Never>?
+    /// When the current notification burst started, so the debounce can't be
+    /// postponed indefinitely by a continuous stream of changes.
+    @ObservationIgnored private var burstStartedAt: Date?
     /// While > 0 (an import or resync is running), full rechecks are deferred.
     @ObservationIgnored private var pauseCount = 0
     @ObservationIgnored private var recheckDeferredWhilePaused = false
 
     /// How long after the last library change notification before re-diffing.
     /// One diff per burst instead of one per notification.
-    private static let debounceInterval: Duration = .seconds(2)
+    private static let debounceInterval: TimeInterval = 2
+    /// Upper bound on how long a sustained notification stream can postpone a
+    /// recheck. Without this cap, iCloud download/analysis storms (which post
+    /// changes more often than the debounce interval for minutes) would starve
+    /// rechecks entirely and leave delta badges stale the whole time.
+    private static let maxDebounceLatency: TimeInterval = 10
 
     /// Begin observing the Photos library and run an initial diff for every
     /// catalogued album that has a `photosAlbumLocalIdentifier`.
@@ -98,11 +126,16 @@ final class PhotosLibraryMonitor: NSObject, PHPhotoLibraryChangeObserver {
         }
     }
 
-    /// Coalesce notification bursts into one recheck after a quiet period.
+    /// Coalesce notification bursts into one recheck after a quiet period, but
+    /// never postpone longer than `maxDebounceLatency` past the burst's start.
     private func scheduleRecheck() {
         pendingRecheck?.cancel()
+        let now = Date()
+        if burstStartedAt == nil { burstStartedAt = now }
+        let elapsed = now.timeIntervalSince(burstStartedAt ?? now)
+        let delay = min(Self.debounceInterval, max(0, Self.maxDebounceLatency - elapsed))
         pendingRecheck = Task { [weak self] in
-            try? await Task.sleep(for: Self.debounceInterval)
+            try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled else { return }
             await self?.recheckAll()
         }
@@ -114,6 +147,7 @@ final class PhotosLibraryMonitor: NSObject, PHPhotoLibraryChangeObserver {
             recheckDeferredWhilePaused = true
             return
         }
+        burstStartedAt = nil
         guard let modelContext else { return }
         let descriptor = FetchDescriptor<AlbumRecord>(
             predicate: #Predicate { $0.photosAlbumLocalIdentifier != nil }
@@ -188,22 +222,6 @@ final class PhotosLibraryMonitor: NSObject, PHPhotoLibraryChangeObserver {
             added: added,
             removed: parts.removedIndices.map { images[$0] },
             untrackable: parts.untrackableIndices.map { images[$0] },
-            albumMissing: false
-        )
-    }
-
-    /// Pure diff over PHAssets — convenience over the id-based core.
-    static func computeDelta(
-        photosAssets: [PHAsset],
-        catalogImages: [ImageRecord]
-    ) -> AlbumDelta {
-        let photoIds = Set(photosAssets.map(\.localIdentifier))
-        let parts = computeDeltaParts(photoIds: photoIds, catalogImages: catalogImages)
-        let added = photosAssets.filter { parts.addedIds.contains($0.localIdentifier) }
-        return AlbumDelta(
-            added: added,
-            removed: parts.removed,
-            untrackable: parts.untrackable,
             albumMissing: false
         )
     }

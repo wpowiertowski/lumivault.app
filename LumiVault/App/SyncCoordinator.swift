@@ -44,6 +44,14 @@ final class SyncCoordinator: @unchecked Sendable {
 
         try? await catalogService.load(from: catalogURL)
 
+        // Rebuild SwiftData from the catalog on launch when the store looks
+        // empty or out of sync with catalog.json (e.g. the container was reset
+        // or a prior hydration failed). Ongoing syncs only hydrate on remote
+        // changes, so without this a lost store that already agrees with iCloud
+        // would never repopulate and the sidebar/grid would stay empty.
+        let loaded = await catalogService.currentCatalog()
+        await MainActor.run { hydrateSwiftDataIfStale(catalog: loaded) }
+
         // Initialize sync service
         let service = SyncService(catalogService: catalogService)
         self.syncService = service
@@ -197,6 +205,20 @@ final class SyncCoordinator: @unchecked Sendable {
         // a record already exists and is rediscovered by sync/verify flows otherwise.
         await MainActor.run { hydrateSwiftData(from: catalog) }
         return catalog
+    }
+
+    /// Hydrate only when SwiftData's image count doesn't match the catalog —
+    /// a cheap proxy for "the store was lost or is stale." Keeps launch fast in
+    /// the common case (counts match → no full hydration) while still repairing
+    /// an empty/reset store even when catalog.json already agrees with iCloud.
+    @MainActor
+    private func hydrateSwiftDataIfStale(catalog: Catalog) {
+        guard let container = modelContainer else { return }
+        let context = ModelContext(container)
+        let recordCount = (try? context.fetchCount(FetchDescriptor<ImageRecord>())) ?? 0
+        if recordCount != catalog.totalImageCount {
+            hydrateSwiftData(from: catalog)
+        }
     }
 
     @MainActor
@@ -435,10 +457,10 @@ final class SyncCoordinator: @unchecked Sendable {
     private func localVolumeIdentities() -> [VolumeIdentity] {
         guard let container = modelContainer else { return [] }
         let context = ModelContext(container)
-        // Sorted: an unspecified fetch order flip-flops the synced settings
-        // document's content comparison (see SyncedSettings.capture).
-        let descriptor = FetchDescriptor<VolumeRecord>(sortBy: [SortDescriptor(\.volumeID)])
-        guard let volumes = try? context.fetch(descriptor) else { return [] }
+        // Order-independent: SyncedSettings.contentEquals compares each host's
+        // volumes as a set, so the fetch order here doesn't affect whether a
+        // push is triggered.
+        guard let volumes = try? context.fetch(FetchDescriptor<VolumeRecord>()) else { return [] }
         return volumes.map { VolumeIdentity(volumeID: $0.volumeID, label: $0.label) }
     }
 

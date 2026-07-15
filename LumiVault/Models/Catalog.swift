@@ -3,7 +3,7 @@ import CryptoKit
 
 // MARK: - catalog.json Codable Structs
 
-nonisolated struct Catalog: Codable, Sendable {
+nonisolated struct Catalog: Codable, Sendable, Equatable {
     var version: Int
     var lastUpdated: Date
     var years: [String: CatalogYear]
@@ -15,19 +15,19 @@ nonisolated struct Catalog: Codable, Sendable {
     }
 }
 
-nonisolated struct CatalogYear: Codable, Sendable {
+nonisolated struct CatalogYear: Codable, Sendable, Equatable {
     var months: [String: CatalogMonth]
 }
 
-nonisolated struct CatalogMonth: Codable, Sendable {
+nonisolated struct CatalogMonth: Codable, Sendable, Equatable {
     var days: [String: CatalogDay]
 }
 
-nonisolated struct CatalogDay: Codable, Sendable {
+nonisolated struct CatalogDay: Codable, Sendable, Equatable {
     var albums: [String: CatalogAlbum]
 }
 
-nonisolated struct CatalogAlbum: Codable, Sendable {
+nonisolated struct CatalogAlbum: Codable, Sendable, Equatable {
     var addedAt: Date
     var images: [CatalogImage]
 
@@ -37,7 +37,7 @@ nonisolated struct CatalogAlbum: Codable, Sendable {
     }
 }
 
-nonisolated struct CatalogImage: Codable, Sendable {
+nonisolated struct CatalogImage: Codable, Sendable, Equatable {
     var filename: String
     var sha256: String
     var sizeBytes: Int64
@@ -59,6 +59,103 @@ nonisolated struct CatalogImage: Codable, Sendable {
         case encryptionKeyId = "encryption_key_id"
         case encryptionNonce = "encryption_nonce"
         case encryptedSizeBytes = "encrypted_size_bytes"
+    }
+}
+
+// MARK: - Semantic comparison & merge helpers
+
+nonisolated extension Catalog {
+    /// Total number of images across the whole tree.
+    var totalImageCount: Int {
+        var count = 0
+        for year in years.values {
+            for month in year.months.values {
+                for day in month.days.values {
+                    for album in day.albums.values {
+                        count += album.images.count
+                    }
+                }
+            }
+        }
+        return count
+    }
+
+    /// Semantic equality that ignores `lastUpdated` and the ordering of each
+    /// album's images. Two catalogs that hold the same albums and images are
+    /// equal even when their JSON bytes differ (formatting, key order, array
+    /// order, encoder version). Sync relies on this — comparing raw bytes made
+    /// loop-prevention depend on the exact encoder configuration, so a
+    /// formatting change (or a mixed-version fleet) re-opened the write loop.
+    func contentEquals(_ other: Catalog) -> Bool {
+        normalizedYears() == other.normalizedYears()
+    }
+
+    /// `years` in a canonical form for content comparison: each album's images
+    /// sorted by sha256 (order-insensitive), and each album's `addedAt` floored
+    /// to whole seconds. catalog.json persists second-precision ISO-8601 dates,
+    /// so a higher-precision in-memory `addedAt` must not read as different
+    /// content from its round-tripped form — otherwise every sync sees a
+    /// spurious change and rewrites the target forever.
+    private func normalizedYears() -> [String: CatalogYear] {
+        func floorToSecond(_ date: Date) -> Date {
+            Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.down))
+        }
+        var result = years
+        for (y, var year) in result {
+            for (m, var month) in year.months {
+                for (d, var day) in month.days {
+                    for (name, var album) in day.albums {
+                        album.images.sort { $0.sha256 < $1.sha256 }
+                        album.addedAt = floorToSecond(album.addedAt)
+                        day.albums[name] = album
+                    }
+                    month.days[d] = day
+                }
+                year.months[m] = month
+            }
+            result[y] = year
+        }
+        return result
+    }
+}
+
+nonisolated extension CatalogImage {
+    /// Deterministically combine two catalog entries for the same image (same
+    /// sha256) so that `a.reconciled(with: b)` and `b.reconciled(with: a)`
+    /// produce identical results. Without a commutative merge, two Macs that
+    /// hold different values for one image — e.g. a `b2FileId` reassigned by a
+    /// heal on one Mac — never converge, and each sync re-pushes its own
+    /// version: an endless cross-Mac write loop the byte-level echo check
+    /// cannot break.
+    func reconciled(with other: CatalogImage) -> CatalogImage {
+        func pick(_ a: String, _ b: String) -> String { a >= b ? a : b }
+        func pick(_ a: String?, _ b: String?) -> String? {
+            switch (a, b) {
+            case (nil, nil): nil
+            case let (x?, nil): x
+            case let (nil, y?): y
+            case let (x?, y?): x >= y ? x : y
+            }
+        }
+        func pick(_ a: Int64?, _ b: Int64?) -> Int64? {
+            switch (a, b) {
+            case (nil, nil): nil
+            case let (x?, nil): x
+            case let (nil, y?): y
+            case let (x?, y?): Swift.max(x, y)
+            }
+        }
+        return CatalogImage(
+            filename: pick(filename, other.filename),
+            sha256: sha256,
+            sizeBytes: Swift.max(sizeBytes, other.sizeBytes),
+            par2Filename: pick(par2Filename, other.par2Filename),
+            b2FileId: pick(b2FileId, other.b2FileId),
+            encryptionAlgorithm: pick(encryptionAlgorithm, other.encryptionAlgorithm),
+            encryptionKeyId: pick(encryptionKeyId, other.encryptionKeyId),
+            encryptionNonce: pick(encryptionNonce, other.encryptionNonce),
+            encryptedSizeBytes: pick(encryptedSizeBytes, other.encryptedSizeBytes)
+        )
     }
 }
 

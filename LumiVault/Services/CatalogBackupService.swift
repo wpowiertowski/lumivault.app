@@ -159,11 +159,7 @@ actor CatalogBackupService {
         guard FileManager.default.fileExists(atPath: catalogURL.path) else {
             throw RestoreError.catalogNotFound(source: volumeURL.lastPathComponent)
         }
-
-        let data = try Data(contentsOf: catalogURL)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(Catalog.self, from: data)
+        return try Catalog.load(from: catalogURL)
     }
 
     /// Restore catalog from B2.
@@ -181,10 +177,7 @@ actor CatalogBackupService {
 
     /// Restore catalog from a local file URL.
     func restoreFromFile(url: URL) async throws -> Catalog {
-        let data = try Data(contentsOf: url)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(Catalog.self, from: data)
+        try Catalog.load(from: url)
     }
 
     // MARK: - Helpers

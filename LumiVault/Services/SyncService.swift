@@ -6,13 +6,12 @@ actor SyncService {
     private let syncURL: URL
     private let usesICloud: Bool
     private var isMonitoring = false
-    /// Bytes of the last catalog.json this process wrote to the sync target.
-    /// The NSMetadataQuery watching the container fires for our own writes
-    /// (and again for each upload-state transition); comparing against these
-    /// bytes lets `sync()` recognize such echoes and return without doing the
-    /// pull-merge-push cycle. Without this, every sync re-triggered another
-    /// sync ~2s later — an endless loop of main-thread catalog work.
-    private var lastPushedData: Data?
+    /// Serializes the read-merge-write critical sections of `sync()` and
+    /// `pushToICloud()` against each other. `SyncService` is an actor, but its
+    /// `await` points are reentrancy windows: without this lock a push from a
+    /// local mutation could interleave mid-`sync()` and get clobbered by the
+    /// stale merged bytes (e.g. resurrecting a just-deleted album).
+    private let syncLock = AsyncSemaphore(count: 1)
     /// Where `sync()` saves the merged catalog locally. Injectable so unit
     /// tests never touch the real `~/Pictures/LumiVault/catalog.json`.
     private let localCatalogURL: URL
@@ -89,14 +88,11 @@ actor SyncService {
     func pushToICloud() async throws {
         guard isICloudAvailable else { throw SyncError.iCloudUnavailable }
 
-        let catalog = await catalogService.currentCatalog()
-        let data = try encodeCatalog(catalog)
+        await syncLock.wait()
+        defer { Task { await syncLock.signal() } }
 
-        // Skip the write when the sync target already holds these exact
-        // bytes — every write re-triggers the metadata query watching the
-        // container.
-        if data == lastPushedData { return }
-        try writeSyncTarget(data)
+        let catalog = await catalogService.currentCatalog()
+        try writeSyncTarget(encodeCatalog(catalog))
     }
 
     private func writeSyncTarget(_ data: Data) throws {
@@ -109,18 +105,24 @@ actor SyncService {
         if usesICloud {
             let coordinator = NSFileCoordinator()
             var coordinatorError: NSError?
+            var writeError: Error?
 
             coordinator.coordinate(writingItemAt: syncURL, options: .forReplacing, error: &coordinatorError) { coordinatedURL in
-                try? data.write(to: coordinatedURL, options: .atomic)
+                do {
+                    try data.write(to: coordinatedURL, options: .atomic)
+                } catch {
+                    // Surface the inner write failure. Swallowing it (the old
+                    // `try?`) let a disk-full / container error masquerade as a
+                    // successful push, so the change was never retried.
+                    writeError = error
+                }
             }
 
-            if let error = coordinatorError {
-                throw error
-            }
+            if let coordinatorError { throw coordinatorError }
+            if let writeError { throw writeError }
         } else {
             try data.write(to: syncURL, options: .atomic)
         }
-        lastPushedData = data
     }
 
     // MARK: - Pull (sync target → local)
@@ -165,50 +167,51 @@ actor SyncService {
 
     /// Pull-merge-push. Returns `true` when the merge actually changed the
     /// local catalog — i.e. content arrived from another Mac that the caller
-    /// should re-hydrate SwiftData from. Byte differences that merge away
-    /// (format or timestamp churn from another Mac) report `false`.
+    /// should re-hydrate SwiftData from. Format or timestamp churn that merges
+    /// away reports `false`.
     ///
-    /// Pushes only when the merge produced bytes that differ from the sync
-    /// target, and recognizes metadata-query echoes of our own writes, so a
-    /// sync can never re-trigger itself through the query watching the
-    /// container.
+    /// Loop-freedom comes from `merge()` being idempotent and the push/hydrate
+    /// decisions using semantic content comparison (`Catalog.contentEquals`)
+    /// rather than raw bytes: re-reading our own push yields a merge that is
+    /// content-equal to both sides, so nothing is written and no further sync
+    /// is triggered.
     @discardableResult
     func sync() async throws -> Bool {
         guard isICloudAvailable else { throw SyncError.iCloudUnavailable }
 
-        let remoteData = try readSyncTarget()
+        await syncLock.wait()
+        defer { Task { await syncLock.signal() } }
 
-        // Echo of our own last push — nothing new from other Macs.
-        if let remoteData, remoteData == lastPushedData {
-            return false
-        }
+        let localBefore = await catalogService.currentCatalog()
+        let remoteData = try readSyncTarget()
 
         guard let remoteData else {
             // No remote file yet — seed the sync target with the local catalog.
-            try await pushToICloud()
-            try await catalogService.save(to: localCatalogURL)
+            try writeSyncTarget(encodeCatalog(localBefore))
+            // Materialize catalog.json locally only on a fresh install (no file
+            // yet). When it already exists it is byte-identical, so re-saving
+            // it (re-encode + SHA-256 + PAR2) would be pure wasted work.
+            if !FileManager.default.fileExists(atPath: localCatalogURL.path) {
+                try await catalogService.save(to: localCatalogURL)
+            }
             return false
         }
 
-        let localData = try encodeCatalog(await catalogService.currentCatalog())
         let remote = try decodeCatalog(remoteData)
         let merged = await catalogService.merge(remote: remote)
-        let mergedData = try encodeCatalog(merged)
 
-        if mergedData != remoteData {
-            try writeSyncTarget(mergedData)
-        } else {
-            // The target already equals the merge result; remember its bytes
-            // so the next metadata event for this content reads as settled.
-            lastPushedData = remoteData
+        // Push when our merged view differs in content from what the target
+        // holds. Semantic (not byte) comparison so formatting, key/array order,
+        // or a peer's encoder version never masquerade as a real change.
+        if !merged.contentEquals(remote) {
+            try writeSyncTarget(encodeCatalog(merged))
         }
 
-        let localChanged = mergedData != localData
+        // Re-hydrate + persist locally only when the merge changed local
+        // content. The save regenerates the .sha256/.par2 sidecars, so it is
+        // skipped for a no-op merge.
+        let localChanged = !merged.contentEquals(localBefore)
         if localChanged {
-            // Save the merged catalog locally (outside the watched container).
-            // Skipped when the merge was a no-op — the save regenerates the
-            // .sha256/.par2 sidecars, which is pointless work for unchanged
-            // content.
             try await catalogService.save(to: localCatalogURL)
         }
         return localChanged

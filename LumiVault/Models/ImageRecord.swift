@@ -44,13 +44,15 @@ final class ImageRecord {
         return phAssetLocalIdentifiers + [legacy]
     }
 
-    /// Record that `id` is a Photos asset backing this image.
+    /// Record that `id` is a Photos asset backing this image. The array is the
+    /// source of truth; the legacy scalar is only backfilled once (for records
+    /// created before multi-asset tracking) and never read on its own.
     func trackPHAsset(_ id: String) {
+        if !phAssetLocalIdentifiers.contains(id) {
+            phAssetLocalIdentifiers.append(id)
+        }
         if phAssetLocalIdentifier == nil {
             phAssetLocalIdentifier = id
-        }
-        if !allPHAssetIdentifiers.contains(id) {
-            phAssetLocalIdentifiers.append(id)
         }
     }
 

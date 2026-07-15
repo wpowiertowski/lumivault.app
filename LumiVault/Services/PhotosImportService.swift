@@ -152,6 +152,23 @@ actor PhotosImportService {
         return refs
     }
 
+    /// For each album id, how many of its current image assets are already
+    /// tracked in the catalog (present in `trackedIds`). Computed from the
+    /// album's live Photos asset ids intersected with the global tracked set, so
+    /// it stays correct when byte-identical duplicates dedup to a single stored
+    /// image owned by a different album — counting a record's ids per owning
+    /// album miscounts both albums in that case.
+    func importedAssetCounts(albumIds: [String], trackedIds: Set<String>) -> [String: Int] {
+        var result: [String: Int] = [:]
+        for albumId in albumIds {
+            guard let assets = fetchAssets(in: albumId) else { continue }
+            result[albumId] = assets.reduce(0) { count, asset in
+                count + (trackedIds.contains(asset.localIdentifier) ? 1 : 0)
+            }
+        }
+        return result
+    }
+
     // MARK: - Single Asset Import
 
     private func importAsset(
@@ -180,7 +197,20 @@ actor PhotosImportService {
         // duplicates into one SHA-256 — so render the current version instead.
         if resource.type != .fullSizePhoto,
            resources.contains(where: { $0.type == .adjustmentData }) {
-            return try await importRenderedAsset(asset, originalFilename: filename, to: directory)
+            do {
+                return try await importRenderedAsset(asset, originalFilename: filename, to: directory)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // The render couldn't be produced (offline, edit not yet
+                // materialized, or the request stalled). Fall through to the
+                // original resource so the photo is still archived in its
+                // unedited form rather than dropped entirely — the edit is lost,
+                // but the image is preserved.
+                Logger(subsystem: "app.lumivault", category: "import").warning(
+                    "Render unavailable for \(filename, privacy: .public); importing original instead. \(error.localizedDescription, privacy: .public)"
+                )
+            }
         }
 
         let destURL = directory.appendingPathComponent(filename)
@@ -197,6 +227,12 @@ actor PhotosImportService {
             phAssetLocalIdentifier: asset.localIdentifier
         )
     }
+
+    /// Idle timeout for the rendered-asset request. If the PHImageManager
+    /// request produces no progress for this long, the watchdog cancels it and
+    /// throws — so a request whose completion handler never fires (network drop
+    /// mid-iCloud-download) can't wedge the process-global `gate` forever.
+    static let renderStallThreshold: TimeInterval = 30
 
     /// Export an edited asset by rendering its current version through
     /// PHImageManager. Used when the `.fullSizePhoto` resource is missing, so
@@ -217,23 +253,38 @@ actor PhotosImportService {
         options.deliveryMode = .highQualityFormat
         options.isNetworkAccessAllowed = true
 
-        let resumed = OSAllocatedUnfairLock(initialState: false)
-        let (data, dataUTI): (Data, String?) = try await withCheckedThrowingContinuation { continuation in
-            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, uti, _, info in
-                if (info?[PHImageResultIsDegradedKey] as? Bool) == true { return }
-                let firstResult = resumed.withLock { done -> Bool in
-                    if done { return false }
-                    done = true
-                    return true
+        let state = RenderState()
+        // Downloads report progress; each callback resets the idle timer.
+        options.progressHandler = { _, _, _, _ in state.noteActivity() }
+
+        let (data, dataUTI): (Data, String?) = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(Data, String?), Error>) in
+                let requestID = PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, uti, _, info in
+                    if (info?[PHImageResultIsDegradedKey] as? Bool) == true { return }
+                    guard state.claimResume() else { return }
+                    state.cancelWatchdog()
+                    if let data {
+                        continuation.resume(returning: (data, uti))
+                    } else if let error = info?[PHImageErrorKey] as? Error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(throwing: PhotosImportError.exportFailed)
+                    }
                 }
-                guard firstResult else { return }
-                if let data {
-                    continuation.resume(returning: (data, uti))
-                } else if let error = info?[PHImageErrorKey] as? Error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(throwing: PhotosImportError.exportFailed)
+                // Arm the watchdog; it stays as the backstop even across task
+                // cancellation, so the continuation always resumes eventually.
+                state.arm(requestID: requestID, stallThreshold: Self.renderStallThreshold) {
+                    PHImageManager.default().cancelImageRequest(requestID)
+                    if state.claimResume() {
+                        continuation.resume(throwing: PhotosImportError.stalled)
+                    }
                 }
+            }
+        } onCancel: {
+            // Hasten completion; if the handler never fires, the still-armed
+            // watchdog will resume-throw within the idle threshold.
+            if let id = state.requestID {
+                PHImageManager.default().cancelImageRequest(id)
             }
         }
 
@@ -674,6 +725,67 @@ nonisolated private final class WriteState: @unchecked Sendable {
             state.resumed = true
             return true
         }
+    }
+}
+
+// MARK: - RenderState
+
+/// State shared between the PHImageManager result handler, the idle watchdog,
+/// and the task-cancellation path for a single `importRenderedAsset` request.
+/// Thread-safe via an unfair lock; nonisolated so the framework callback threads
+/// and the detached watchdog can all touch it.
+nonisolated private final class RenderState: @unchecked Sendable {
+    private let lock = OSAllocatedUnfairLock<Storage>(initialState: Storage())
+
+    private struct Storage {
+        var lastActivity: Date = .init()
+        var requestID: PHImageRequestID?
+        var watchdog: Task<Void, Never>?
+        var resumed: Bool = false
+    }
+
+    var requestID: PHImageRequestID? { lock.withLock { $0.requestID } }
+
+    func noteActivity() {
+        lock.withLock { $0.lastActivity = .init() }
+    }
+
+    /// Returns true for the single caller that wins the race to resume the
+    /// continuation, which must resume exactly once.
+    func claimResume() -> Bool {
+        lock.withLock { state in
+            guard !state.resumed else { return false }
+            state.resumed = true
+            return true
+        }
+    }
+
+    func cancelWatchdog() {
+        let task = lock.withLock { state -> Task<Void, Never>? in
+            let t = state.watchdog
+            state.watchdog = nil
+            return t
+        }
+        task?.cancel()
+    }
+
+    /// Start the idle watchdog. `onStall` fires when the request produces no
+    /// activity for `stallThreshold` seconds.
+    func arm(requestID: PHImageRequestID, stallThreshold: TimeInterval, onStall: @escaping @Sendable () -> Void) {
+        lock.withLock { $0.requestID = requestID }
+        let watchdog = Task.detached { [weak self] in
+            let tick: TimeInterval = 0.5
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(tick))
+                guard let self else { return }
+                let idle = Date().timeIntervalSince(self.lock.withLock { $0.lastActivity })
+                if idle >= stallThreshold {
+                    onStall()
+                    return
+                }
+            }
+        }
+        lock.withLock { $0.watchdog = watchdog }
     }
 }
 
