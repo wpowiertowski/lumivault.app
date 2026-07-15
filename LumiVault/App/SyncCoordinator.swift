@@ -103,12 +103,15 @@ final class SyncCoordinator: @unchecked Sendable {
         }
 
         do {
-            try await service.sync()
-            // Rebuild SwiftData from the merged catalog so @Query-backed views reflect
-            // albums/images that arrived from other Macs. Without this, a second Mac
-            // pulls catalog.json but the sidebar and grid stay empty.
-            let merged = await catalogService.currentCatalog()
-            await MainActor.run { hydrateSwiftData(from: merged) }
+            let hasRemoteChanges = try await service.sync()
+            if hasRemoteChanges {
+                // Rebuild SwiftData from the merged catalog so @Query-backed views reflect
+                // albums/images that arrived from other Macs. Without this, a second Mac
+                // pulls catalog.json but the sidebar and grid stay empty. Skipped when the
+                // sync was an echo of our own push — hydration is expensive main-actor work.
+                let merged = await catalogService.currentCatalog()
+                await MainActor.run { hydrateSwiftData(from: merged) }
+            }
             await syncSettings()
             await MainActor.run {
                 syncStatus = .synced
@@ -201,6 +204,19 @@ final class SyncCoordinator: @unchecked Sendable {
         guard let container = modelContainer else { return }
         let context = ModelContext(container)
 
+        // Batch-load both models once and match in memory. Fetching per image
+        // inside the loop made hydration O(N²) — SwiftData evaluated the
+        // #Predicate against every registered record for each lookup, which
+        // showed up in Time Profiler as seconds-long main-thread hangs.
+        var albumsByKey: [String: AlbumRecord] = [:]
+        for album in (try? context.fetch(FetchDescriptor<AlbumRecord>())) ?? [] {
+            albumsByKey["\(album.year)/\(album.month)/\(album.day)/\(album.name)"] = album
+        }
+        var imagesBySHA: [String: ImageRecord] = [:]
+        for image in (try? context.fetch(FetchDescriptor<ImageRecord>())) ?? [] {
+            imagesBySHA[image.sha256] = image
+        }
+
         var skippedCount = 0
 
         for (year, yearData) in catalog.years {
@@ -217,18 +233,9 @@ final class SyncCoordinator: @unchecked Sendable {
                             continue
                         }
 
-                        let lookupName = albumName
-                        let lookupYear = year
-                        let lookupMonth = month
-                        let lookupDay = day
-                        let albumDescriptor = FetchDescriptor<AlbumRecord>(
-                            predicate: #Predicate {
-                                $0.name == lookupName && $0.year == lookupYear &&
-                                $0.month == lookupMonth && $0.day == lookupDay
-                            }
-                        )
+                        let albumKey = "\(year)/\(month)/\(day)/\(albumName)"
                         let album: AlbumRecord
-                        if let existing = try? context.fetch(albumDescriptor).first {
+                        if let existing = albumsByKey[albumKey] {
                             album = existing
                         } else {
                             album = AlbumRecord(
@@ -239,6 +246,7 @@ final class SyncCoordinator: @unchecked Sendable {
                                 addedAt: catalogAlbum.addedAt
                             )
                             context.insert(album)
+                            albumsByKey[albumKey] = album
                         }
 
                         for catalogImage in catalogAlbum.images {
@@ -250,13 +258,9 @@ final class SyncCoordinator: @unchecked Sendable {
                                 skippedCount += 1
                                 continue
                             }
-                            let sha = catalogImage.sha256
-                            let imageDescriptor = FetchDescriptor<ImageRecord>(
-                                predicate: #Predicate { $0.sha256 == sha }
-                            )
                             let nonce = catalogImage.encryptionNonce.flatMap { Data(base64Encoded: $0) }
                             let isEncrypted = catalogImage.encryptionAlgorithm != nil
-                            if let existing = try? context.fetch(imageDescriptor).first {
+                            if let existing = imagesBySHA[catalogImage.sha256] {
                                 existing.filename = catalogImage.filename
                                 existing.sizeBytes = catalogImage.sizeBytes
                                 existing.par2Filename = catalogImage.par2Filename
@@ -284,6 +288,7 @@ final class SyncCoordinator: @unchecked Sendable {
                                     encryptionNonce: nonce
                                 )
                                 context.insert(record)
+                                imagesBySHA[catalogImage.sha256] = record
                             }
                         }
                     }

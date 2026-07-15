@@ -6,9 +6,20 @@ actor SyncService {
     private let syncURL: URL
     private let usesICloud: Bool
     private var isMonitoring = false
+    /// Bytes of the last catalog.json this process wrote to the sync target.
+    /// The NSMetadataQuery watching the container fires for our own writes
+    /// (and again for each upload-state transition); comparing against these
+    /// bytes lets `sync()` recognize such echoes and return without doing the
+    /// pull-merge-push cycle. Without this, every sync re-triggered another
+    /// sync ~2s later — an endless loop of main-thread catalog work.
+    private var lastPushedData: Data?
+    /// Where `sync()` saves the merged catalog locally. Injectable so unit
+    /// tests never touch the real `~/Pictures/LumiVault/catalog.json`.
+    private let localCatalogURL: URL
 
     init(catalogService: CatalogService) {
         self.catalogService = catalogService
+        self.localCatalogURL = Constants.Paths.resolvedCatalogURL
 
         if let iCloudURL = FileManager.default.url(
             forUbiquityContainerIdentifier: containerID
@@ -35,6 +46,9 @@ actor SyncService {
         self.catalogService = catalogService
         self.syncURL = syncURL
         self.usesICloud = false
+        self.localCatalogURL = syncURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("local-catalog.json")
     }
 
     var isICloudAvailable: Bool {
@@ -49,20 +63,45 @@ actor SyncService {
         #endif
     }
 
+    // MARK: - Encoding
+
+    private func encodeCatalog(_ catalog: Catalog) async throws -> Data {
+        try await MainActor.run {
+            let encoder = JSONEncoder()
+            // sortedKeys keeps the output deterministic so byte comparisons
+            // ("did the merge change anything?") are meaningful. prettyPrinted
+            // was dropped — it inflated encode time and file size for a
+            // machine-consumed file.
+            encoder.outputFormatting = [.sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            return try encoder.encode(catalog)
+        }
+    }
+
+    private func decodeCatalog(_ data: Data) async throws -> Catalog {
+        try await MainActor.run {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(Catalog.self, from: data)
+        }
+    }
+
     // MARK: - Push (local → sync target)
 
     func pushToICloud() async throws {
         guard isICloudAvailable else { throw SyncError.iCloudUnavailable }
 
         let catalog = await catalogService.currentCatalog()
+        let data = try await encodeCatalog(catalog)
 
-        let data = try await MainActor.run {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            encoder.dateEncodingStrategy = .iso8601
-            return try encoder.encode(catalog)
-        }
+        // Skip the write when the sync target already holds these exact
+        // bytes — every write re-triggers the metadata query watching the
+        // container.
+        if data == lastPushedData { return }
+        try writeSyncTarget(data)
+    }
 
+    private func writeSyncTarget(_ data: Data) throws {
         // Ensure parent directory exists
         let dir = syncURL.deletingLastPathComponent()
         if !FileManager.default.fileExists(atPath: dir.path) {
@@ -83,13 +122,12 @@ actor SyncService {
         } else {
             try data.write(to: syncURL, options: .atomic)
         }
+        lastPushedData = data
     }
 
     // MARK: - Pull (sync target → local)
 
-    func pullFromICloud() async throws -> Catalog? {
-        guard isICloudAvailable else { throw SyncError.iCloudUnavailable }
-
+    private func readSyncTarget() throws -> Data? {
         if usesICloud {
             // Trigger download if file is in iCloud but not local
             try? FileManager.default.startDownloadingUbiquitousItem(at: syncURL)
@@ -114,28 +152,60 @@ actor SyncService {
             fileData = try? Data(contentsOf: syncURL)
         }
 
-        guard let data = fileData else { return nil }
-
-        let remote = try await MainActor.run {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            return try decoder.decode(Catalog.self, from: data)
-        }
-
-        let merged = await catalogService.merge(remote: remote)
-        return merged
+        return fileData
     }
 
-    // MARK: - Sync (pull then push)
+    func pullFromICloud() async throws -> Catalog? {
+        guard isICloudAvailable else { throw SyncError.iCloudUnavailable }
 
-    func sync() async throws {
-        _ = try await pullFromICloud()
+        guard let data = try readSyncTarget() else { return nil }
+        let remote = try await decodeCatalog(data)
+        return await catalogService.merge(remote: remote)
+    }
 
-        // After merging remote changes, push the merged result back
-        try await pushToICloud()
+    // MARK: - Sync (pull, merge, push-if-changed)
 
-        // Also save merged catalog locally
-        try await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
+    /// Pull-merge-push. Returns `true` when the sync target held content that
+    /// differed from our last push — i.e. changes from another Mac that the
+    /// caller should re-hydrate SwiftData from.
+    ///
+    /// Pushes only when the merge produced bytes that differ from the sync
+    /// target, and recognizes metadata-query echoes of our own writes, so a
+    /// sync can never re-trigger itself through the query watching the
+    /// container.
+    @discardableResult
+    func sync() async throws -> Bool {
+        guard isICloudAvailable else { throw SyncError.iCloudUnavailable }
+
+        let remoteData = try readSyncTarget()
+
+        // Echo of our own last push — nothing new from other Macs.
+        if let remoteData, remoteData == lastPushedData {
+            return false
+        }
+
+        guard let remoteData else {
+            // No remote file yet — seed the sync target with the local catalog.
+            try await pushToICloud()
+            try await catalogService.save(to: localCatalogURL)
+            return false
+        }
+
+        let remote = try await decodeCatalog(remoteData)
+        let merged = await catalogService.merge(remote: remote)
+        let mergedData = try await encodeCatalog(merged)
+
+        if mergedData != remoteData {
+            try writeSyncTarget(mergedData)
+        } else {
+            // The target already equals the merge result; remember its bytes
+            // so the next metadata event for this content reads as settled.
+            lastPushedData = remoteData
+        }
+
+        // Save the merged catalog locally (outside the watched container).
+        try await catalogService.save(to: localCatalogURL)
+        return true
     }
 
     // MARK: - NSMetadataQuery Monitoring
