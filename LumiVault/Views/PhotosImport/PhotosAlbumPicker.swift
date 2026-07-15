@@ -19,14 +19,17 @@ enum AlbumSyncStatus {
 
 struct PhotosAlbumPicker: View {
     @Binding var selectedAlbumIds: Set<String>
+    /// Legacy title → aggregate catalog image count, used only for albums with
+    /// no id-tracked assets (imported before asset-id tracking existed).
     let catalogAlbumCounts: [String: Int]
-    /// Photos-album localIdentifier → number of Photos assets the catalog
-    /// accounts for (tracked asset ids + legacy images without ids). Byte-
-    /// identical duplicates in Photos dedup to one stored image, so this can
-    /// exceed the raw image count — comparing raw counts would flag such
-    /// albums as out of sync forever.
-    let catalogTrackedAssetCounts: [String: Int]
+    /// Every Photos asset id tracked anywhere in the catalog. Intersected with
+    /// each album's live asset ids to count how many are already imported —
+    /// correct even when byte-identical duplicates dedup across albums.
+    let globalTrackedIds: Set<String>
     @State private var albums: [PhotosAlbum] = []
+    /// Photos-album localIdentifier → number of its current assets already
+    /// tracked in the catalog. Computed on load; `syncStatus` reads it.
+    @State private var importedCounts: [String: Int] = [:]
     @State private var searchText = ""
     @State private var sortOrder: AlbumSortOrder = .name
     @State private var sortAscending = true
@@ -160,25 +163,32 @@ struct PhotosAlbumPicker: View {
     private func loadAlbums() async {
         isLoading = true
         let service = PhotosImportService()
-        albums = await service.fetchAlbums()
+        let fetched = await service.fetchAlbums()
+        albums = fetched
+        importedCounts = await service.importedAssetCounts(
+            albumIds: fetched.map(\.id), trackedIds: globalTrackedIds
+        )
         isLoading = false
     }
 
     private func syncStatus(for album: PhotosAlbum) -> AlbumSyncStatus {
-        // Asset-id tracking is the source of truth when available; the raw
-        // image count only decides for albums imported before id tracking.
-        if let tracked = catalogTrackedAssetCounts[album.id] {
-            return tracked == album.assetCount
+        // Asset-id intersection is the source of truth when any of the album's
+        // assets are tracked; imported ≤ assetCount always, so equality means
+        // fully synced.
+        let imported = importedCounts[album.id] ?? 0
+        if imported > 0 {
+            return imported >= album.assetCount
                 ? .synced
-                : .needsUpdate(catalogCount: catalogAlbumCounts[album.title] ?? tracked)
+                : .needsUpdate(catalogCount: imported)
         }
+        // No id-tracked assets — fall back to the legacy title-based count for
+        // albums imported before asset-id tracking existed.
         guard let catalogCount = catalogAlbumCounts[album.title] else {
             return .notSynced
         }
-        if catalogCount == album.assetCount {
-            return .synced
-        }
-        return .needsUpdate(catalogCount: catalogCount)
+        return catalogCount >= album.assetCount
+            ? .synced
+            : .needsUpdate(catalogCount: catalogCount)
     }
 }
 

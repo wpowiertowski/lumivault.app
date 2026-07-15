@@ -44,6 +44,14 @@ final class SyncCoordinator: @unchecked Sendable {
 
         try? await catalogService.load(from: catalogURL)
 
+        // Rebuild SwiftData from the catalog on launch when the store looks
+        // empty or out of sync with catalog.json (e.g. the container was reset
+        // or a prior hydration failed). Ongoing syncs only hydrate on remote
+        // changes, so without this a lost store that already agrees with iCloud
+        // would never repopulate and the sidebar/grid would stay empty.
+        let loaded = await catalogService.currentCatalog()
+        await MainActor.run { hydrateSwiftDataIfStale(catalog: loaded) }
+
         // Initialize sync service
         let service = SyncService(catalogService: catalogService)
         self.syncService = service
@@ -199,6 +207,20 @@ final class SyncCoordinator: @unchecked Sendable {
         return catalog
     }
 
+    /// Hydrate only when SwiftData's image count doesn't match the catalog —
+    /// a cheap proxy for "the store was lost or is stale." Keeps launch fast in
+    /// the common case (counts match → no full hydration) while still repairing
+    /// an empty/reset store even when catalog.json already agrees with iCloud.
+    @MainActor
+    private func hydrateSwiftDataIfStale(catalog: Catalog) {
+        guard let container = modelContainer else { return }
+        let context = ModelContext(container)
+        let recordCount = (try? context.fetchCount(FetchDescriptor<ImageRecord>())) ?? 0
+        if recordCount != catalog.totalImageCount {
+            hydrateSwiftData(from: catalog)
+        }
+    }
+
     @MainActor
     private func hydrateSwiftData(from catalog: Catalog) {
         guard let container = modelContainer else { return }
@@ -218,6 +240,10 @@ final class SyncCoordinator: @unchecked Sendable {
         }
 
         var skippedCount = 0
+        // Track what the (post-merge) catalog contains so tombstone-driven
+        // deletions below never touch a path/sha the catalog still holds.
+        var catalogAlbumKeys = Set<String>()
+        var catalogSHAs = Set<String>()
 
         for (year, yearData) in catalog.years {
             for (month, monthData) in yearData.months {
@@ -234,6 +260,7 @@ final class SyncCoordinator: @unchecked Sendable {
                         }
 
                         let albumKey = "\(year)/\(month)/\(day)/\(albumName)"
+                        catalogAlbumKeys.insert(albumKey)
                         let album: AlbumRecord
                         if let existing = albumsByKey[albumKey] {
                             album = existing
@@ -258,6 +285,7 @@ final class SyncCoordinator: @unchecked Sendable {
                                 skippedCount += 1
                                 continue
                             }
+                            catalogSHAs.insert(catalogImage.sha256)
                             let nonce = catalogImage.encryptionNonce.flatMap { Data(base64Encoded: $0) }
                             let isEncrypted = catalogImage.encryptionAlgorithm != nil
                             if let existing = imagesBySHA[catalogImage.sha256] {
@@ -293,6 +321,33 @@ final class SyncCoordinator: @unchecked Sendable {
                         }
                     }
                 }
+            }
+        }
+
+        // Reflect deletions that arrived via merge: remove SwiftData records a
+        // tombstone marks deleted, so a peer's deletion actually clears from the
+        // sidebar/grid. Gated on the catalog no longer holding the item and on
+        // the record predating the deletion, so an in-flight local import (a
+        // fresh record not yet in the catalog) is never nuked.
+        for tombstone in catalog.deletions ?? [] {
+            if let sha = tombstone.sha256 {
+                guard !catalogSHAs.contains(sha),
+                      let record = imagesBySHA[sha],
+                      record.addedAt <= tombstone.deletedAt else { continue }
+                context.delete(record)
+                imagesBySHA.removeValue(forKey: sha)
+            } else {
+                guard !catalogAlbumKeys.contains(tombstone.albumKey),
+                      let album = albumsByKey[tombstone.albumKey],
+                      album.addedAt <= tombstone.deletedAt else { continue }
+                // Delete images that live only in this album; images re-parented
+                // to a surviving album were already updated above.
+                for image in album.images where !catalogSHAs.contains(image.sha256) {
+                    context.delete(image)
+                    imagesBySHA.removeValue(forKey: image.sha256)
+                }
+                context.delete(album)
+                albumsByKey.removeValue(forKey: tombstone.albumKey)
             }
         }
 
@@ -435,10 +490,10 @@ final class SyncCoordinator: @unchecked Sendable {
     private func localVolumeIdentities() -> [VolumeIdentity] {
         guard let container = modelContainer else { return [] }
         let context = ModelContext(container)
-        // Sorted: an unspecified fetch order flip-flops the synced settings
-        // document's content comparison (see SyncedSettings.capture).
-        let descriptor = FetchDescriptor<VolumeRecord>(sortBy: [SortDescriptor(\.volumeID)])
-        guard let volumes = try? context.fetch(descriptor) else { return [] }
+        // Order-independent: SyncedSettings.contentEquals compares each host's
+        // volumes as a set, so the fetch order here doesn't affect whether a
+        // push is triggered.
+        guard let volumes = try? context.fetch(FetchDescriptor<VolumeRecord>()) else { return [] }
         return volumes.map { VolumeIdentity(volumeID: $0.volumeID, label: $0.label) }
     }
 

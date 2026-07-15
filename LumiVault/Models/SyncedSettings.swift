@@ -202,6 +202,24 @@ nonisolated extension SyncedSettings {
             && encryptionEnabled == other.encryptionEnabled
             && encryptionSalt == other.encryptionSalt
             && encryptionKeyId == other.encryptionKeyId
-            && (volumesByHost ?? [:]) == (other.volumesByHost ?? [:])
+            && Self.volumesByHostEqual(volumesByHost, other.volumesByHost)
+    }
+
+    /// Compare each host's volume list as a set. `VolumeIdentity` is `Hashable`,
+    /// and the order in which a host's volumes are captured is not meaningful —
+    /// comparing order-sensitively made an unordered producer look "changed"
+    /// every pass, rewriting settings.json in an endless loop.
+    private static func volumesByHostEqual(
+        _ a: [String: [VolumeIdentity]]?,
+        _ b: [String: [VolumeIdentity]]?
+    ) -> Bool {
+        let lhs = a ?? [:]
+        let rhs = b ?? [:]
+        guard lhs.keys.count == rhs.keys.count else { return false }
+        for (host, volumes) in lhs {
+            guard let otherVolumes = rhs[host] else { return false }
+            if Set(volumes) != Set(otherVolumes) { return false }
+        }
+        return true
     }
 }

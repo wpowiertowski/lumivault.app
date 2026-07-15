@@ -316,4 +316,247 @@ struct SyncServiceTests {
             _ = try await sync.pullFromICloud()
         }
     }
+
+    // MARK: - Sync (stranded local changes / target reseed)
+
+    /// A local mutation that was never separately pushed (e.g. an integrity
+    /// heal updates the catalog but doesn't call the push path) must still reach
+    /// the sync target on the next sync. The old echo short-circuit returned
+    /// early whenever the target matched the last push and left the change
+    /// stranded for the rest of the session.
+    @Test func syncPushesLocalChangeThatWasNeverPushed() async throws {
+        let syncURL = makeTempSyncURL()
+        defer { try? FileManager.default.removeItem(at: syncURL.deletingLastPathComponent()) }
+
+        let catalogService = CatalogService()
+        let shaA = "aaaa000000000000000000000000000000000000000000000000000000000000"
+        await catalogService.addImage(
+            CatalogImage(filename: "a.heic", sha256: shaA, sizeBytes: 100, par2Filename: "a.heic.par2"),
+            toAlbum: "Shared", year: "2025", month: "07", day: "15"
+        )
+        let sync = SyncService(catalogService: catalogService, syncURL: syncURL)
+
+        // Seed the target with just image A.
+        _ = try await sync.sync()
+
+        // A local-only change lands (not routed through pushToICloud).
+        let shaB = "bbbb000000000000000000000000000000000000000000000000000000000000"
+        await catalogService.addImage(
+            CatalogImage(filename: "b.heic", sha256: shaB, sizeBytes: 100, par2Filename: "b.heic.par2"),
+            toAlbum: "Shared", year: "2025", month: "07", day: "15"
+        )
+
+        _ = try await sync.sync()
+
+        // The target must now carry the local addition.
+        let decoded = try Catalog.load(from: syncURL)
+        let hashes = Set((decoded.years["2025"]?.months["07"]?.days["15"]?
+            .albums["Shared"]?.images ?? []).map(\.sha256))
+        #expect(hashes == [shaA, shaB])
+    }
+
+    /// If the sync target is deleted or evicted after our last push, the next
+    /// sync must re-seed it — the old `data == lastPushedData` skip in the push
+    /// path left a deleted target missing forever.
+    @Test func syncReseedsTargetAfterItIsDeleted() async throws {
+        let syncURL = makeTempSyncURL()
+        defer { try? FileManager.default.removeItem(at: syncURL.deletingLastPathComponent()) }
+
+        let catalogService = CatalogService()
+        let spec = TestFixtures.files[0]
+        await catalogService.addImage(
+            CatalogImage(filename: spec.name, sha256: spec.sha256,
+                         sizeBytes: Int64(spec.size), par2Filename: spec.par2Name),
+            toAlbum: spec.album, year: spec.year, month: spec.month, day: spec.day
+        )
+        let sync = SyncService(catalogService: catalogService, syncURL: syncURL)
+
+        _ = try await sync.sync()
+        #expect(FileManager.default.fileExists(atPath: syncURL.path))
+
+        // Simulate the container being cleared / the file evicted.
+        try FileManager.default.removeItem(at: syncURL)
+        #expect(FileManager.default.fileExists(atPath: syncURL.path) == false)
+
+        _ = try await sync.sync()
+        #expect(FileManager.default.fileExists(atPath: syncURL.path))
+    }
+
+    // MARK: - Merge convergence
+
+    /// Two Macs that each contribute a different image to the same album must
+    /// converge on identical content after exchanging catalogs — otherwise each
+    /// keeps pushing its own ordering and they ping-pong catalog.json forever.
+    @Test func mergeConvergesRegardlessOfContributionOrder() async throws {
+        let shaX = "1111000000000000000000000000000000000000000000000000000000000000"
+        let shaY = "2222000000000000000000000000000000000000000000000000000000000000"
+
+        let macA = CatalogService()
+        await macA.addImage(
+            CatalogImage(filename: "x.heic", sha256: shaX, sizeBytes: 1, par2Filename: "x.par2"),
+            toAlbum: "Trip", year: "2025", month: "07", day: "15"
+        )
+        let macB = CatalogService()
+        await macB.addImage(
+            CatalogImage(filename: "y.heic", sha256: shaY, sizeBytes: 1, par2Filename: "y.par2"),
+            toAlbum: "Trip", year: "2025", month: "07", day: "15"
+        )
+
+        let mergedA = await macA.merge(remote: await macB.currentCatalog())
+        let mergedB = await macB.merge(remote: await macA.currentCatalog())
+
+        #expect(mergedA.contentEquals(mergedB))
+        // Deterministic (sorted) image order on both sides.
+        let orderA = (mergedA.years["2025"]?.months["07"]?.days["15"]?.albums["Trip"]?.images ?? []).map(\.sha256)
+        let orderB = (mergedB.years["2025"]?.months["07"]?.days["15"]?.albums["Trip"]?.images ?? []).map(\.sha256)
+        #expect(orderA == [shaX, shaY])
+        #expect(orderB == [shaX, shaY])
+    }
+
+    /// A field that differs for the same image (a b2FileId reassigned by a heal
+    /// on one Mac) must reconcile the same way on both Macs so they converge.
+    @Test func mergeReconcilesDivergentB2FileIdCommutatively() async throws {
+        let sha = "3333000000000000000000000000000000000000000000000000000000000000"
+
+        func service(b2FileId: String?) async -> CatalogService {
+            let s = CatalogService()
+            await s.addImage(
+                CatalogImage(filename: "p.heic", sha256: sha, sizeBytes: 1,
+                             par2Filename: "p.par2", b2FileId: b2FileId),
+                toAlbum: "Trip", year: "2025", month: "07", day: "15"
+            )
+            return s
+        }
+
+        let macA = await service(b2FileId: "F1")
+        let macB = await service(b2FileId: nil)
+
+        let mergedA = await macA.merge(remote: await macB.currentCatalog())
+        let mergedB = await macB.merge(remote: await macA.currentCatalog())
+
+        #expect(mergedA.contentEquals(mergedB))
+        // Non-nil healed id wins on both sides.
+        let idA = mergedA.years["2025"]?.months["07"]?.days["15"]?.albums["Trip"]?.images.first?.b2FileId
+        #expect(idA == "F1")
+    }
+
+    // MARK: - Tombstones (deletion propagation)
+
+    private func addSharedImage(to service: CatalogService, sha: String) async {
+        await service.addImage(
+            CatalogImage(filename: "x.heic", sha256: sha, sizeBytes: 1, par2Filename: "x.par2"),
+            toAlbum: "Trip", year: "2025", month: "07", day: "15"
+        )
+    }
+
+    /// A whole-album deletion must propagate to the peer and must not be
+    /// resurrected on the deleting Mac by the peer's still-present copy.
+    @Test func albumDeletionPropagatesAndDoesNotResurrect() async throws {
+        let sha = "1111000000000000000000000000000000000000000000000000000000000000"
+        let macA = CatalogService()
+        let macB = CatalogService()
+        await addSharedImage(to: macA, sha: sha)
+        await addSharedImage(to: macB, sha: sha)
+
+        await macA.removeAlbum(name: "Trip", year: "2025", month: "07", day: "15")
+        let aAfterDelete = await macA.currentCatalog()
+        #expect(aAfterDelete.years["2025"] == nil)
+        #expect((aAfterDelete.deletions ?? []).count == 1)
+
+        // A pulls B (B still has the album): must not come back.
+        let mergedA = await macA.merge(remote: await macB.currentCatalog())
+        #expect(mergedA.years["2025"] == nil)
+
+        // B pulls A: the deletion must remove the album on B too.
+        let mergedB = await macB.merge(remote: aAfterDelete)
+        #expect(mergedB.years["2025"] == nil)
+
+        #expect(mergedA.contentEquals(mergedB))
+    }
+
+    /// A single-image deletion propagates while the rest of the album stays.
+    @Test func imageDeletionPropagatesButKeepsOtherImages() async throws {
+        let shaX = "1111000000000000000000000000000000000000000000000000000000000000"
+        let shaY = "2222000000000000000000000000000000000000000000000000000000000000"
+
+        func service() async -> CatalogService {
+            let s = CatalogService()
+            await addSharedImage(to: s, sha: shaX)
+            await s.addImage(
+                CatalogImage(filename: "y.heic", sha256: shaY, sizeBytes: 1, par2Filename: "y.par2"),
+                toAlbum: "Trip", year: "2025", month: "07", day: "15"
+            )
+            return s
+        }
+        let macA = await service()
+        let macB = await service()
+
+        await macA.removeImage(sha256: shaX, fromAlbum: "Trip", year: "2025", month: "07", day: "15")
+
+        let mergedB = await macB.merge(remote: await macA.currentCatalog())
+        let hashes = Set((mergedB.years["2025"]?.months["07"]?.days["15"]?
+            .albums["Trip"]?.images ?? []).map(\.sha256))
+        #expect(hashes == [shaY])
+        #expect(mergedB.contentEquals(await macA.merge(remote: await macB.currentCatalog())))
+    }
+
+    /// Re-importing after a deletion must win over the tombstone (add-wins by
+    /// timestamp), and drop the now-superseded tombstone.
+    @Test func reimportAfterDeletionWinsOverTombstone() async throws {
+        let sha = "1111000000000000000000000000000000000000000000000000000000000000"
+        let macA = CatalogService()
+        let macB = CatalogService()
+        await addSharedImage(to: macA, sha: sha)
+        await addSharedImage(to: macB, sha: sha)
+
+        // A deletes; B learns the deletion.
+        await macA.removeAlbum(name: "Trip", year: "2025", month: "07", day: "15")
+        _ = await macB.merge(remote: await macA.currentCatalog())
+        #expect(await macB.currentCatalog().years["2025"] == nil)
+
+        // B re-imports the album afterwards.
+        await addSharedImage(to: macB, sha: sha)
+
+        // A (still holding the tombstone) pulls B's re-import: the album returns.
+        let mergedA = await macA.merge(remote: await macB.currentCatalog())
+        #expect(mergedA.years["2025"]?.months["07"]?.days["15"]?.albums["Trip"]?.images.count == 1)
+        #expect((mergedA.deletions ?? []).isEmpty)
+    }
+
+    /// Merging the same remote twice must be a no-op the second time —
+    /// tombstones must not reintroduce the sync write loop.
+    @Test func tombstoneMergeIsIdempotent() async throws {
+        let sha = "1111000000000000000000000000000000000000000000000000000000000000"
+        let macA = CatalogService()
+        let macB = CatalogService()
+        await addSharedImage(to: macA, sha: sha)
+        await addSharedImage(to: macB, sha: sha)
+        await macA.removeAlbum(name: "Trip", year: "2025", month: "07", day: "15")
+
+        let remote = await macA.currentCatalog()
+        let first = await macB.merge(remote: remote)
+        let second = await macB.merge(remote: remote)
+        #expect(first.contentEquals(second))
+    }
+
+    /// A catalog with no deletions must encode without the `deletions` key so
+    /// the on-disk format stays identical to the pre-tombstone version and older
+    /// app builds keep decoding it.
+    @Test func catalogWithoutDeletionsOmitsKeyAndDecodesLegacy() throws {
+        let catalog = makeCatalog(albumName: "Trip", imageName: "x.heic",
+                                  sha256: "1111000000000000000000000000000000000000000000000000000000000000")
+        #expect(catalog.deletions == nil)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(catalog)
+        let json = String(decoding: data, as: UTF8.self)
+        #expect(!json.contains("deletions"))
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(Catalog.self, from: data)
+        #expect(decoded.deletions == nil)
+    }
 }

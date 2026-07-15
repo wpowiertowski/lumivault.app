@@ -20,7 +20,7 @@ xcodegen generate
 xcodebuild -project LumiVault.xcodeproj -scheme LumiVault -configuration Debug build
 ```
 
-The `.xcodeproj` is gitignored — always regenerate from `project.yml` with `xcodegen generate`.
+The `.xcodeproj` is generated from `project.yml` by `xcodegen generate` and committed to the repo. Regenerate and commit it after any structural change (added/removed/moved files or `project.yml` edits).
 
 ## Architecture
 
