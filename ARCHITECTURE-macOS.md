@@ -36,6 +36,7 @@
 | Encryption | CryptoKit (AES-256-GCM), CommonCrypto (PBKDF2) | Per-file encryption at rest |
 | In-App Purchase | StoreKit 2 | Tip jar consumable products |
 | Drag & Drop | UniformTypeIdentifiers, Transferable | Native drag-in import, drag-out export |
+| Video Pipeline *(planned)* | AVFoundation, AVKit | Poster-frame thumbnails, duration/codec metadata, in-app playback |
 
 ---
 
@@ -104,6 +105,12 @@ catalog.json
 Codable structs mirror this hierarchy exactly. Serialization uses `JSONEncoder` with
 `.sortedKeys` and `.iso8601` date strategy for deterministic output.
 
+*(Planned — video support)*: each entry in `images` gains two optional fields,
+`media_type` (`"video"`; absent = image) and `duration_seconds`. Both are optional so
+older catalogs decode unchanged and older app versions ignore the unknown keys — the
+`images` array name is preserved for schema compatibility even though it will hold
+both media types.
+
 ### 4.2 SwiftData Models (Local Index)
 
 ```swift
@@ -121,6 +128,11 @@ Codable structs mirror this hierarchy exactly. Serialization uses `JSONEncoder` 
     var isEncrypted: Bool                     // true if stored as ciphertext
     var encryptionKeyId: String?              // identifies which key encrypted
     var encryptionNonce: Data?                // 12-byte AES-GCM nonce
+    // Planned — video support (defaults keep lightweight migration):
+    var mediaTypeRaw: String                  // "image" (default) | "video"
+    var durationSeconds: Double?              // videos only
+    var pixelWidth: Int?                      // for the inspector
+    var pixelHeight: Int?
 }
 
 @Model class AlbumRecord {
@@ -319,7 +331,9 @@ metadata). Progress tracks both per-album and global file counts.
 **Album picker** supports search (`.searchable`) and sort (by name, date, or photo count
 with ascending/descending toggle). Asset counts reflect images only (`mediaType == .image`),
 matching the import filter — videos and other media types are excluded from counts to
-prevent misleading sync status indicators.
+prevent misleading sync status indicators. *(Planned — video support: the picker,
+monitor, and import share one parameterized media-type predicate, and counts display
+photos and videos separately; see §5.10.)*
 
 **Completion reporting**: The import completion screen shows `filesCataloged` (images
 actually added to the album) as the primary count, plus a breakdown of duplicates
@@ -554,6 +568,49 @@ Raw file
 loads products via `Product.products(for:)`, handles purchase verification, and displays
 a thank-you confirmation. A `TipJar.storekit` configuration file enables local testing
 in Xcode without App Store Connect setup.
+
+### 5.10 Video File Support *(planned — see VIDEO-SUPPORT-PLAN.md)*
+
+Videos become first-class archive citizens alongside images. Detailed phasing, risks,
+and file-by-file changes live in `VIDEO-SUPPORT-PLAN.md`; this section records the
+architectural decisions.
+
+**Design decisions**:
+
+| Decision | Rationale |
+| --- | --- |
+| Reuse `ImageRecord` + catalog `images` array with a `media_type` discriminator | Renaming the SwiftData model breaks store migration; renaming the JSON key breaks CLI/schema compatibility. Optional fields keep old catalogs decoding and old app versions tolerant. |
+| No transcoding — videos import as exported by Photos | LumiVault is an archival tool; `ImageFormat`/quality/max-dimension settings apply to images only, and the conversion phase passes videos through untouched. |
+| AVFoundation/AVKit only | Poster frames via `AVAssetImageGenerator`, metadata via `AVURLAsset`, playback via `VideoPlayer` — all first-party (G5 preserved), no new entitlements. |
+| Exact dedup only for videos | SHA-256 works unchanged; perceptual hashing (dHash) is an image algorithm, so `perceptualHash` stays nil and near-duplicate detection remains image-only. |
+| Encryption size cap | CryptoKit AES-GCM is one-shot in-memory (~2× file size). Videos above a configurable cap (default 2 GB) import unencrypted with a surfaced warning; a streaming encryption format is deliberate future work. |
+| B2 large-file API | Files > 200 MB upload via `b2_start_large_file` / `b2_upload_part` / `b2_finish_large_file` (100 MB parts, per-part SHA-1); the single-call path (B2 hard limit 5 GB) switches to `URLSession.upload(fromFile:)` so no path buffers whole files in memory. |
+
+**Pipeline impact** (phases are already format-agnostic unless noted):
+
+```text
+Photos Export   → adds .fullSizeVideo/.video resource selection; slow-mo and
+                  cross-device-edited videos render via PHImageManager export
+                  sessions (passthrough preset, HQ fallback)
+Conversion      → skipped per-item for videos
+Hashing & Dedup → unchanged (streaming SHA-256); pHash skipped for videos
+Thumbnails      → AVAssetImageGenerator poster frame at min(1s, midpoint),
+                  written through the existing SHA-keyed 256/64px HEIC cache
+Encryption      → unchanged format, size-capped for videos
+PAR2            → unchanged (GF(2^16) block scaling already covers multi-GB files)
+Copy / Upload   → copy unchanged; upload gains the B2 large-file path
+Catalog Sink    → writes media_type/duration_seconds
+```
+
+**Viewing**: the grid shows a duration badge + play glyph over the normal thumbnail;
+the detail view branches on media type — AVKit `VideoPlayer` for videos (decrypting or
+downloading to a sandboxed temp file first when needed), the existing `NSImage` path
+for images. The inspector shows duration/resolution/codec in place of EXIF.
+
+**Photos scope consistency**: album picker counts, median-date computation, the library
+monitor's diffing, and the import fetch all share one media-type predicate so sidebar
+badges can never drift from what import actually ingests. An "Include videos" toggle
+lives in import settings with a default in Import Defaults.
 
 ---
 
@@ -792,7 +849,9 @@ remains fully functional alongside the macOS app.
 - iOS / iPadOS companion app (catalog is viewable via iCloud, but no native app yet)
 - AI-based tagging or face detection
 - Photo editing or RAW development
-- Video file support
+- ~~Video file support~~ — now planned; see §5.10 and `VIDEO-SUPPORT-PLAN.md`.
+  Still out of scope within video support: transcoding, streaming encryption
+  (lifting the 2 GB cap), video near-duplicate detection, Live Photo paired video
 
 ---
 
@@ -804,3 +863,5 @@ remains fully functional alongside the macOS app.
 | 2 | ~~Perceptual hash threshold for "near duplicate"~~ | Resolved: user-configurable Stepper (Hamming distance, range 2..10) in Settings > Import Defaults; default in `Constants.Dedup.nearDuplicateThreshold` |
 | 3 | ~~iCloud container type~~ | Resolved: App container (hidden) — catalog syncs via the app's iCloud container, not user-visible Documents |
 | 4 | ~~Redundancy format~~ | Resolved: Standard PAR2 2.0 format with GF(2^16) Vandermonde matrix, fully interoperable with par2cmdline |
+| 5 | Streaming encryption format for large videos | Open — lifting the 2 GB video encryption cap requires a chunked AES-GCM on-disk format and new catalog fields; deferred past video v1 (VIDEO-SUPPORT-PLAN.md §6) |
+| 6 | Default poster-frame timestamp | Proposed: min(1s, duration/2) to skip black lead-in frames; revisit after QA on real libraries |
