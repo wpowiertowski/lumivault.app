@@ -414,6 +414,13 @@ actor PhotosImportService {
         )
     }
 
+    /// Carries the non-Sendable `AVAssetExportSession` out of the PHImageManager
+    /// result handler. Safe: the handler never touches the session after
+    /// resuming the continuation, so ownership genuinely transfers.
+    private struct ExportSessionBox: @unchecked Sendable {
+        let session: AVAssetExportSession
+    }
+
     /// Obtain an export session for the asset's current version, with the same
     /// idle watchdog as the photo render path — the iCloud download behind
     /// `requestExportSession` can stall, and its completion handler is not
@@ -431,8 +438,8 @@ actor PhotosImportService {
         // Downloads report progress; each callback resets the idle timer.
         options.progressHandler = { _, _, _, _ in state.noteActivity() }
 
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AVAssetExportSession, Error>) in
+        let box = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<ExportSessionBox, Error>) in
                 let requestID = PHImageManager.default().requestExportSession(
                     forVideo: asset,
                     options: options,
@@ -441,7 +448,7 @@ actor PhotosImportService {
                     guard state.claimResume() else { return }
                     state.cancelWatchdog()
                     if let session {
-                        continuation.resume(returning: session)
+                        continuation.resume(returning: ExportSessionBox(session: session))
                     } else if let error = info?[PHImageErrorKey] as? Error {
                         continuation.resume(throwing: error)
                     } else {
@@ -462,6 +469,7 @@ actor PhotosImportService {
                 PHImageManager.default().cancelImageRequest(id)
             }
         }
+        return box.session
     }
 
     // MARK: - writeResource with retry + cancellable + exponential watchdog
