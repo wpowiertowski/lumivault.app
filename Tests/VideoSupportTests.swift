@@ -203,6 +203,44 @@ struct VideoImportSettingsTests {
 
 // MARK: - B2 Large-File API
 
+/// Separate URLProtocol stub class for this suite. `B2ServiceNetworkTests` owns
+/// `StubURLProtocol` and runs concurrently with other suites — sharing its
+/// global responder caused cross-suite request bleed. A distinct class keeps
+/// each suite's stub state fully isolated.
+final class LargeFileStubURLProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var responder: (@Sendable (URLRequest) -> Result<(HTTPURLResponse, Data), Error>)?
+
+    static func reset() {
+        responder = nil
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let responder = Self.responder else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        switch responder(request) {
+        case .success(let (response, data)):
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        case .failure(let error):
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
+func makeLargeFileStubSession() -> URLSession {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [LargeFileStubURLProtocol.self]
+    return URLSession(configuration: config)
+}
+
 @Suite(.serialized)
 @MainActor
 struct B2LargeFileTests {
@@ -215,13 +253,13 @@ struct B2LargeFileTests {
     )
 
     @Test func startUploadFinishLargeFileFlow() async throws {
-        StubURLProtocol.reset()
-        let service = B2Service(session: makeStubSession())
+        LargeFileStubURLProtocol.reset()
+        let service = B2Service(session: makeLargeFileStubSession())
 
         let partBodies = Locked<[Int: String]>([:])
         let finishBody = Locked<[String: Any]?>(nil)
 
-        StubURLProtocol.responder = { request in
+        LargeFileStubURLProtocol.responder = { request in
             switch request.url?.path ?? "" {
             case let p where p.hasSuffix("/b2_authorize_account"):
                 return authorizeResponse(for: request)
@@ -276,11 +314,11 @@ struct B2LargeFileTests {
     }
 
     @Test func cancelLargeFilePostsFileId() async throws {
-        StubURLProtocol.reset()
-        let service = B2Service(session: makeStubSession())
+        LargeFileStubURLProtocol.reset()
+        let service = B2Service(session: makeLargeFileStubSession())
 
         let cancelBody = Locked<[String: Any]?>(nil)
-        StubURLProtocol.responder = { request in
+        LargeFileStubURLProtocol.responder = { request in
             switch request.url?.path ?? "" {
             case let p where p.hasSuffix("/b2_authorize_account"):
                 return authorizeResponse(for: request)
@@ -298,8 +336,8 @@ struct B2LargeFileTests {
     }
 
     @Test func smallUploadStreamsFromDiskWithCorrectSha1() async throws {
-        StubURLProtocol.reset()
-        let service = B2Service(session: makeStubSession())
+        LargeFileStubURLProtocol.reset()
+        let service = B2Service(session: makeLargeFileStubSession())
 
         let payload = Data("streamed from disk".utf8)
         let fileURL = FileManager.default.temporaryDirectory
@@ -311,7 +349,7 @@ struct B2LargeFileTests {
         #expect(try B2Service.sha1Hash(ofFileAt: fileURL) == expectedSha1)
 
         let sawUpload = Locked(false)
-        StubURLProtocol.responder = { request in
+        LargeFileStubURLProtocol.responder = { request in
             switch request.url?.path ?? "" {
             case let p where p.hasSuffix("/b2_authorize_account"):
                 return authorizeResponse(for: request)
@@ -343,8 +381,8 @@ struct B2LargeFileTests {
     }
 
     @Test func uploadImageRoutesLargeFilesThroughPartAPI() async throws {
-        StubURLProtocol.reset()
-        let service = B2Service(session: makeStubSession())
+        LargeFileStubURLProtocol.reset()
+        let service = B2Service(session: makeLargeFileStubSession())
 
         // Sparse file just over the 200 MB threshold — APFS materializes no data.
         let fileSize = Constants.Media.b2LargeFileThreshold + 1024
@@ -359,7 +397,7 @@ struct B2LargeFileTests {
         let partNumbers = Locked<[Int]>([])
         let finished = Locked(false)
 
-        StubURLProtocol.responder = { request in
+        LargeFileStubURLProtocol.responder = { request in
             switch request.url?.path ?? "" {
             case let p where p.hasSuffix("/b2_authorize_account"):
                 return authorizeResponse(for: request)
