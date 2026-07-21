@@ -66,12 +66,15 @@ These items would further improve coverage but require architectural changes:
 
 ---
 
-## Video Support — Planned Test Additions
+## Video Support — Test Additions
 
-Tracks the test work for `VIDEO-SUPPORT-PLAN.md`. These suites/cases do not exist yet;
-each lands with its corresponding implementation PR.
+Tracks the test work for `VIDEO-SUPPORT-PLAN.md`. The automated suites below now live
+in `Tests/VideoSupportTests.swift` (catalog schema, SwiftData model, import
+settings/filters, B2 large-file API, video thumbnails via a runtime-generated
+AVAssetWriter fixture). The manual cases TC-26/27/28 remain to be executed on real
+hardware before release.
 
-### New automated suites
+### Automated suites
 
 | Suite | With PR | Covers |
 | ------- | --------- | -------- |

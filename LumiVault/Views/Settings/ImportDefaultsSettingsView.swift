@@ -5,6 +5,7 @@ struct ImportDefaultsSettingsView: View {
     @AppStorage("importJpegQuality") private var jpegQuality = 0.85
     @AppStorage("importMaxDimension") private var maxDimensionRaw = 0 // 0 = original
     @AppStorage("importGeneratePAR2") private var generatePAR2 = true
+    @AppStorage(ImportSettings.includeVideosDefaultsKey) private var includeVideos = true
     @AppStorage("importDetectNearDuplicates") private var detectNearDuplicates = true
     @AppStorage("importNearDuplicateThreshold") private var nearDuplicateThreshold = Constants.Dedup.nearDuplicateThreshold
 
@@ -67,6 +68,11 @@ struct ImportDefaultsSettingsView: View {
             Section("Processing") {
                 Toggle("Generate PAR2 error correction", isOn: $generatePAR2)
                     .accessibilityIdentifier("importDefaults.par2")
+                Toggle("Include videos", isOn: $includeVideos)
+                    .accessibilityIdentifier("importDefaults.includeVideos")
+                Text("Videos are archived as exported — format and dimension settings apply to images only.")
+                    .font(Constants.Design.monoCaption)
+                    .foregroundStyle(.tertiary)
                 Toggle("Detect near-duplicate images", isOn: $detectNearDuplicates)
                     .accessibilityIdentifier("importDefaults.nearDupe")
                 Stepper(

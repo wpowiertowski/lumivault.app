@@ -3,6 +3,7 @@ import SwiftData
 import AppKit
 import ImageIO
 import CryptoKit
+import UniformTypeIdentifiers
 import os
 
 /// Wrapper to pass MainActor-isolated values into Task closures
@@ -87,7 +88,8 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         let assetStream = try await photosService.importAlbumStreaming(
             albumId: photosAlbumId,
             to: staging,
-            callbacks: PhotosImportCallbacks(health: healthCallback)
+            callbacks: PhotosImportCallbacks(health: healthCallback),
+            includeVideos: settings.includeVideos
         ) { current, total in
             Task { @MainActor in
                 progress.currentFile = current
@@ -128,11 +130,13 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         let feedTask = Task.detached(priority: .userInitiated) {
             for (index, url) in urlsBox.enumerated() {
                 if Task.isCancelled { break }
+                let isVideo = UTType(filenameExtension: url.pathExtension)?.conforms(to: .movie) ?? false
                 let asset = ImportedAsset(
                     fileURL: url,
                     originalFilename: url.lastPathComponent,
                     creationDate: nil,
-                    phAssetLocalIdentifier: nil
+                    phAssetLocalIdentifier: nil,
+                    mediaType: isVideo ? .video : .image
                 )
                 continuation.yield(.success(asset))
                 await MainActor.run {
@@ -483,7 +487,9 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                         encryptionAlgorithm: record.isEncrypted ? "AES-256-GCM" : nil,
                         encryptionKeyId: record.encryptionKeyId,
                         encryptionNonce: record.encryptionNonce?.base64EncodedString(),
-                        encryptedSizeBytes: encryptedSizes[record.sha256]
+                        encryptedSizeBytes: encryptedSizes[record.sha256],
+                        mediaType: record.mediaType == .video ? MediaType.video.rawValue : nil,
+                        durationSeconds: record.durationSeconds
                     )
                     await catalogService.addImage(
                         catalogImage,
@@ -654,13 +660,14 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             if Task.isCancelled { break }
             switch result {
             case .success(let asset):
-                let item = PipelineItem(
+                var item = PipelineItem(
                     albumName: settings.albumName,
                     importDate: .now,
                     fileURL: asset.fileURL,
                     originalFilename: asset.originalFilename,
                     phAssetLocalIdentifier: asset.phAssetLocalIdentifier
                 )
+                item.mediaType = asset.mediaType
                 await firstChannel.send(item)
             case .failure(_, let error):
                 let msg = "Photos export failed: \(error)"
@@ -695,6 +702,13 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         for await item in inputCh.stream {
             await inputCh.consumed()
             if Task.isCancelled { break }
+
+            // Videos are archived as exported — format/quality/max-dimension
+            // settings apply to images only.
+            if item.mediaType == .video {
+                await outputCh.send(item)
+                continue
+            }
 
             var mutableItem = item
             let converted = ImageConversionService.convertImage(
@@ -858,10 +872,21 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 } else {
                     // Brand-new record. Heavy work off-main:
                     //   1. thumbnail (already on thumbnail actor)
-                    //   2. perceptual hash (CPU)
+                    //   2. perceptual hash (CPU) — images only; dHash is an image algorithm
                     //   3. near-dup scan (CPU + thread-safe lock)
-                    try? await self.thumbnailService.generateThumbnail(for: fileToHash, sha256: hash)
-                    let pHash = try? PerceptualHash.compute(for: fileToHash)
+                    var pHash: Data?
+                    if item.mediaType == .video {
+                        if let probe = try? await self.thumbnailService.generateVideoThumbnail(
+                            for: fileToHash, sha256: hash
+                        ) {
+                            mutableItem.durationSeconds = probe.durationSeconds
+                            mutableItem.pixelWidth = probe.pixelWidth
+                            mutableItem.pixelHeight = probe.pixelHeight
+                        }
+                    } else {
+                        try? await self.thumbnailService.generateThumbnail(for: fileToHash, sha256: hash)
+                        pHash = try? PerceptualHash.compute(for: fileToHash)
+                    }
                     if let pHash {
                         mutableItem.perceptualHash = pHash
                     }
@@ -891,6 +916,10 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                     let activeFilename = item.activeFilename
                     let pHashCopy = pHash
                     let matchToAppend = nearDupMatch
+                    let mediaType = item.mediaType
+                    let duration = mutableItem.durationSeconds
+                    let pixelWidth = mutableItem.pixelWidth
+                    let pixelHeight = mutableItem.pixelHeight
                     // Resolve a collision-free stored name (disambiguated if a
                     // different asset already owns this filename in the album) and
                     // use it for both the record and the snapshot so every
@@ -905,7 +934,11 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                             sha256: hash,
                             filename: resolvedName,
                             sizeBytes: size,
-                            phAssetLocalIdentifier: phAssetId
+                            phAssetLocalIdentifier: phAssetId,
+                            mediaType: mediaType,
+                            durationSeconds: duration,
+                            pixelWidth: pixelWidth,
+                            pixelHeight: pixelHeight
                         )
                         record.thumbnailState = .generated
                         if let pHashCopy {
@@ -966,6 +999,22 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
             var mutableItem = item
             guard let snap = item.snapshot, item.error == nil, snap.isNew else {
+                await outputCh.send(mutableItem)
+                continue
+            }
+
+            // CryptoKit AES-GCM is one-shot in-memory (~2x file size held at once).
+            // Store oversized files unencrypted with a surfaced warning instead of
+            // risking memory exhaustion mid-import. Not an `item.error`: the file
+            // still flows through PAR2/copy/upload as plaintext.
+            if snap.sizeBytes > Constants.Media.encryptionSizeLimit {
+                let filename = snap.filename
+                await MainActor.run {
+                    progress.errors.append(
+                        "\(filename) was stored unencrypted: it exceeds the "
+                        + "\(Constants.Media.encryptionSizeLimit / (1024 * 1024 * 1024)) GB encryption limit."
+                    )
+                }
                 await outputCh.send(mutableItem)
                 continue
             }

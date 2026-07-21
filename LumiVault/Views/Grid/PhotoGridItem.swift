@@ -20,7 +20,7 @@ struct PhotoGridItem: View {
                 Rectangle()
                     .fill(.quaternary)
                     .overlay {
-                        Image(systemName: "photo")
+                        Image(systemName: image.mediaType == .video ? "video" : "photo")
                             .font(.title2)
                             .foregroundStyle(.tertiary)
                     }
@@ -29,6 +29,23 @@ struct PhotoGridItem: View {
         .aspectRatio(1, contentMode: .fit)
         .contentShape(Rectangle())
         .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(alignment: .bottomLeading) {
+            if image.mediaType == .video {
+                HStack(spacing: 3) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 8))
+                    if let duration = image.durationSeconds {
+                        Text(Self.durationLabel(duration))
+                    }
+                }
+                .font(Constants.Design.monoCaption2)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(.black.opacity(0.55), in: Capsule())
+                .padding(4)
+            }
+        }
         .overlay {
             if isSelected {
                 RoundedRectangle(cornerRadius: 4)
@@ -38,6 +55,42 @@ struct PhotoGridItem: View {
         .accessibilityIdentifier("grid.photo.\(String(image.sha256.prefix(8)))")
         .task {
             await loadThumbnail()
+        }
+    }
+
+    static func durationLabel(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded())
+        let minutes = total / 60
+        let secs = total % 60
+        if minutes >= 60 {
+            return String(format: "%d:%02d:%02d", minutes / 60, minutes % 60, secs)
+        }
+        return String(format: "%d:%02d", minutes, secs)
+    }
+
+    /// Media-type-aware regeneration from a file on a mounted volume.
+    private func generate(at fileURL: URL, sha256: String, isEncrypted: Bool, nonce: Data?) async throws {
+        if image.mediaType == .video {
+            if isEncrypted, let nonce {
+                try await thumbnailService.generateVideoThumbnail(
+                    fromEncryptedFileAt: fileURL,
+                    nonce: nonce,
+                    sha256: sha256,
+                    fileExtension: fileURL.pathExtension,
+                    encryption: encryptionService
+                )
+            } else {
+                try await thumbnailService.generateVideoThumbnail(for: fileURL, sha256: sha256)
+            }
+        } else if isEncrypted, let nonce {
+            try await thumbnailService.generateThumbnail(
+                fromEncryptedFileAt: fileURL,
+                nonce: nonce,
+                sha256: sha256,
+                encryption: encryptionService
+            )
+        } else {
+            try await thumbnailService.generateThumbnail(for: fileURL, sha256: sha256)
         }
     }
 
@@ -67,16 +120,7 @@ struct PhotoGridItem: View {
             didAttemptGeneration = true
 
             do {
-                if isEncrypted, let nonce {
-                    try await thumbnailService.generateThumbnail(
-                        fromEncryptedFileAt: fileURL,
-                        nonce: nonce,
-                        sha256: sha256,
-                        encryption: encryptionService
-                    )
-                } else {
-                    try await thumbnailService.generateThumbnail(for: fileURL, sha256: sha256)
-                }
+                try await generate(at: fileURL, sha256: sha256, isEncrypted: isEncrypted, nonce: nonce)
                 if scoped { mountURL.stopAccessingSecurityScopedResource() }
                 thumbnail = await thumbnailService.thumbnail(for: sha256, size: .grid)
                 image.thumbnailState = .generated
@@ -132,16 +176,7 @@ struct PhotoGridItem: View {
             guard FileManager.default.fileExists(atPath: fileURL.path) else { continue }
 
             do {
-                if isEncrypted, let nonce {
-                    try await thumbnailService.generateThumbnail(
-                        fromEncryptedFileAt: fileURL,
-                        nonce: nonce,
-                        sha256: sha256,
-                        encryption: encryptionService
-                    )
-                } else {
-                    try await thumbnailService.generateThumbnail(for: fileURL, sha256: sha256)
-                }
+                try await generate(at: fileURL, sha256: sha256, isEncrypted: isEncrypted, nonce: nonce)
             } catch {
                 if error is EncryptionService.EncryptionError { return false }
                 continue
@@ -175,7 +210,14 @@ struct PhotoGridItem: View {
             plaintext = raw
         }
 
-        guard (try? await thumbnailService.generateThumbnail(from: plaintext, sha256: sha256)) != nil else {
+        if image.mediaType == .video {
+            let ext = (image.filename as NSString).pathExtension
+            guard (try? await thumbnailService.generateVideoThumbnail(
+                fromPlaintext: plaintext, sha256: sha256, fileExtension: ext
+            )) != nil else {
+                return false
+            }
+        } else if (try? await thumbnailService.generateThumbnail(from: plaintext, sha256: sha256)) == nil {
             return false
         }
         thumbnail = await thumbnailService.thumbnail(for: sha256, size: .grid)

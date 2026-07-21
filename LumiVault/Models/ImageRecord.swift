@@ -7,6 +7,13 @@ enum ThumbnailState: Int, Codable, Sendable {
     case failed
 }
 
+/// `nonisolated` so services (thumbnail actor, Photos import actor, pipeline
+/// stages) can construct and compare it off the main actor.
+nonisolated enum MediaType: String, Codable, Sendable {
+    case image
+    case video
+}
+
 struct StorageLocation: Codable, Sendable, Hashable {
     var volumeID: String
     var relativePath: String
@@ -34,6 +41,15 @@ final class ImageRecord {
     /// several assets. `phAssetLocalIdentifier` remains as the legacy
     /// single-id field for records created before multi-asset tracking.
     var phAssetLocalIdentifiers: [String] = []
+    /// Raw `MediaType`. Stored as a defaulted string so legacy stores migrate
+    /// lightweight and pre-video records read as images.
+    var mediaTypeRaw: String = MediaType.image.rawValue
+    /// Playback duration in seconds — videos only.
+    var durationSeconds: Double?
+    var pixelWidth: Int?
+    var pixelHeight: Int?
+
+    var mediaType: MediaType { MediaType(rawValue: mediaTypeRaw) ?? .image }
 
     /// Every Photos asset id that maps to this image, folding in the legacy
     /// single-id field.
@@ -71,7 +87,11 @@ final class ImageRecord {
         isEncrypted: Bool = false,
         encryptionKeyId: String? = nil,
         encryptionNonce: Data? = nil,
-        phAssetLocalIdentifier: String? = nil
+        phAssetLocalIdentifier: String? = nil,
+        mediaType: MediaType = .image,
+        durationSeconds: Double? = nil,
+        pixelWidth: Int? = nil,
+        pixelHeight: Int? = nil
     ) {
         self.sha256 = sha256
         self.filename = filename
@@ -89,5 +109,9 @@ final class ImageRecord {
         self.encryptionNonce = encryptionNonce
         self.phAssetLocalIdentifier = phAssetLocalIdentifier
         self.phAssetLocalIdentifiers = phAssetLocalIdentifier.map { [$0] } ?? []
+        self.mediaTypeRaw = mediaType.rawValue
+        self.durationSeconds = durationSeconds
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
     }
 }

@@ -35,6 +35,14 @@ struct PhotosAlbumPicker: View {
     @State private var sortAscending = true
     @State private var authStatus: PHAuthorizationStatus = .notDetermined
     @State private var isLoading = false
+    @AppStorage(ImportSettings.includeVideosDefaultsKey) private var includeVideosDefault = true
+
+    /// Assets in the current import scope — what an import of this album would
+    /// actually ingest. Sync comparisons must use this, not `assetCount`, or
+    /// tracked videos would read as phantom extra imports.
+    private func importableCount(for album: PhotosAlbum) -> Int {
+        album.assetCount + (includeVideosDefault ? album.videoCount : 0)
+    }
 
     private var filteredAlbums: [PhotosAlbum] {
         let filtered = searchText.isEmpty
@@ -49,7 +57,7 @@ struct PhotosAlbumPicker: View {
             case .date:
                 result = (a.startDate ?? .distantPast) < (b.startDate ?? .distantPast)
             case .count:
-                result = a.assetCount < b.assetCount
+                result = importableCount(for: a) < importableCount(for: b)
             }
             return sortAscending ? result : !result
         }
@@ -173,11 +181,12 @@ struct PhotosAlbumPicker: View {
 
     private func syncStatus(for album: PhotosAlbum) -> AlbumSyncStatus {
         // Asset-id intersection is the source of truth when any of the album's
-        // assets are tracked; imported ≤ assetCount always, so equality means
-        // fully synced.
+        // assets are tracked; imported ≤ importableCount always, so equality
+        // means fully synced.
+        let target = importableCount(for: album)
         let imported = importedCounts[album.id] ?? 0
         if imported > 0 {
-            return imported >= album.assetCount
+            return imported >= target
                 ? .synced
                 : .needsUpdate(catalogCount: imported)
         }
@@ -186,7 +195,7 @@ struct PhotosAlbumPicker: View {
         guard let catalogCount = catalogAlbumCounts[album.title] else {
             return .notSynced
         }
-        return catalogCount >= album.assetCount
+        return catalogCount >= target
             ? .synced
             : .needsUpdate(catalogCount: catalogCount)
     }
@@ -212,12 +221,20 @@ private struct AlbumPickerRow: View {
         }
     }
 
+    private var albumCountLabel: String {
+        var label = "\(album.assetCount) photo\(album.assetCount == 1 ? "" : "s")"
+        if album.videoCount > 0 {
+            label += " · \(album.videoCount) video\(album.videoCount == 1 ? "" : "s")"
+        }
+        return label
+    }
+
     private var statusHelp: String {
         switch syncStatus {
         case .synced:
-            "Synced — \(album.assetCount) photos in album and catalog"
+            "Synced — \(albumCountLabel) in album and catalog"
         case .needsUpdate(let catalogCount):
-            "Needs update — album has \(album.assetCount) photos, catalog has \(catalogCount)"
+            "Needs update — album has \(albumCountLabel), catalog has \(catalogCount)"
         case .notSynced:
             "Not synced — album not found in catalog"
         }
@@ -235,7 +252,7 @@ private struct AlbumPickerRow: View {
                     .font(Constants.Design.monoBody)
                     .lineLimit(1)
                 HStack(spacing: 8) {
-                    Text("\(album.assetCount) photos")
+                    Text(albumCountLabel)
                     if case .needsUpdate(let catalogCount) = syncStatus {
                         Text("(\(catalogCount) in catalog)")
                             .foregroundStyle(.yellow)

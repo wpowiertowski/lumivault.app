@@ -78,4 +78,16 @@ enum Constants {
         static let nearDuplicateThreshold = 5 // Hamming distance
     }
 
+    // MARK: - Media
+    enum Media {
+        /// CryptoKit's AES-GCM is one-shot: plaintext and ciphertext are both held in
+        /// memory (~2x file size). Files above this limit are stored unencrypted with a
+        /// surfaced warning instead of risking memory exhaustion mid-import.
+        nonisolated static let encryptionSizeLimit: Int64 = 2 * 1024 * 1024 * 1024 // 2 GB
+
+        /// B2 recommends the large-file API above 200 MB (hard single-call limit is 5 GB).
+        nonisolated static let b2LargeFileThreshold: Int64 = 200 * 1024 * 1024
+        /// Part size for B2 large-file uploads (minimum allowed is 5 MB).
+        nonisolated static let b2PartSize: Int64 = 100 * 1024 * 1024
+    }
 }

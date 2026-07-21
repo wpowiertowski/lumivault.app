@@ -78,6 +78,10 @@ nonisolated struct CatalogImage: Codable, Sendable, Equatable {
     /// compatible (legacy entries decode as nil). Lets a re-import win over an
     /// older deletion tombstone for the same sha256.
     var addedAt: Date?
+    /// "video" for video entries; nil/absent means image, so pre-video catalogs
+    /// decode unchanged and older app versions ignore the unknown key.
+    var mediaType: String?
+    var durationSeconds: Double?
 
     enum CodingKeys: String, CodingKey {
         case filename
@@ -90,6 +94,8 @@ nonisolated struct CatalogImage: Codable, Sendable, Equatable {
         case encryptionNonce = "encryption_nonce"
         case encryptedSizeBytes = "encrypted_size_bytes"
         case addedAt = "added_at"
+        case mediaType = "media_type"
+        case durationSeconds = "duration_seconds"
     }
 }
 
@@ -263,6 +269,14 @@ nonisolated extension CatalogImage {
             case let (x?, y?): Swift.max(x, y)
             }
         }
+        func pick(_ a: Double?, _ b: Double?) -> Double? {
+            switch (a, b) {
+            case (nil, nil): nil
+            case let (x?, nil): x
+            case let (nil, y?): y
+            case let (x?, y?): Swift.max(x, y)
+            }
+        }
         return CatalogImage(
             filename: pick(filename, other.filename),
             sha256: sha256,
@@ -273,7 +287,9 @@ nonisolated extension CatalogImage {
             encryptionKeyId: pick(encryptionKeyId, other.encryptionKeyId),
             encryptionNonce: pick(encryptionNonce, other.encryptionNonce),
             encryptedSizeBytes: pick(encryptedSizeBytes, other.encryptedSizeBytes),
-            addedAt: pick(addedAt, other.addedAt)
+            addedAt: pick(addedAt, other.addedAt),
+            mediaType: pick(mediaType, other.mediaType),
+            durationSeconds: pick(durationSeconds, other.durationSeconds)
         )
     }
 }

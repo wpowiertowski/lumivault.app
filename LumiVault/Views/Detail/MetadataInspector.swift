@@ -17,6 +17,18 @@ struct MetadataInspector: View {
                     InspectorRow(label: "Added", value: image.addedAt.formatted(date: .abbreviated, time: .shortened))
                 }
 
+                // Video metadata (probed at import; EXIF does not apply)
+                if image.mediaType == .video {
+                    InspectorSection(title: "Video") {
+                        if let duration = image.durationSeconds {
+                            InspectorRow(label: "Duration", value: PhotoGridItem.durationLabel(duration))
+                        }
+                        if let w = image.pixelWidth, let h = image.pixelHeight {
+                            InspectorRow(label: "Resolution", value: "\(w) × \(h)")
+                        }
+                    }
+                }
+
                 // EXIF — Camera & Capture
                 if let exif, hasExifContent(exif) {
                     InspectorSection(title: "Camera") {

@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import ImageIO
+import AVKit
 
 struct PhotoDetailView: View {
     let image: ImageRecord
@@ -12,17 +13,27 @@ struct PhotoDetailView: View {
     @State private var isLoadingFromB2 = false
     @State private var showingInspector = true
     @State private var b2Service = B2Service()
+    @State private var player: AVPlayer?
+    /// Volume kept security-scope-accessed while the player streams from it.
+    @State private var scopedMountURL: URL?
+    /// Decrypted/downloaded plaintext staged for playback; deleted on teardown.
+    @State private var tempPlaybackURL: URL?
 
     enum LoadFailureReason {
         case volumesDisconnected
         case fileUnreadable
     }
 
+    private var isVideo: Bool { image.mediaType == .video }
+
     var body: some View {
         HSplitView {
-            // Full-resolution preview
+            // Full-resolution preview / video player
             ZStack {
-                if let fullImage {
+                if let player {
+                    VideoPlayer(player: player)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let fullImage {
                     Image(nsImage: fullImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -55,10 +66,33 @@ struct PhotoDetailView: View {
             }
         }
         .task(id: image.sha256) {
+            teardownPlayback()
             fullImage = nil
             exifData = nil
             failureReason = nil
-            await loadFullImage()
+            if isVideo {
+                await loadVideo()
+            } else {
+                await loadFullImage()
+            }
+        }
+        .onDisappear {
+            teardownPlayback()
+        }
+    }
+
+    /// Stop playback, release the volume's security scope, and remove any
+    /// staged plaintext.
+    private func teardownPlayback() {
+        player?.pause()
+        player = nil
+        if let scoped = scopedMountURL {
+            scoped.stopAccessingSecurityScopedResource()
+            scopedMountURL = nil
+        }
+        if let temp = tempPlaybackURL {
+            try? FileManager.default.removeItem(at: temp)
+            tempPlaybackURL = nil
         }
     }
 
@@ -76,7 +110,13 @@ struct PhotoDetailView: View {
             HStack(spacing: 8) {
                 Button("Retry") {
                     failureReason = nil
-                    Task { await loadFullImage() }
+                    Task {
+                        if isVideo {
+                            await loadVideo()
+                        } else {
+                            await loadFullImage()
+                        }
+                    }
                 }
                 if canLoadFromB2 {
                     Button("Load preview from B2 storage") {
@@ -105,6 +145,60 @@ struct PhotoDetailView: View {
 
     private static func loadB2Credentials() -> B2Credentials? {
         B2Credentials.load()
+    }
+
+    /// Resolve a playable URL for a video. Unencrypted files play straight off
+    /// the volume (its security scope stays open until teardown); encrypted
+    /// files are decrypted to a temp file first — bounded by the encryption
+    /// size cap, above which files are never stored encrypted.
+    private func loadVideo() async {
+        var accessedAnyVolume = false
+
+        for location in image.storageLocations {
+            guard let (mountURL, scoped) = StorageResolver.resolveMount(for: location, volumes: volumes) else {
+                continue
+            }
+            accessedAnyVolume = true
+
+            let fileURL = mountURL.appendingPathComponent(location.relativePath)
+            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                if scoped { mountURL.stopAccessingSecurityScopedResource() }
+                continue
+            }
+
+            if image.isEncrypted, let nonce = image.encryptionNonce {
+                defer { if scoped { mountURL.stopAccessingSecurityScopedResource() } }
+                guard let ciphertext = try? Data(contentsOf: fileURL),
+                      let plaintext = try? await encryptionService.decryptData(
+                          ciphertext, nonce: nonce, sha256: image.sha256
+                      ) else {
+                    continue
+                }
+                if startPlayback(plaintext: plaintext) { return }
+            } else {
+                scopedMountURL = scoped ? mountURL : nil
+                player = AVPlayer(url: fileURL)
+                return
+            }
+        }
+
+        failureReason = accessedAnyVolume ? .fileUnreadable : .volumesDisconnected
+    }
+
+    /// Stage plaintext video bytes to a temp file and start playback.
+    private func startPlayback(plaintext: Data) -> Bool {
+        let ext = (image.filename as NSString).pathExtension
+        let temp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumivault-playback-\(image.sha256)")
+            .appendingPathExtension(ext.isEmpty ? "mov" : ext)
+        do {
+            try plaintext.write(to: temp, options: .atomic)
+        } catch {
+            return false
+        }
+        tempPlaybackURL = temp
+        player = AVPlayer(url: temp)
+        return true
     }
 
     private func loadFullImage() async {
@@ -157,17 +251,24 @@ struct PhotoDetailView: View {
         do {
             let data = try await b2Service.downloadFile(fileId: fileId, credentials: credentials)
 
-            let imageData: Data
+            let mediaData: Data
             if image.isEncrypted, let nonce = image.encryptionNonce {
-                imageData = try await encryptionService.decryptData(
+                mediaData = try await encryptionService.decryptData(
                     data, nonce: nonce, sha256: image.sha256
                 )
             } else {
-                imageData = data
+                mediaData = data
             }
 
-            exifData = EXIFData.extract(from: imageData)
-            if let loaded = NSImage(data: imageData) {
+            if isVideo {
+                if !startPlayback(plaintext: mediaData) {
+                    failureReason = .fileUnreadable
+                }
+                return
+            }
+
+            exifData = EXIFData.extract(from: mediaData)
+            if let loaded = NSImage(data: mediaData) {
                 fullImage = loaded
                 return
             }

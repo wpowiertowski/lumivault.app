@@ -19,6 +19,7 @@ struct PipelineItem: Sendable {
     let fileURL: URL
     let originalFilename: String
     let phAssetLocalIdentifier: String?
+    var mediaType: MediaType = .image
 
     // Phase outputs
     var convertedURL: URL?
@@ -27,6 +28,10 @@ struct PipelineItem: Sendable {
     var sizeBytes: Int64 = 0
     var isDuplicate: Bool = false
     var perceptualHash: Data?
+    /// Probed during the hashing phase — videos only.
+    var durationSeconds: Double?
+    var pixelWidth: Int?
+    var pixelHeight: Int?
     var encryptedURL: URL?
     var encryptionNonce: Data?
     var encryptedSize: Int64?

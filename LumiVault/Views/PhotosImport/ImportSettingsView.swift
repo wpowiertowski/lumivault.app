@@ -12,6 +12,7 @@ struct ImportSettingsView: View {
     @AppStorage("importJpegQuality") private var defaultJpegQuality = 0.85
     @AppStorage("importMaxDimension") private var defaultMaxDimension = 0
     @AppStorage("importGeneratePAR2") private var defaultGeneratePAR2 = true
+    @AppStorage(ImportSettings.includeVideosDefaultsKey) private var defaultIncludeVideos = true
     @AppStorage("importDetectNearDuplicates") private var defaultDetectNearDuplicates = true
     @AppStorage("importNearDuplicateThreshold") private var defaultNearDuplicateThreshold = Constants.Dedup.nearDuplicateThreshold
 
@@ -72,6 +73,16 @@ struct ImportSettingsView: View {
 
                 if settings.imageFormat != .original || settings.maxDimension != .original {
                     Text("Images will be converted during import. Originals in Photos are not modified.")
+                        .font(Constants.Design.monoCaption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Section("Videos") {
+                Toggle("Include videos", isOn: $settings.includeVideos)
+                    .accessibilityIdentifier("importSettings.includeVideos")
+                if settings.includeVideos {
+                    Text("Videos are archived as exported from Photos — format and dimension settings above apply to images only.")
                         .font(Constants.Design.monoCaption)
                         .foregroundStyle(.tertiary)
                 }
@@ -166,6 +177,7 @@ struct ImportSettingsView: View {
         settings.jpegQuality = defaultJpegQuality
         settings.maxDimension = defaultMaxDimension == 0 ? .original : .capped(defaultMaxDimension)
         settings.generatePAR2 = defaultGeneratePAR2
+        settings.includeVideos = defaultIncludeVideos
         settings.detectNearDuplicates = defaultDetectNearDuplicates
         settings.nearDuplicateThreshold = defaultNearDuplicateThreshold
 

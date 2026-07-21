@@ -23,11 +23,23 @@ enum MaxDimension: Sendable, Hashable {
 }
 
 struct ImportSettings: Sendable {
+    /// UserDefaults key for the Import Defaults toggle. Shared with
+    /// `PhotosLibraryMonitor` so sidebar sync badges always count the same
+    /// media-type scope the import pipeline will actually ingest.
+    nonisolated static let includeVideosDefaultsKey = "importIncludeVideos"
+
+    /// The user's Import Defaults value for `includeVideos`.
+    nonisolated static var includeVideosDefault: Bool {
+        UserDefaults.standard.object(forKey: includeVideosDefaultsKey) == nil
+            || UserDefaults.standard.bool(forKey: includeVideosDefaultsKey)
+    }
+
     var albumName: String
     var year: String
     var month: String
     var day: String
     var generatePAR2: Bool = true
+    var includeVideos: Bool = true
     var detectNearDuplicates: Bool = true
     var nearDuplicateThreshold: Int = Constants.Dedup.nearDuplicateThreshold
     var encryptFiles: Bool = false

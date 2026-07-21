@@ -92,6 +92,209 @@ actor B2Service {
         }
     }
 
+    /// Streaming variant of `uploadFile` — the body is read from disk by URLSession
+    /// instead of being buffered in memory. Used for whole-file uploads under the
+    /// large-file threshold.
+    func uploadFile(
+        fromFileAt fileURL: URL,
+        fileName: String,
+        sha1: String,
+        contentLength: Int64,
+        contentType: String = "b2/x-auto"
+    ) async throws -> B2FileResponse {
+        guard let upload = uploadURL else { throw B2Error.noUploadURL }
+
+        // Single-use, same as the in-memory path.
+        uploadURL = nil
+
+        let url = URL(string: upload.uploadUrl)!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(upload.authorizationToken, forHTTPHeaderField: "Authorization")
+        request.setValue(fileName, forHTTPHeaderField: "X-Bz-File-Name")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.setValue(sha1, forHTTPHeaderField: "X-Bz-Content-Sha1")
+        request.setValue(String(contentLength), forHTTPHeaderField: "Content-Length")
+
+        let (data, response) = try await session.upload(for: request, fromFile: fileURL)
+        try Self.checkResponse(response, data: data)
+
+        return try await MainActor.run {
+            try JSONDecoder().decode(B2FileResponse.self, from: data)
+        }
+    }
+
+    // MARK: - Large File Upload
+
+    // b2_start_large_file → N × (b2_get_upload_part_url + b2_upload_part) →
+    // b2_finish_large_file, with b2_cancel_large_file on failure. Required above
+    // the single-call API's 5 GB cap; recommended above 200 MB.
+
+    func startLargeFile(
+        fileName: String,
+        bucketId: String,
+        contentType: String = "b2/x-auto"
+    ) async throws -> String {
+        guard let auth = authorization else { throw B2Error.notAuthorized }
+
+        let url = URL(string: "\(auth.apiURL)/b2api/v2/b2_start_large_file")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(auth.authorizationToken, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = [
+            "bucketId": bucketId,
+            "fileName": fileName,
+            "contentType": contentType
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+        try Self.checkResponse(response, data: data)
+
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let fileId = json?["fileId"] as? String else { throw B2Error.invalidResponse }
+        return fileId
+    }
+
+    func getUploadPartURL(fileId: String) async throws -> B2UploadURL {
+        guard let auth = authorization else { throw B2Error.notAuthorized }
+
+        let url = URL(string: "\(auth.apiURL)/b2api/v2/b2_get_upload_part_url")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(auth.authorizationToken, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["fileId": fileId])
+
+        let (data, response) = try await session.data(for: request)
+        try Self.checkResponse(response, data: data)
+
+        return try await MainActor.run {
+            try JSONDecoder().decode(B2UploadURL.self, from: data)
+        }
+    }
+
+    func uploadPart(
+        partNumber: Int,
+        data partData: Data,
+        sha1: String,
+        to partURL: B2UploadURL
+    ) async throws {
+        let url = URL(string: partURL.uploadUrl)!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(partURL.authorizationToken, forHTTPHeaderField: "Authorization")
+        request.setValue(String(partNumber), forHTTPHeaderField: "X-Bz-Part-Number")
+        request.setValue(sha1, forHTTPHeaderField: "X-Bz-Content-Sha1")
+        request.setValue(String(partData.count), forHTTPHeaderField: "Content-Length")
+        request.httpBody = partData
+
+        let (data, response) = try await session.data(for: request)
+        try Self.checkResponse(response, data: data)
+    }
+
+    func finishLargeFile(fileId: String, partSha1Array: [String]) async throws -> String {
+        guard let auth = authorization else { throw B2Error.notAuthorized }
+
+        let url = URL(string: "\(auth.apiURL)/b2api/v2/b2_finish_large_file")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(auth.authorizationToken, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = ["fileId": fileId, "partSha1Array": partSha1Array]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+        try Self.checkResponse(response, data: data)
+
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let finishedId = json?["fileId"] as? String else { throw B2Error.invalidResponse }
+        return finishedId
+    }
+
+    /// Best-effort — called on failure/cancellation so unfinished large files don't
+    /// accumulate (and bill) in the bucket.
+    func cancelLargeFile(fileId: String) async {
+        guard let auth = authorization else { return }
+
+        let url = URL(string: "\(auth.apiURL)/b2api/v2/b2_cancel_large_file")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(auth.authorizationToken, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["fileId": fileId])
+
+        _ = try? await session.data(for: request)
+    }
+
+    private func uploadLargeFile(
+        fileURL: URL,
+        encodedPath: String,
+        fileSize: Int64,
+        credentials: B2Credentials,
+        onAttempt: (@Sendable (Int) -> Void)?,
+        onPartProgress: (@Sendable (Int, Int) -> Void)?
+    ) async throws -> String {
+        let partSize = Constants.Media.b2PartSize
+        let partCount = Int((fileSize + partSize - 1) / partSize)
+
+        let b2FileId = try await withRetry(credentials: credentials, onAttempt: onAttempt) {
+            if self.authorization == nil {
+                try await self.authorize(credentials: credentials)
+            }
+            return try await self.startLargeFile(fileName: encodedPath, bucketId: credentials.bucketId)
+        }
+
+        do {
+            let handle = try FileHandle(forReadingFrom: fileURL)
+            defer { try? handle.close() }
+
+            var partSha1s: [String] = []
+            partSha1s.reserveCapacity(partCount)
+
+            for part in 1...partCount {
+                try Task.checkCancellation()
+
+                let offset = Int64(part - 1) * partSize
+                try handle.seek(toOffset: UInt64(offset))
+                let expected = Int(Swift.min(partSize, fileSize - offset))
+                guard let chunk = try handle.read(upToCount: expected), chunk.count == expected else {
+                    throw B2Error.fileChangedDuringUpload
+                }
+
+                let sha1 = Self.sha1Hash(of: chunk)
+                try await withRetry(credentials: credentials, onAttempt: onAttempt) {
+                    if self.authorization == nil {
+                        try await self.authorize(credentials: credentials)
+                    }
+                    // Part URLs are cheap and can go stale — fetch fresh per attempt.
+                    let partURL = try await self.getUploadPartURL(fileId: b2FileId)
+                    try await self.uploadPart(partNumber: part, data: chunk, sha1: sha1, to: partURL)
+                }
+                partSha1s.append(sha1)
+                onPartProgress?(part, partCount)
+            }
+
+            let sha1Array = partSha1s
+            return try await withRetry(credentials: credentials, onAttempt: onAttempt) {
+                if self.authorization == nil {
+                    try await self.authorize(credentials: credentials)
+                }
+                return try await self.finishLargeFile(fileId: b2FileId, partSha1Array: sha1Array)
+            }
+        } catch {
+            // Detached so the cleanup request still reaches B2 when the failure
+            // is this task being cancelled — a cancelled task's own URLSession
+            // calls fail immediately, which would leave the unfinished large
+            // file accumulating (and billing) in the bucket.
+            Task.detached { [self] in
+                await self.cancelLargeFile(fileId: b2FileId)
+            }
+            throw error
+        }
+    }
+
     // MARK: - Check File Exists
 
     func fileExists(
@@ -253,11 +456,22 @@ actor B2Service {
         remotePath: String,
         sha256: String,
         credentials: B2Credentials,
-        onAttempt: (@Sendable (Int) -> Void)? = nil
+        onAttempt: (@Sendable (Int) -> Void)? = nil,
+        onPartProgress: (@Sendable (Int, Int) -> Void)? = nil
     ) async throws -> String {
-        let fileData: Data
+        let encodedPath = remotePath.addingPercentEncoding(withAllowedCharacters: Self.b2AllowedCharacters) ?? remotePath
+
+        // Streamed from disk in both paths — a multi-GB video must never be
+        // buffered whole in memory. SHA-1 is likewise computed incrementally.
+        let fileSize: Int64
+        let sha1: String
         do {
-            fileData = try Data(contentsOf: fileURL)
+            let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+            guard let size = (attributes[.size] as? NSNumber)?.int64Value else {
+                throw CocoaError(.fileReadUnknown)
+            }
+            fileSize = size
+            sha1 = try Self.sha1Hash(ofFileAt: fileURL)
         } catch {
             throw B2UploadError(
                 fileName: fileURL.lastPathComponent,
@@ -265,10 +479,18 @@ actor B2Service {
                 reason: "Could not read file from disk: \(error.localizedDescription)"
             )
         }
-        let sha1 = Self.sha1Hash(of: fileData)
-        let encodedPath = remotePath.addingPercentEncoding(withAllowedCharacters: Self.b2AllowedCharacters) ?? remotePath
 
         do {
+            if fileSize > Constants.Media.b2LargeFileThreshold {
+                return try await uploadLargeFile(
+                    fileURL: fileURL,
+                    encodedPath: encodedPath,
+                    fileSize: fileSize,
+                    credentials: credentials,
+                    onAttempt: onAttempt,
+                    onPartProgress: onPartProgress
+                )
+            }
             return try await withRetry(credentials: credentials, onAttempt: onAttempt) {
                 if self.authorization == nil {
                     try await self.authorize(credentials: credentials)
@@ -276,9 +498,10 @@ actor B2Service {
                 try await self.getUploadURL(bucketId: credentials.bucketId)
 
                 let result = try await self.uploadFile(
-                    fileData: fileData,
+                    fromFileAt: fileURL,
                     fileName: encodedPath,
-                    sha1: sha1
+                    sha1: sha1,
+                    contentLength: fileSize
                 )
                 return result.fileId
             }
@@ -347,6 +570,17 @@ actor B2Service {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Incremental SHA-1 over a file on disk — constant memory regardless of size.
+    nonisolated static func sha1Hash(ofFileAt url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = Insecure.SHA1()
+        while let chunk = try handle.read(upToCount: 4 * 1024 * 1024), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
     nonisolated static func checkResponse(_ response: URLResponse, data: Data? = nil) throws {
         guard let http = response as? HTTPURLResponse else {
             throw B2Error.invalidResponse
@@ -393,6 +627,7 @@ actor B2Service {
         case notAuthorized
         case noUploadURL
         case invalidResponse
+        case fileChangedDuringUpload
         case httpError(statusCode: Int, message: String?)
 
         var isRetryable: Bool {
@@ -416,6 +651,8 @@ actor B2Service {
                 "Failed to obtain B2 upload URL. Try again or check your bucket configuration."
             case .invalidResponse:
                 "Received an invalid response from B2. Check your network connection."
+            case .fileChangedDuringUpload:
+                "The file changed on disk during upload. Try the upload again."
             case .httpError(let statusCode, let message):
                 switch statusCode {
                 case 401:
