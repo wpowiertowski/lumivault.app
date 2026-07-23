@@ -19,13 +19,14 @@ Your photos, preserved forever. Native macOS archiving with Apple Photos integra
 
 LumiVault is a native macOS 26 application for long-term photo archiving built entirely with Apple frameworks — zero third-party dependencies.
 
-Photos are organized into date-based albums, deduplicated across multiple external volumes, protected with Reed-Solomon error correction, and synced via iCloud. The app reads and writes the same `catalog.json` format as the CLI tool, so both workflows can coexist.
+Photos and videos are organized into date-based albums, deduplicated across multiple external volumes, protected with Reed-Solomon error correction, and synced via iCloud. The app reads and writes the same `catalog.json` format as the CLI tool, so both workflows can coexist.
 
 ## Features
 
-- **Apple Photos Import** — browse, search, and sort albums from your Photos library; imports the current edited state (crops, filters, adjustments) via PhotoKit and archives in one step; supports multi-album batch import with per-album progress tracking
+- **Apple Photos Import** — browse, search, and sort albums from your Photos library; imports both photos and videos, including the current edited state (crops, filters, adjustments) via PhotoKit, and archives in one step; supports multi-album batch import with per-album progress tracking
+- **Video Archiving** — import videos alongside photos with an optional "Include videos" toggle; archived exactly as exported by Photos (no transcoding), with poster-frame thumbnails, duration/resolution metadata, and in-app playback via AVKit; large files use the B2 large-file upload API
 - **Reed-Solomon Error Correction** — standard PAR2 2.0 format with GF(2^16) Vandermonde-matrix Reed-Solomon coding, fully compatible with par2cmdline and other PAR2 tools; GPU-accelerated via Metal compute shaders (CPU fallback), adaptive block sizing for guaranteed 10% recovery, split file output (.par2 index + .vol0+N.par2 recovery volumes)
-- **Integrity Verification & Auto-Repair** — re-hash files against stored SHA-256 digests to detect corruption; auto-repair by copying from a healthy volume or using PAR2 Reed-Solomon recovery; verify and repair individual albums or images via right-click context menus
+- **Integrity Verification & Auto-Repair** — re-hash files against stored SHA-256 digests to detect corruption; auto-repair by copying from a healthy volume or using PAR2 Reed-Solomon recovery; verify and repair individual albums or items via right-click context menus
 - **Backblaze B2 Cloud Upload** — upload photos and PAR2 recovery data to B2 cloud storage via the REST API with SHA-1 verification; existence checks prevent duplicate uploads
 - **Multi-Volume Mirroring** — mirror albums to multiple external drives with security-scoped bookmarks for persistent access; sync existing catalog to newly added volumes with dedup-by-hash
 - **Per-File Encryption** — optional AES-256-GCM encryption with PBKDF2 key derivation (600K iterations); pipeline order Hash(raw) → Encrypt → PAR2(ciphertext) → Store enables key-free PAR2 repair and raw-data dedup
@@ -33,7 +34,7 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 - **Storage Reconciliation** — scan all volumes and B2 for discrepancies (dangling references, orphan files, missing entries, hash mismatches) with per-item resolution actions and automatic corruption repair via the Integrity settings tab
 - **iCloud Catalog Sync** — catalog.json syncs across devices via iCloud Drive with conflict-free merge (union by SHA-256, newest timestamp wins)
 - **Catalog Backup & Restore** — catalog.json is automatically distributed to all external volumes and B2 after every mutation; restore from any backup source (volume, B2, or local file) on fresh run or via Settings
-- **Drag & Drop Import** — native file import via `UniformTypeIdentifiers` with image-type filtering
+- **Drag & Drop Import** — native file import via `UniformTypeIdentifiers` with image- and video-type filtering
 - **Image Format Conversion** — optional JPEG/HEIC conversion with configurable quality and max dimension during import; originals in Photos are never modified
 - **Thumbnail Generation** — HEIC/RAW/CR2/CR3/NEF/ARW/DNG support with a multi-resolution cache (256px grid, 64px list) keyed by content hash
 
@@ -47,6 +48,7 @@ Photos are organized into date-based albums, deduplicated across multiple extern
 | Cloud Sync      | iCloud Drive via NSFileCoordinator                            |
 | Cloud Storage   | URLSession + Backblaze B2 REST API                            |
 | Image Pipeline  | Core Image, ImageIO                                           |
+| Video Pipeline  | AVFoundation, AVKit                                           |
 | Hashing         | CryptoKit (SHA-256, SHA-1)                                    |
 | Encryption      | CryptoKit (AES-256-GCM), CommonCrypto (PBKDF2)                |
 | In-App Purchase | StoreKit 2                                                    |

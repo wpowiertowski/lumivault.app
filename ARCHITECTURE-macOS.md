@@ -36,7 +36,7 @@
 | Encryption | CryptoKit (AES-256-GCM), CommonCrypto (PBKDF2) | Per-file encryption at rest |
 | In-App Purchase | StoreKit 2 | Tip jar consumable products |
 | Drag & Drop | UniformTypeIdentifiers, Transferable | Native drag-in import, drag-out export |
-| Video Pipeline *(planned)* | AVFoundation, AVKit | Poster-frame thumbnails, duration/codec metadata, in-app playback |
+| Video Pipeline | AVFoundation, AVKit | Poster-frame thumbnails, duration/codec metadata, in-app playback |
 
 ---
 
@@ -105,10 +105,10 @@ catalog.json
 Codable structs mirror this hierarchy exactly. Serialization uses `JSONEncoder` with
 `.sortedKeys` and `.iso8601` date strategy for deterministic output.
 
-*(Planned — video support)*: each entry in `images` gains two optional fields,
+**Video support**: each entry in `images` gains two optional fields,
 `media_type` (`"video"`; absent = image) and `duration_seconds`. Both are optional so
 older catalogs decode unchanged and older app versions ignore the unknown keys — the
-`images` array name is preserved for schema compatibility even though it will hold
+`images` array name is preserved for schema compatibility even though it holds
 both media types.
 
 ### 4.2 SwiftData Models (Local Index)
@@ -128,7 +128,7 @@ both media types.
     var isEncrypted: Bool                     // true if stored as ciphertext
     var encryptionKeyId: String?              // identifies which key encrypted
     var encryptionNonce: Data?                // 12-byte AES-GCM nonce
-    // Planned — video support (defaults keep lightweight migration):
+    // Video support (defaults keep lightweight migration):
     var mediaTypeRaw: String                  // "image" (default) | "video"
     var durationSeconds: Double?              // videos only
     var pixelWidth: Int?                      // for the inspector
@@ -328,12 +328,13 @@ imported sequentially through the same pipeline, with per-album settings derived
 the shared configuration (album name and date are overridden per-album from Photos
 metadata). Progress tracks both per-album and global file counts.
 
-**Album picker** supports search (`.searchable`) and sort (by name, date, or photo count
-with ascending/descending toggle). Asset counts reflect images only (`mediaType == .image`),
-matching the import filter — videos and other media types are excluded from counts to
-prevent misleading sync status indicators. *(Planned — video support: the picker,
-monitor, and import share one parameterized media-type predicate, and counts display
-photos and videos separately; see §5.10.)*
+**Album picker** supports search (`.searchable`) and sort (by name, date, or item count
+with ascending/descending toggle). The picker, library monitor, and import fetch share
+one parameterized media-type predicate (`PhotosImportService.mediaPredicate`), so asset
+counts always match what import actually ingests and sync-status indicators can never
+drift from import scope. When "Include videos" is on the picker displays photos and
+videos separately ("N photos · M videos"); when off, videos are excluded everywhere.
+See §5.10.
 
 **Completion reporting**: The import completion screen shows `filesCataloged` (images
 actually added to the album) as the primary count, plus a breakdown of duplicates
@@ -569,9 +570,9 @@ loads products via `Product.products(for:)`, handles purchase verification, and 
 a thank-you confirmation. A `TipJar.storekit` configuration file enables local testing
 in Xcode without App Store Connect setup.
 
-### 5.10 Video File Support *(planned — see VIDEO-SUPPORT-PLAN.md)*
+### 5.10 Video File Support *(see VIDEO-SUPPORT-PLAN.md)*
 
-Videos become first-class archive citizens alongside images. Detailed phasing, risks,
+Videos are first-class archive citizens alongside images. Detailed phasing, risks,
 and file-by-file changes live in `VIDEO-SUPPORT-PLAN.md`; this section records the
 architectural decisions.
 
@@ -849,7 +850,7 @@ remains fully functional alongside the macOS app.
 - iOS / iPadOS companion app (catalog is viewable via iCloud, but no native app yet)
 - AI-based tagging or face detection
 - Photo editing or RAW development
-- ~~Video file support~~ — now planned; see §5.10 and `VIDEO-SUPPORT-PLAN.md`.
+- ~~Video file support~~ — shipped; see §5.10 and `VIDEO-SUPPORT-PLAN.md`.
   Still out of scope within video support: transcoding, streaming encryption
   (lifting the 2 GB cap), video near-duplicate detection, Live Photo paired video
 

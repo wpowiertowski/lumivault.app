@@ -8,7 +8,7 @@
 Companion documents:
 
 - `ARCHITECTURE-macOS.md` §5.10 — the target architecture for video support
-- `TEST-PLAN.md` — "Video Support — Planned Test Additions"
+- `TEST-PLAN.md` — "Video Support — Test Additions"
 
 ---
 
@@ -231,7 +231,7 @@ Audit-and-test (expected no-op, but each gets a test or explicit check):
 
 ### Phase 6 — Tests, Docs, Project Plumbing
 
-- Automated + manual test additions per `TEST-PLAN.md` ("Video Support — Planned Test
+- Automated + manual test additions per `TEST-PLAN.md` ("Video Support — Test
   Additions"): schema round-trip/legacy decode, merge reconciliation, SwiftData
   migration smoke, video poster-frame generation with a bundled fixture `.mov`,
   B2 large-file flow via the existing `URLProtocol` stub, pipeline pass-through of the

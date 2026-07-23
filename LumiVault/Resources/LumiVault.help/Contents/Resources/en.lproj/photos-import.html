@@ -38,7 +38,7 @@
     <a href="index.html" class="back">&larr; LumiVault Help</a>
     <h1>Import from Photos Library</h1>
 
-    <p>LumiVault imports albums directly from your Apple Photos library, including any edits (crops, filters, adjustments) you've made.</p>
+    <p>LumiVault imports albums directly from your Apple Photos library, including any edits (crops, filters, adjustments) you've made. Both photos and videos are imported.</p>
 
     <h2>Step 1: Select Albums</h2>
     <p>Click <strong>Import from Photos</strong> in the toolbar (or press <kbd>&#x21E7;&#x2318;I</kbd>). The album picker shows all albums in your Photos library.</p>
@@ -52,14 +52,19 @@
     <ul>
         <li><strong>Album Name</strong> &mdash; pre-filled from Photos, editable.</li>
         <li><strong>Date</strong> &mdash; year/month/day determine the folder structure on volumes.</li>
-        <li><strong>Image Format</strong> &mdash; Original (keep as-is), JPEG, or HEIC. Quality slider appears for JPEG/HEIC.</li>
-        <li><strong>Max Dimension</strong> &mdash; optionally cap the longest edge (e.g., 2048px).</li>
+        <li><strong>Include Videos</strong> &mdash; when on (the default), videos in the album are imported alongside photos. The album picker shows the counts separately ("N photos &middot; M videos").</li>
+        <li><strong>Image Format</strong> &mdash; Original (keep as-is), JPEG, or HEIC. Quality slider appears for JPEG/HEIC. Applies to images only &mdash; videos are always archived as exported by Photos.</li>
+        <li><strong>Max Dimension</strong> &mdash; optionally cap the longest edge (e.g., 2048px). Images only.</li>
         <li><strong>PAR2</strong> &mdash; generate Reed-Solomon error correction data for each file.</li>
-        <li><strong>Near-Duplicates</strong> &mdash; flag visually similar images using perceptual hashing.</li>
+        <li><strong>Near-Duplicates</strong> &mdash; flag visually similar images using perceptual hashing. Images only; videos are deduplicated by exact SHA-256 hash.</li>
         <li><strong>Encryption</strong> &mdash; encrypt files with AES-256-GCM (requires passphrase set up in Settings).</li>
         <li><strong>Volumes</strong> &mdash; select which external drives to copy to.</li>
         <li><strong>B2 Upload</strong> &mdash; upload to Backblaze B2 cloud (requires credentials in Settings).</li>
     </ul>
+
+    <div class="note">
+        <strong>Large videos &amp; encryption:</strong> Videos over 2&nbsp;GB are archived unencrypted even when encryption is enabled, because encrypting very large files in memory is not safe. The import summary flags any file this applies to.
+    </div>
 
     <h2>Step 3: Import</h2>
     <p>Click <strong>Start Import</strong>. The progress screen shows each phase:</p>
