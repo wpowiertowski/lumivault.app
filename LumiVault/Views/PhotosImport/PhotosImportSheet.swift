@@ -465,7 +465,7 @@ struct PhotosImportSheet: View {
                 if totalImportAlbums > 1 {
                     Text("\(totalImportAlbums) albums processed")
                 }
-                Text("\(progress.filesCataloged) images added to album")
+                Text("\(progress.filesCataloged) items added to album")
                 if progress.filesDeduplicated > 0 {
                     Text("\(progress.filesDeduplicated) duplicates skipped")
                 }

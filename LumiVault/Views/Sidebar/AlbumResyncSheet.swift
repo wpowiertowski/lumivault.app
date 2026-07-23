@@ -83,7 +83,7 @@ struct AlbumResyncSheet: View {
     private var additionsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Toggle(isOn: $includeAdditions) {
-                Text("Add \(delta.added.count) new \(delta.added.count == 1 ? "photo" : "photos")")
+                Text("Add \(delta.added.count) new \(delta.added.count == 1 ? "item" : "items")")
                     .font(Constants.Design.monoHeadline)
             }
             ScrollView(.horizontal) {
@@ -106,7 +106,7 @@ struct AlbumResyncSheet: View {
     private var removalsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Toggle(isOn: $includeRemovals) {
-                Text("Remove \(delta.removed.count) \(delta.removed.count == 1 ? "photo" : "photos") no longer in Photos")
+                Text("Remove \(delta.removed.count) \(delta.removed.count == 1 ? "item" : "items") no longer in Photos")
                     .font(Constants.Design.monoHeadline)
             }
             ScrollView(.horizontal) {
@@ -123,7 +123,7 @@ struct AlbumResyncSheet: View {
                 }
             }
             .frame(height: 64)
-            Text("Removed photos will be deleted from all configured external volumes and Backblaze B2.")
+            Text("Removed items will be deleted from all configured external volumes and Backblaze B2.")
                 .font(Constants.Design.monoCaption2)
                 .foregroundStyle(.tertiary)
         }
@@ -133,7 +133,7 @@ struct AlbumResyncSheet: View {
         HStack(spacing: 8) {
             Image(systemName: "questionmark.circle")
                 .foregroundStyle(.secondary)
-            Text("\(delta.untrackable.count) image\(delta.untrackable.count == 1 ? "" : "s") imported before sync was available — can't detect deletions for those.")
+            Text("\(delta.untrackable.count) item\(delta.untrackable.count == 1 ? "" : "s") imported before sync was available — can't detect deletions for those.")
                 .font(Constants.Design.monoCaption2)
                 .foregroundStyle(.secondary)
         }
