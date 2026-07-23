@@ -11,7 +11,7 @@ Items explicitly scoped out of v1 but worth tracking for future development.
 Source: ARCHITECTURE-macOS.md Section 11
 
 - [ ] iOS / iPadOS companion app (catalog viewable via iCloud, no native app yet)
-- [ ] Video file support
+- [x] Video file support — shipped; see ARCHITECTURE-macOS.md §5.10 and `VIDEO-SUPPORT-PLAN.md`. Still deferred within video support: transcoding, streaming encryption (lifting the 2 GB cap), video near-duplicate detection, Live Photo paired video.
 
 ---
 

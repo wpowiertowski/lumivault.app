@@ -15,9 +15,9 @@ LumiVault is a local-first photo archiving app. It is designed so that your phot
 ## Data the app handles
 
 ### Photos and metadata
-When you import an album, LumiVault reads photos and their metadata (EXIF, file dates, perceptual hashes, SHA-256 hashes) from your Apple Photos library or from files you drag in. Originals in Apple Photos are never modified.
+When you import an album, LumiVault reads photos and videos and their metadata (EXIF, file dates, perceptual hashes, SHA-256 hashes) from your Apple Photos library or from files you drag in. Originals in Apple Photos are never modified.
 
-Imported photos are written to:
+Imported photos and videos are written to:
 
 - The local library folder at `~/Pictures/LumiVault` on your Mac.
 - The external volumes you have added in **Settings → Volumes**.

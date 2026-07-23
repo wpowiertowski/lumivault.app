@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-LumiVault is a native macOS 26 photo archiving app built with SwiftUI, SwiftData, and Swift 6.2. It imports albums from Apple Photos, deduplicates via SHA-256, generates PAR2 error correction, mirrors to external volumes, uploads to Backblaze B2, and syncs catalog.json via iCloud.
+LumiVault is a native macOS 26 photo and video archiving app built with SwiftUI, SwiftData, and Swift 6.2. It imports albums from Apple Photos, deduplicates via SHA-256, generates PAR2 error correction, mirrors to external volumes, uploads to Backblaze B2, and syncs catalog.json via iCloud.
 
 ## Build & Run
 

@@ -198,7 +198,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 | Backblaze B2 | Test bucket with application key (read/write) |
 | iCloud | Signed-in Apple ID with iCloud Drive enabled |
 | Test images | 10+ images on disk (drag-and-drop import testing), including at least one duplicate pair |
-| Test videos *(planned — video support, TC-26/27/28)* | Photos album with edited, slow-mo, and iCloud-offloaded videos; on-disk `.mov`/`.mp4` files at ~150 MB, ~500 MB, and > 2 GB |
+| Test videos *(manual QA pending — TC-26/27/28)* | Photos album with edited, slow-mo, and iCloud-offloaded videos; on-disk `.mov`/`.mp4` files at ~150 MB, ~500 MB, and > 2 GB |
 
 ---
 
@@ -514,7 +514,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 
 ---
 
-### TC-26: Video Import *(planned — video support)*
+### TC-26: Video Import *(manual QA pending)*
 
 Prerequisites: a Photos album containing a mix of photos and videos, including at least
 one edited video, one slow-mo, and one iCloud-offloaded (not downloaded) video.
@@ -535,7 +535,7 @@ one edited video, one slow-mo, and one iCloud-offloaded (not downloaded) video.
 
 ---
 
-### TC-27: Video Playback & Thumbnails *(planned — video support)*
+### TC-27: Video Playback & Thumbnails *(manual QA pending)*
 
 | # | Action | Expected |
 | --- | -------- | ---------- |
@@ -549,7 +549,7 @@ one edited video, one slow-mo, and one iCloud-offloaded (not downloaded) video.
 
 ---
 
-### TC-28: Large Video Handling *(planned — video support)*
+### TC-28: Large Video Handling *(manual QA pending)*
 
 Prerequisites: videos of ~150 MB, ~500 MB, and > 2 GB; B2 test bucket.
 
@@ -603,7 +603,7 @@ Prerequisites: videos of ~150 MB, ~500 MB, and > 2 GB; B2 test bucket.
 - TC-24: Tip Jar
 - TC-23.5-23.9: Edge cases
 
-### Video support additions *(planned; once video support ships)*
+### Video support additions *(video support shipped — manual QA pending)*
 
 - P0: TC-26.2-26.3 (import scope + badge consistency), TC-26.8 (video dedup),
   TC-26.11 (old-version catalog compatibility), TC-28.3 (large-upload cancel cleanup),
