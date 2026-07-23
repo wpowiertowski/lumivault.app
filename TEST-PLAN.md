@@ -66,6 +66,40 @@ These items would further improve coverage but require architectural changes:
 
 ---
 
+## Video Support — Test Additions
+
+Tracks the test work for `VIDEO-SUPPORT-PLAN.md`. The automated suites below now live
+in `Tests/VideoSupportTests.swift` (catalog schema, SwiftData model, import
+settings/filters, B2 large-file API, video thumbnails via a runtime-generated
+AVAssetWriter fixture). The manual cases TC-26/27/28 remain to be executed on real
+hardware before release.
+
+### Automated suites
+
+| Suite | With PR | Covers |
+| ------- | --------- | -------- |
+| CatalogVideoSchemaTests | PR 1 (schema) | `media_type`/`duration_seconds` encode/decode round-trip; legacy catalog (no video fields) decodes with nil → image; catalog containing videos re-encodes deterministically; `reconciled(with:)` commutativity over the new fields; `contentEquals` stability across a save/load round-trip |
+| SwiftData migration smoke | PR 1 (schema) | Legacy store opens with defaulted `mediaTypeRaw = "image"` and nil duration (same pattern as PhotosSyncSchemaTests) |
+| B2LargeFileNetworkTests | PR 2 (B2) | Via the existing URLProtocol stub: start_large_file → get_upload_part_url → upload_part (per-part SHA-1 headers, part numbering) → finish_large_file (part SHA-1 array); cancel_large_file on mid-flight failure; threshold routing (≤ 200 MB single-call, > 200 MB parts); single-call path streams from file instead of `Data(contentsOf:)` |
+| VideoThumbnailTests | PR 3 (pipeline) | Poster frame from a fixture `.mov` writes 256/64px HEICs into the standard SHA-keyed cache; duration/dimension probe returns expected values; non-video input throws. (AVAssetImageGenerator decodes without a display, so this is headless-safe — unlike the CIContext-based image cases.) |
+| Pipeline media-type routing | PR 3 (pipeline) | Video `PipelineItem` skips conversion (output URL == input, no re-encode); pHash skipped (stays nil); encryption size cap: over-cap video imports unencrypted and surfaces a warning, under-cap encrypts normally; catalog sink persists `media_type`/`duration_seconds` |
+| PhotosLibraryMonitor scope | PR 4 (Photos) | `computeDeltaParts` parity when the tracked set includes video asset ids — badges must match the import scope in both includeVideos states |
+| ImportSettingsTests (extend) | PR 4 (Photos) | `includeVideos` default matches Import Defaults |
+| DeletionServiceTests / VolumeScanTests (extend) | PR 3/5 | Existing suites gain a video fixture: deletion removes video + PAR2 companion; reconciliation dangling/orphan/hash-verify paths treat videos identically |
+
+**Fixture**: one committed sub-second ~100 KB H.264 `.mov` under `Tests/Fixtures` with
+a pinned SHA-256, serving as the trust anchor the same way the image fixtures do.
+
+### Known automation gaps (manual QA only)
+
+| Area | Blocker |
+| ------ | --------- |
+| Photos video export (.fullSizeVideo selection, slow-mo export sessions, iCloud-offloaded downloads) | Requires Photos library entitlement + real assets — same limitation as image import (covered by TC-26) |
+| AVKit playback (incl. decrypt-to-temp) | Needs a real app session; covered by TC-27 |
+| Multi-GB behavior (PAR2 duration, memory ceiling, real B2 large-file upload) | Requires large real files + live B2; covered by TC-28 |
+
+---
+
 ## UI Test Automation (XCUIAutomation)
 
 ### Summary: 12 UI tests in 1 suite (local environment only)
@@ -164,6 +198,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 | Backblaze B2 | Test bucket with application key (read/write) |
 | iCloud | Signed-in Apple ID with iCloud Drive enabled |
 | Test images | 10+ images on disk (drag-and-drop import testing), including at least one duplicate pair |
+| Test videos *(planned — video support, TC-26/27/28)* | Photos album with edited, slow-mo, and iCloud-offloaded videos; on-disk `.mov`/`.mp4` files at ~150 MB, ~500 MB, and > 2 GB |
 
 ---
 
@@ -479,6 +514,57 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 
 ---
 
+### TC-26: Video Import *(planned — video support)*
+
+Prerequisites: a Photos album containing a mix of photos and videos, including at least
+one edited video, one slow-mo, and one iCloud-offloaded (not downloaded) video.
+
+| # | Action | Expected |
+| --- | -------- | ---------- |
+| 26.1 | Open Photos album picker | Albums show separate photo and video counts (e.g., "42 photos · 3 videos") |
+| 26.2 | Import settings: "Include videos" ON | Import ingests both photos and videos; total count matches picker |
+| 26.3 | Import settings: "Include videos" OFF | Only photos imported; behavior identical to pre-video releases; sidebar sync badges do not report the skipped videos as pending |
+| 26.4 | Import an edited video | Edited render is imported (`.fullSizeVideo` or export-session render), not the unedited original; original filename preserved |
+| 26.5 | Import a slow-mo video | Export-session render succeeds; playback shows the slow-mo effect |
+| 26.6 | Import an iCloud-offloaded video (multi-hundred MB) | Download proceeds with health status; watchdog does not spuriously cancel while chunks arrive |
+| 26.7 | Import with JPEG/HEIC conversion + max dimension configured | Videos are passed through untouched (same bytes/extension); photos convert as usual |
+| 26.8 | Import the same videos again | All deduplicated by SHA-256, 0 new copies |
+| 26.9 | Drag a `.mov`/`.mp4` from Finder onto the app (TC-5 extension) | Video accepted by drop filter and file picker; imports through the same pipeline |
+| 26.10 | Check catalog.json | Video entries carry `media_type: "video"` and `duration_seconds`; photo entries unchanged |
+| 26.11 | Open the new catalog in a pre-video app version | Catalog decodes; videos appear as entries with broken previews but no crash or data loss |
+
+---
+
+### TC-27: Video Playback & Thumbnails *(planned — video support)*
+
+| # | Action | Expected |
+| --- | -------- | ---------- |
+| 27.1 | Grid view of a mixed album | Videos show poster-frame thumbnails with duration badge + play glyph; posters are not black frames |
+| 27.2 | Open a video in detail view | Video plays inline (AVKit player) with audio; images keep the existing preview |
+| 27.3 | Metadata inspector on a video | Shows duration, resolution, codec, hash, PAR2, storage locations; no EXIF section |
+| 27.4 | Import a video with encryption ON (under size cap) | File on volume is ciphertext; grid poster still renders (generated pre-encryption) |
+| 27.5 | Play an encrypted video | Decrypts to temp and plays; temp file removed after leaving the view |
+| 27.6 | Delete thumbnail cache, rescroll grid | Poster regenerated from volume original (decrypt-to-temp path for encrypted) |
+| 27.7 | Load video preview from B2 (volumes ejected) | Downloads, (decrypts,) and plays |
+
+---
+
+### TC-28: Large Video Handling *(planned — video support)*
+
+Prerequisites: videos of ~150 MB, ~500 MB, and > 2 GB; B2 test bucket.
+
+| # | Action | Expected |
+| --- | -------- | ---------- |
+| 28.1 | Import ~150 MB video with B2 ON | Single-call upload path; memory stays flat (streamed from file) |
+| 28.2 | Import ~500 MB video with B2 ON | Large-file API used (parts visible in B2 console as one finished file); `b2FileId` recorded; re-import reports "already exists" |
+| 28.3 | Cancel import mid large-file upload | `b2_cancel_large_file` called; no orphaned unfinished large files in bucket |
+| 28.4 | Import > 2 GB video with encryption ON | File imported **unencrypted**; completion screen surfaces the size-cap warning; no memory spike |
+| 28.5 | PAR2 on a multi-GB video | Recovery files generated (~10%); progress advances; verify + corrupt-and-repair round-trip passes (TC-10 procedure) |
+| 28.6 | Delete a large video (TC-16/17 extension) | Removed from volumes, B2 (large-file version), catalog, SwiftData |
+| 28.7 | Reconciliation with a video fixture (TC-18 extension) | Dangling/orphan/hash-mismatch detection and repair work identically to images |
+
+---
+
 ## Priority Matrix
 
 ### P0 — Must Pass (data loss risk)
@@ -516,3 +602,13 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 - TC-22: Settings
 - TC-24: Tip Jar
 - TC-23.5-23.9: Edge cases
+
+### Video support additions *(planned; once video support ships)*
+
+- P0: TC-26.2-26.3 (import scope + badge consistency), TC-26.8 (video dedup),
+  TC-26.11 (old-version catalog compatibility), TC-28.3 (large-upload cancel cleanup),
+  TC-28.4 (encryption size cap), TC-28.5 (PAR2 on multi-GB video)
+- P1: TC-26.4-26.6 (edited/slow-mo/iCloud videos), TC-27.4-27.5 (encrypted video
+  poster + playback), TC-28.1-28.2 (B2 upload paths), TC-28.6-28.7 (deletion,
+  reconciliation)
+- P2: TC-26.1/26.9-26.10, TC-27.1-27.3/27.6-27.7

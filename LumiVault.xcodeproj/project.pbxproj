@@ -31,6 +31,7 @@
 		4627A53502C9ADCF7662B490 /* VolumeSyncSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B64E8F8B0DBDF7B71FF1E6 /* VolumeSyncSheet.swift */; };
 		4947D3D9752DCA4CD8200F79 /* SyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E154D6C9BE1D38992E43BA85 /* SyncCoordinator.swift */; };
 		49EECE51F6F24EDA028977C2 /* MetalPAR2Service.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7AF86B7699D2920ED076EB /* MetalPAR2Service.swift */; };
+		4B78225EED961C81207D931E /* VideoSupportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F25946248E6013048DA42C01 /* VideoSupportTests.swift */; };
 		501A35F756977D30D428B869 /* PipelinedImportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DAAFF78DFC668D556C45BE3 /* PipelinedImportCoordinator.swift */; };
 		501A9A0B01E7CDE2D560E609 /* PhotosAlbumPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA85E7129726352A8ABA7D14 /* PhotosAlbumPicker.swift */; };
 		50D5C5A6BA309A0BCAB0CC64 /* VolumeListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0099C37B5592C7B2AACD467B /* VolumeListView.swift */; };
@@ -194,6 +195,7 @@
 		E69F5FC018A6F4282FD4B52D /* PhotosLibraryMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosLibraryMonitor.swift; sourceTree = "<group>"; };
 		E7C8416D7A7C9047F26714AD /* LumiVaultUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumiVaultUITests.swift; sourceTree = "<group>"; };
 		E7DCF4AB401E33135B55AC71 /* PathComponentValidation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathComponentValidation.swift; sourceTree = "<group>"; };
+		F25946248E6013048DA42C01 /* VideoSupportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoSupportTests.swift; sourceTree = "<group>"; };
 		F4DA177B337BD6A1C2268C14 /* AsyncPrimitivesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncPrimitivesTests.swift; sourceTree = "<group>"; };
 		F66D8D26FF9F0CA911982598 /* SettingsSyncServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSyncServiceTests.swift; sourceTree = "<group>"; };
 		F90BF32093AC2357CD61747D /* Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalog.swift; sourceTree = "<group>"; };
@@ -315,6 +317,7 @@
 				F66D8D26FF9F0CA911982598 /* SettingsSyncServiceTests.swift */,
 				93EA5474D335D73AA5521633 /* SyncServiceTests.swift */,
 				2CFB81A5F9B3F78322F61142 /* TestFixtures.swift */,
+				F25946248E6013048DA42C01 /* VideoSupportTests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -659,6 +662,7 @@
 				B2B2DBC78DFDEE14E2BD95E7 /* SettingsSyncServiceTests.swift in Sources */,
 				8CD050FBD82D0F256781112F /* SyncServiceTests.swift in Sources */,
 				27E6FC12E9C96DA903E62582 /* TestFixtures.swift in Sources */,
+				4B78225EED961C81207D931E /* VideoSupportTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -772,7 +776,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0.2;
+				MARKETING_VERSION = 1.0.3;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = LumiVault;
@@ -842,7 +846,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0.2;
+				MARKETING_VERSION = 1.0.3;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

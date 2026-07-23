@@ -1,14 +1,27 @@
 import Foundation
 import Photos
+import AVFoundation
 import UniformTypeIdentifiers
 import os
 
 struct PhotosAlbum: Identifiable, Sendable {
     let id: String
     let title: String
+    /// Image assets in the album. Named for its original image-only meaning;
+    /// videos are counted separately in `videoCount`.
     let assetCount: Int
+    let videoCount: Int
     let startDate: Date?
     let endDate: Date?
+
+    nonisolated init(id: String, title: String, assetCount: Int, videoCount: Int = 0, startDate: Date?, endDate: Date?) {
+        self.id = id
+        self.title = title
+        self.assetCount = assetCount
+        self.videoCount = videoCount
+        self.startDate = startDate
+        self.endDate = endDate
+    }
 }
 
 struct ImportedAsset: Sendable {
@@ -16,12 +29,20 @@ struct ImportedAsset: Sendable {
     let originalFilename: String
     let creationDate: Date?
     let phAssetLocalIdentifier: String?
+    let mediaType: MediaType
 
-    nonisolated init(fileURL: URL, originalFilename: String, creationDate: Date?, phAssetLocalIdentifier: String? = nil) {
+    nonisolated init(
+        fileURL: URL,
+        originalFilename: String,
+        creationDate: Date?,
+        phAssetLocalIdentifier: String? = nil,
+        mediaType: MediaType = .image
+    ) {
         self.fileURL = fileURL
         self.originalFilename = originalFilename
         self.creationDate = creationDate
         self.phAssetLocalIdentifier = phAssetLocalIdentifier
+        self.mediaType = mediaType
     }
 }
 
@@ -58,14 +79,34 @@ actor PhotosImportService {
         await PHPhotoLibrary.requestAuthorization(for: .readWrite)
     }
 
+    // MARK: - Media Scope
+
+    /// Predicate matching what the import pipeline ingests. The album picker,
+    /// median-date computation, library monitor, and import fetch must all use
+    /// this one helper so counts and sync badges can never drift from the
+    /// actual import scope.
+    nonisolated static func mediaPredicate(includeVideos: Bool) -> NSPredicate {
+        if includeVideos {
+            return NSPredicate(
+                format: "mediaType == %d OR mediaType == %d",
+                PHAssetMediaType.image.rawValue,
+                PHAssetMediaType.video.rawValue
+            )
+        }
+        return NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+    }
+
     // MARK: - Album Enumeration
 
     func fetchAlbums() -> [PhotosAlbum] {
         var albums: [PhotosAlbum] = []
 
-        // Only count images — import filters to images, so counts must match
+        // Images and videos counted separately — the picker shows both, and
+        // `assetCount` keeps its image-only meaning for sort/sync parity.
         let imageOnly = PHFetchOptions()
         imageOnly.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+        let videoOnly = PHFetchOptions()
+        videoOnly.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue)
 
         // User-created albums
         let userAlbums = PHAssetCollection.fetchAssetCollections(
@@ -73,10 +114,12 @@ actor PhotosImportService {
         )
         userAlbums.enumerateObjects { collection, _, _ in
             let assets = PHAsset.fetchAssets(in: collection, options: imageOnly)
+            let videos = PHAsset.fetchAssets(in: collection, options: videoOnly)
             albums.append(PhotosAlbum(
                 id: collection.localIdentifier,
                 title: collection.localizedTitle ?? "Untitled",
                 assetCount: assets.count,
+                videoCount: videos.count,
                 startDate: collection.startDate,
                 endDate: collection.endDate
             ))
@@ -88,11 +131,13 @@ actor PhotosImportService {
         )
         smartAlbums.enumerateObjects { collection, _, _ in
             let assets = PHAsset.fetchAssets(in: collection, options: imageOnly)
-            guard assets.count > 0 else { return }
+            let videos = PHAsset.fetchAssets(in: collection, options: videoOnly)
+            guard assets.count + videos.count > 0 else { return }
             albums.append(PhotosAlbum(
                 id: collection.localIdentifier,
                 title: collection.localizedTitle ?? "Untitled",
                 assetCount: assets.count,
+                videoCount: videos.count,
                 startDate: collection.startDate,
                 endDate: collection.endDate
             ))
@@ -101,21 +146,21 @@ actor PhotosImportService {
         return albums
     }
 
-    /// Median `creationDate` across image assets in the album. `creationDate`
-    /// is the original capture timestamp on the PHAsset, distinct from the
-    /// edit/modification date (`modificationDate`). Returns nil if the album
-    /// is missing or contains no images with creation dates.
+    /// Median `creationDate` across the album's assets in the import scope.
+    /// `creationDate` is the original capture timestamp on the PHAsset, distinct
+    /// from the edit/modification date (`modificationDate`). Returns nil if the
+    /// album is missing or contains no in-scope assets with creation dates.
     ///
-    /// Filtering to images matches what the import pipeline actually ingests —
-    /// videos in the same Photos album won't skew the result.
-    func medianCreationDate(in albumLocalIdentifier: String) -> Date? {
+    /// The media-type filter matches what the import pipeline actually ingests —
+    /// out-of-scope assets in the same Photos album won't skew the result.
+    func medianCreationDate(in albumLocalIdentifier: String, includeVideos: Bool = ImportSettings.includeVideosDefault) -> Date? {
         let fetchResult = PHAssetCollection.fetchAssetCollections(
             withLocalIdentifiers: [albumLocalIdentifier], options: nil
         )
         guard let collection = fetchResult.firstObject else { return nil }
 
         let opts = PHFetchOptions()
-        opts.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+        opts.predicate = Self.mediaPredicate(includeVideos: includeVideos)
         let assets = PHAsset.fetchAssets(in: collection, options: opts)
 
         var dates: [Date] = []
@@ -132,16 +177,18 @@ actor PhotosImportService {
 
     // MARK: - Album Asset Diff
 
-    /// Returns the current image PHAssets in the named album, or `nil` if the
-    /// album is no longer present (e.g. the user deleted it in Photos).
-    func fetchAssets(in albumLocalIdentifier: String) -> [PHAsset]? {
+    /// Returns the current in-scope PHAssets in the named album, or `nil` if the
+    /// album is no longer present (e.g. the user deleted it in Photos). Defaults
+    /// to the user's Import Defaults media scope so album diffs (sync badges,
+    /// resync) match what an import would ingest.
+    func fetchAssets(in albumLocalIdentifier: String, includeVideos: Bool = ImportSettings.includeVideosDefault) -> [PHAsset]? {
         let fetchResult = PHAssetCollection.fetchAssetCollections(
             withLocalIdentifiers: [albumLocalIdentifier], options: nil
         )
         guard let collection = fetchResult.firstObject else { return nil }
 
         let opts = PHFetchOptions()
-        opts.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+        opts.predicate = Self.mediaPredicate(includeVideos: includeVideos)
         let assets = PHAsset.fetchAssets(in: collection, options: opts)
 
         var refs: [PHAsset] = []
@@ -177,36 +224,48 @@ actor PhotosImportService {
         callbacks: PhotosImportCallbacks
     ) async throws -> ImportedAsset {
         let resources = PHAssetResource.assetResources(for: asset)
+        let isVideo = asset.mediaType == .video
+        let mediaType: MediaType = isVideo ? .video : .image
 
-        // Prefer edited (fullSizePhoto) over unedited original (photo)
-        // so that user edits from Photos are preserved in the import
-        guard let resource = resources.first(where: { $0.type == .fullSizePhoto })
-                ?? resources.first(where: { $0.type == .photo })
+        // Prefer edited (fullSizePhoto / fullSizeVideo) over the unedited
+        // original so that user edits from Photos are preserved in the import.
+        // Live Photo `.pairedVideo` resources are never selected — a Live Photo
+        // has mediaType == .image and imports as its still.
+        let editedType: PHAssetResourceType = isVideo ? .fullSizeVideo : .fullSizePhoto
+        let originalType: PHAssetResourceType = isVideo ? .video : .photo
+        guard let resource = resources.first(where: { $0.type == editedType })
+                ?? resources.first(where: { $0.type == originalType })
                 ?? resources.first else {
             throw PhotosImportError.noResourceFound
         }
 
-        // Use the original resource's filename (fullSizePhoto always reports "FullSizeRender.jpeg")
-        let originalResource = resources.first(where: { $0.type == .photo })
+        // Use the original resource's filename (full-size renders report generic
+        // names like "FullSizeRender.jpeg" / "FullSizeRender.mov")
+        let originalResource = resources.first(where: { $0.type == originalType })
         let filename = originalResource?.originalFilename ?? resource.originalFilename
 
         // Edited asset whose rendered version isn't available as a resource
         // (typical when the edit was made on another device and iCloud hasn't
-        // materialized the render locally). Exporting the `.photo` original
-        // would silently drop the edit — and collapse differently-edited
-        // duplicates into one SHA-256 — so render the current version instead.
-        if resource.type != .fullSizePhoto,
+        // materialized the render locally — and, for videos, always the case
+        // for slow-mo, whose current version exists only as an AVComposition).
+        // Exporting the original resource would silently drop the edit — and
+        // collapse differently-edited duplicates into one SHA-256 — so render
+        // the current version instead.
+        if resource.type != editedType,
            resources.contains(where: { $0.type == .adjustmentData }) {
             do {
+                if isVideo {
+                    return try await importRenderedVideo(asset, originalFilename: filename, to: directory)
+                }
                 return try await importRenderedAsset(asset, originalFilename: filename, to: directory)
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
                 // The render couldn't be produced (offline, edit not yet
                 // materialized, or the request stalled). Fall through to the
-                // original resource so the photo is still archived in its
+                // original resource so the asset is still archived in its
                 // unedited form rather than dropped entirely — the edit is lost,
-                // but the image is preserved.
+                // but the media is preserved.
                 Logger(subsystem: "app.lumivault", category: "import").warning(
                     "Render unavailable for \(filename, privacy: .public); importing original instead. \(error.localizedDescription, privacy: .public)"
                 )
@@ -224,7 +283,8 @@ actor PhotosImportService {
             fileURL: finalURL,
             originalFilename: filename,
             creationDate: asset.creationDate,
-            phAssetLocalIdentifier: asset.localIdentifier
+            phAssetLocalIdentifier: asset.localIdentifier,
+            mediaType: mediaType
         )
     }
 
@@ -303,6 +363,113 @@ actor PhotosImportService {
             creationDate: asset.creationDate,
             phAssetLocalIdentifier: asset.localIdentifier
         )
+    }
+
+    /// Export an edited video by rendering its current version through a
+    /// PHImageManager export session. Used when the `.fullSizeVideo` resource is
+    /// missing — a cross-device edit that iCloud hasn't materialized, or a
+    /// slow-mo whose current version exists only as an AVComposition.
+    ///
+    /// Tries `AVAssetExportPresetPassthrough` first (no re-encode); compositions
+    /// that passthrough can't handle fall back to
+    /// `AVAssetExportPresetHighestQuality`. Output is always a QuickTime
+    /// container, so the original stem gets a `.mov` extension.
+    private func importRenderedVideo(
+        _ asset: PHAsset,
+        originalFilename: String,
+        to directory: URL
+    ) async throws -> ImportedAsset {
+        // Same assetsd budget concern as writeResource — serialize the request.
+        await Self.gate.wait()
+        defer {
+            Task.detached { await Self.gate.signal() }
+        }
+
+        let filename = (originalFilename as NSString).deletingPathExtension + ".mov"
+        let finalURL = uniqueURL(for: directory.appendingPathComponent(filename))
+
+        do {
+            let session = try await requestVideoExportSession(
+                for: asset, preset: AVAssetExportPresetPassthrough
+            )
+            try await session.export(to: finalURL, as: .mov)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // Passthrough is incompatible with some compositions (slow-mo).
+            // Re-request with a re-encoding preset and try once more.
+            try? FileManager.default.removeItem(at: finalURL)
+            let session = try await requestVideoExportSession(
+                for: asset, preset: AVAssetExportPresetHighestQuality
+            )
+            try await session.export(to: finalURL, as: .mov)
+        }
+
+        return ImportedAsset(
+            fileURL: finalURL,
+            originalFilename: filename,
+            creationDate: asset.creationDate,
+            phAssetLocalIdentifier: asset.localIdentifier,
+            mediaType: .video
+        )
+    }
+
+    /// Carries the non-Sendable `AVAssetExportSession` out of the PHImageManager
+    /// result handler. Safe: the handler never touches the session after
+    /// resuming the continuation, so ownership genuinely transfers.
+    private struct ExportSessionBox: @unchecked Sendable {
+        let session: AVAssetExportSession
+    }
+
+    /// Obtain an export session for the asset's current version, with the same
+    /// idle watchdog as the photo render path — the iCloud download behind
+    /// `requestExportSession` can stall, and its completion handler is not
+    /// guaranteed to fire after a network drop.
+    private func requestVideoExportSession(
+        for asset: PHAsset,
+        preset: String
+    ) async throws -> AVAssetExportSession {
+        let options = PHVideoRequestOptions()
+        options.version = .current
+        options.deliveryMode = .highQualityFormat
+        options.isNetworkAccessAllowed = true
+
+        let state = RenderState()
+        // Downloads report progress; each callback resets the idle timer.
+        options.progressHandler = { _, _, _, _ in state.noteActivity() }
+
+        let box = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<ExportSessionBox, Error>) in
+                let requestID = PHImageManager.default().requestExportSession(
+                    forVideo: asset,
+                    options: options,
+                    exportPreset: preset
+                ) { session, info in
+                    guard state.claimResume() else { return }
+                    state.cancelWatchdog()
+                    if let session {
+                        continuation.resume(returning: ExportSessionBox(session: session))
+                    } else if let error = info?[PHImageErrorKey] as? Error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(throwing: PhotosImportError.exportFailed)
+                    }
+                }
+                state.arm(requestID: requestID, stallThreshold: Self.renderStallThreshold) {
+                    PHImageManager.default().cancelImageRequest(requestID)
+                    if state.claimResume() {
+                        continuation.resume(throwing: PhotosImportError.stalled)
+                    }
+                }
+            }
+        } onCancel: {
+            // Hasten completion; if the handler never fires, the still-armed
+            // watchdog will resume-throw within the idle threshold.
+            if let id = state.requestID {
+                PHImageManager.default().cancelImageRequest(id)
+            }
+        }
+        return box.session
     }
 
     // MARK: - writeResource with retry + cancellable + exponential watchdog
@@ -508,6 +675,7 @@ actor PhotosImportService {
         albumId: String,
         to importDirectory: URL,
         callbacks: PhotosImportCallbacks = PhotosImportCallbacks(),
+        includeVideos: Bool = true,
         progress: @Sendable @escaping (Int, Int) -> Void
     ) async throws -> AsyncStream<ImportResult> {
         let fetchResult = PHAssetCollection.fetchAssetCollections(
@@ -519,7 +687,7 @@ actor PhotosImportService {
 
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
-        fetchOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+        fetchOptions.predicate = Self.mediaPredicate(includeVideos: includeVideos)
         let assets = PHAsset.fetchAssets(in: collection, options: fetchOptions)
 
         // Snapshot asset references so the stream closure can capture them

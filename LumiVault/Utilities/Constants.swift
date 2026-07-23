@@ -78,4 +78,29 @@ enum Constants {
         static let nearDuplicateThreshold = 5 // Hamming distance
     }
 
+    // MARK: - Media
+    enum Media {
+        /// CryptoKit's AES-GCM is one-shot: plaintext and ciphertext are both held in
+        /// memory (~2x file size). Files above this limit are stored unencrypted with a
+        /// surfaced warning instead of risking memory exhaustion mid-import.
+        nonisolated static let encryptionSizeLimit: Int64 = 2 * 1024 * 1024 * 1024 // 2 GB
+
+        /// B2 recommends the large-file API above 200 MB (hard single-call limit is 5 GB).
+        nonisolated static let b2LargeFileThreshold: Int64 = 200 * 1024 * 1024
+        /// Part size for B2 large-file uploads (minimum allowed is 5 MB).
+        nonisolated static let b2PartSize: Int64 = 100 * 1024 * 1024
+
+        /// Ceiling on the total bytes of concurrent memory-heavy import work
+        /// (encryption + GPU PAR2). The encryption and PAR2 stages each load a
+        /// whole file into memory; without a shared budget, several large videos
+        /// in flight stack into multi-GB peaks that wedge the import. Photos are
+        /// tiny and flow freely under this budget; only large videos serialize.
+        nonisolated static let importMemoryBudget: Int64 = 1_500 * 1024 * 1024 // ~1.5 GB
+        /// Peak resident multiple of file size while AES-GCM sealing one-shot
+        /// (plaintext + sealed box + combined output held at once).
+        nonisolated static let encryptionMemoryFactor: Int64 = 3
+        /// Peak resident multiple while generating PAR2 (CPU `Data` plus the
+        /// Metal buffer in unified memory).
+        nonisolated static let par2MemoryFactor: Int64 = 2
+    }
 }

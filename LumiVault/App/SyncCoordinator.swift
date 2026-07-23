@@ -296,6 +296,12 @@ final class SyncCoordinator: @unchecked Sendable {
                                 existing.isEncrypted = isEncrypted
                                 existing.encryptionKeyId = catalogImage.encryptionKeyId
                                 existing.encryptionNonce = nonce
+                                if let mediaTypeRaw = catalogImage.mediaType {
+                                    existing.mediaTypeRaw = mediaTypeRaw
+                                }
+                                if let duration = catalogImage.durationSeconds {
+                                    existing.durationSeconds = duration
+                                }
                                 // Always point the record at the album it lives in per the
                                 // catalog being hydrated. Guarding on `album == nil` would
                                 // strand the record on a stale album when a restored catalog
@@ -313,7 +319,9 @@ final class SyncCoordinator: @unchecked Sendable {
                                     album: album,
                                     isEncrypted: isEncrypted,
                                     encryptionKeyId: catalogImage.encryptionKeyId,
-                                    encryptionNonce: nonce
+                                    encryptionNonce: nonce,
+                                    mediaType: catalogImage.mediaType.flatMap(MediaType.init(rawValue:)) ?? .image,
+                                    durationSeconds: catalogImage.durationSeconds
                                 )
                                 context.insert(record)
                                 imagesBySHA[catalogImage.sha256] = record

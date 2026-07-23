@@ -74,6 +74,98 @@ struct AsyncSemaphoreTests {
     }
 }
 
+// MARK: - MemoryBudgetSemaphore
+
+@Suite
+@MainActor
+struct MemoryBudgetSemaphoreTests {
+
+    @Test func acquireWithinBudgetDoesNotSuspend() async {
+        let sem = MemoryBudgetSemaphore(capacity: 1000)
+        await sem.acquire(400)
+        await sem.acquire(400)   // 800 <= 1000, still fits
+        // Reaching here without suspending is the assertion.
+    }
+
+    @Test func acquireBeyondBudgetSuspendsUntilRelease() async {
+        let sem = MemoryBudgetSemaphore(capacity: 1000)
+        await sem.acquire(800)
+        let resumed = AsyncFlag()
+
+        let waiter = Task {
+            await sem.acquire(400)   // 800 + 400 > 1000 → suspends
+            await resumed.fire()
+        }
+
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(await resumed.value == false)
+
+        await sem.release(800)       // frees the budget → waiter admitted
+        _ = await waiter.value
+        #expect(await resumed.value == true)
+    }
+
+    @Test func oversizedRequestRunsSoloWhenIdle() async {
+        let sem = MemoryBudgetSemaphore(capacity: 1000)
+        // A single request larger than the whole budget is clamped to capacity
+        // and admitted when the budget is idle, rather than deadlocking.
+        await sem.acquire(5000)
+        // Reaching here is the assertion.
+    }
+
+    @Test func laterSmallRequestCannotJumpAQueuedLarge() async {
+        let sem = MemoryBudgetSemaphore(capacity: 1000)
+        await sem.acquire(700)
+
+        let largeAdmitted = AsyncFlag()
+        let smallAdmitted = AsyncFlag()
+
+        // Large needs 500: 700 + 500 > 1000 → queues.
+        let large = Task {
+            await sem.acquire(500)
+            await largeAdmitted.fire()
+        }
+        try? await Task.sleep(for: .milliseconds(30))   // large is now head of the queue
+
+        // Small needs 200: 700 + 200 = 900 ≤ 1000 and WOULD fit right now, but
+        // FIFO must keep it behind the already-queued large request.
+        let small = Task {
+            await sem.acquire(200)
+            await smallAdmitted.fire()
+        }
+        try? await Task.sleep(for: .milliseconds(30))
+
+        #expect(await largeAdmitted.value == false)   // doesn't fit yet
+        #expect(await smallAdmitted.value == false)   // FIFO-blocked, not starving the large one
+
+        await sem.release(700)   // budget idle → large admitted first, then small
+        _ = await large.value
+        _ = await small.value
+        #expect(await largeAdmitted.value == true)
+        #expect(await smallAdmitted.value == true)
+    }
+
+    @Test func cancelAllResumesBlockedWaiters() async {
+        let sem = MemoryBudgetSemaphore(capacity: 100)
+        await sem.acquire(100)   // full
+        let counter = AsyncCounter()
+
+        let waiters = (0..<3).map { _ in
+            Task {
+                await sem.acquire(50)
+                await counter.increment()
+            }
+        }
+
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(await counter.value == 0)
+
+        await sem.cancelAll()
+        for w in waiters { _ = await w.value }
+        #expect(await counter.value == 3)
+    }
+}
+
 // MARK: - AsyncChannel
 
 @Suite

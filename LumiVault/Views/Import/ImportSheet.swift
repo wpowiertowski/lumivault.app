@@ -88,7 +88,7 @@ struct ImportSheet: View {
                     Button("Choose Files...") { chooseFiles() }
                         .accessibilityIdentifier("import.chooseFiles")
 
-                    Button("Import \(selectedURLs.count) Photos") { startImport() }
+                    Button("Import \(selectedURLs.count) Files") { startImport() }
                         .keyboardShortcut(.defaultAction)
                         .disabled(selectedURLs.isEmpty)
                         .accessibilityIdentifier("import.importButton")
@@ -119,15 +119,14 @@ struct ImportSheet: View {
                     Image(systemName: "photo.on.rectangle.angled")
                         .font(.largeTitle)
                         .foregroundStyle(.secondary)
-                    Text(selectedURLs.isEmpty ? "Drop photos here" : "\(selectedURLs.count) files selected")
+                    Text(selectedURLs.isEmpty ? "Drop photos or videos here" : "\(selectedURLs.count) files selected")
                         .font(Constants.Design.monoBody)
                         .foregroundStyle(.secondary)
                 }
             }
             .accessibilityIdentifier("import.dropZone")
             .dropDestination(for: URL.self) { urls, _ in
-                let imageTypes: Set<String> = ["jpg", "jpeg", "heic", "png", "tiff", "raw", "cr2", "cr3", "nef", "arw", "dng"]
-                selectedURLs = urls.filter { imageTypes.contains($0.pathExtension.lowercased()) }
+                selectedURLs = urls.filter { Self.isImportableFile($0) }
                 return !selectedURLs.isEmpty
             } isTargeted: { targeted in
                 isDragTargeted = targeted
@@ -197,7 +196,7 @@ struct ImportSheet: View {
                 .font(Constants.Design.monoHeadline)
 
             VStack(spacing: 2) {
-                Text("\(progress.filesCataloged) images added")
+                Text("\(progress.filesCataloged) items added")
                 if progress.filesDeduplicated > 0 {
                     Text("\(progress.filesDeduplicated) duplicates skipped")
                 }
@@ -220,11 +219,20 @@ struct ImportSheet: View {
         }
     }
 
+    /// Accepts the image extensions the pipeline has always handled, plus
+    /// anything conforming to `UTType.movie` (mov, mp4, m4v, ...).
+    static func isImportableFile(_ url: URL) -> Bool {
+        let imageTypes: Set<String> = ["jpg", "jpeg", "heic", "png", "tiff", "raw", "cr2", "cr3", "nef", "arw", "dng"]
+        let ext = url.pathExtension.lowercased()
+        if imageTypes.contains(ext) { return true }
+        return UTType(filenameExtension: ext)?.conforms(to: .movie) ?? false
+    }
+
     private func chooseFiles() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = true
-        panel.allowedContentTypes = [.image, .rawImage]
+        panel.allowedContentTypes = [.image, .rawImage, .movie]
 
         if panel.runModal() == .OK {
             selectedURLs = panel.urls

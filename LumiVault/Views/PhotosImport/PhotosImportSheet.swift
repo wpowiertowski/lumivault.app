@@ -465,7 +465,7 @@ struct PhotosImportSheet: View {
                 if totalImportAlbums > 1 {
                     Text("\(totalImportAlbums) albums processed")
                 }
-                Text("\(progress.filesCataloged) images added to album")
+                Text("\(progress.filesCataloged) items added to album")
                 if progress.filesDeduplicated > 0 {
                     Text("\(progress.filesDeduplicated) duplicates skipped")
                 }
@@ -580,7 +580,7 @@ struct PhotosImportSheet: View {
                     selectedAlbumTitle = album.title
                     settings.albumName = album.title
 
-                    let date = (await service.medianCreationDate(in: albumId)) ?? .now
+                    let date = (await service.medianCreationDate(in: albumId, includeVideos: settings.includeVideos)) ?? .now
                     let calendar = Calendar.current
                     settings.year = String(calendar.component(.year, from: date))
                     settings.month = String(format: "%02d", calendar.component(.month, from: date))
@@ -608,12 +608,12 @@ struct PhotosImportSheet: View {
         built.reserveCapacity(selected.count)
         let calendar = Calendar.current
         for album in selected {
-            let median = await service.medianCreationDate(in: album.id)
+            let median = await service.medianCreationDate(in: album.id, includeVideos: settings.includeVideos)
             let date = median ?? .now
             built.append(PendingAlbumImport(
                 id: album.id,
                 originalTitle: album.title,
-                assetCount: album.assetCount,
+                assetCount: album.assetCount + (settings.includeVideos ? album.videoCount : 0),
                 albumName: album.title,
                 year: String(calendar.component(.year, from: date)),
                 month: String(format: "%02d", calendar.component(.month, from: date)),
@@ -792,7 +792,7 @@ private struct AlbumDateRow: View {
                     .textFieldStyle(.roundedBorder)
                     .font(Constants.Design.monoBody)
                 HStack(spacing: 6) {
-                    Text("\(pending.assetCount) image\(pending.assetCount == 1 ? "" : "s")")
+                    Text("\(pending.assetCount) item\(pending.assetCount == 1 ? "" : "s")")
                     if pending.computedDate == nil {
                         Text("· no creation dates found")
                             .foregroundStyle(.orange)

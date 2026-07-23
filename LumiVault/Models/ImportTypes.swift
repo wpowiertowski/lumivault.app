@@ -23,11 +23,23 @@ enum MaxDimension: Sendable, Hashable {
 }
 
 struct ImportSettings: Sendable {
+    /// UserDefaults key for the Import Defaults toggle. Shared with
+    /// `PhotosLibraryMonitor` so sidebar sync badges always count the same
+    /// media-type scope the import pipeline will actually ingest.
+    nonisolated static let includeVideosDefaultsKey = "importIncludeVideos"
+
+    /// The user's Import Defaults value for `includeVideos`.
+    nonisolated static var includeVideosDefault: Bool {
+        UserDefaults.standard.object(forKey: includeVideosDefaultsKey) == nil
+            || UserDefaults.standard.bool(forKey: includeVideosDefaultsKey)
+    }
+
     var albumName: String
     var year: String
     var month: String
     var day: String
     var generatePAR2: Bool = true
+    var includeVideos: Bool = true
     var detectNearDuplicates: Bool = true
     var nearDuplicateThreshold: Int = Constants.Dedup.nearDuplicateThreshold
     var encryptFiles: Bool = false
@@ -97,10 +109,10 @@ final class PhotosImportProgress: @unchecked Sendable {
     var completedAlbumFiles: Int = 0
 
     /// Text for the main import pipeline label.
-    /// Multiple parallel stages running → "Processing images";
+    /// Multiple parallel stages running → "Processing items";
     /// exactly one → that stage's description; none → the current phase rawValue.
     var displayLabel: String {
-        if activeStages.count > 1 { return "Processing images" }
+        if activeStages.count > 1 { return "Processing items" }
         if let only = activeStages.first { return only.rawValue }
         return phase.rawValue
     }
@@ -145,13 +157,13 @@ struct NearDuplicateMatch: Identifiable, Sendable {
 
 enum ImportPhase: String, Sendable {
     case importing = "Importing from Photos"
-    case converting = "Converting images"
+    case converting = "Converting items"
     case hashing = "Hashing & finding duplicates"
     case encrypting = "Encrypting files"
     case par2 = "Generating PAR2 recovery data"
     case copying = "Copying to storage"
     case uploading = "Uploading to B2"
-    case cataloging = "Processing images"
+    case cataloging = "Processing items"
     case complete = "Complete"
     case failed = "Failed"
 
