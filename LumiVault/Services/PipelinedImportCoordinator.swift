@@ -268,6 +268,11 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         let filenameRegistry = FilenameRegistry()
         let candidatesLock = OSAllocatedUnfairLock(initialState: nearDuplicateCandidates)
 
+        // Shared byte budget across the two memory-heavy stages (encryption and
+        // GPU PAR2). Bounds how many large videos' buffers can coexist so a batch
+        // of big files can't stack into a multi-GB peak that wedges the import.
+        let memoryBudget = MemoryBudgetSemaphore(capacity: Constants.Media.importMemoryBudget)
+
         // MARK: - Stage launches
         // Each stage runs detached on the cooperative pool. Heavy CPU/GPU/I/O work
         // runs off-main; only progress + SwiftData touches hop to MainActor.
@@ -317,6 +322,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                     encKey: key,
                     encKeyId: encKeyId,
                     recordsBySHA: recordsBySHA,
+                    memoryBudget: memoryBudget,
                     progress: progress
                 )
             }
@@ -331,6 +337,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                     staging: staging,
                     cancelFlag: cancelFlag,
                     recordsBySHA: recordsBySHA,
+                    memoryBudget: memoryBudget,
                     progress: progress
                 )
             }
@@ -399,6 +406,9 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                     for ch in allChannels {
                         await ch.cancel()
                     }
+
+                    // Unblock any stage suspended waiting on the memory budget.
+                    await memoryBudget.cancelAll()
                 }
             }
         }
@@ -984,6 +994,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         encKey: SymmetricKey,
         encKeyId: String?,
         recordsBySHA: RecordLookup,
+        memoryBudget: MemoryBudgetSemaphore,
         progress: PhotosImportProgress
     ) async {
         defer { outputCh.finish() }
@@ -1020,6 +1031,10 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             }
 
             let encryptedURL = staging.appendingPathComponent(snap.filename + ".enc")
+            // Reserve budget for the one-shot seal's peak (~3x file size) so a
+            // batch of large videos can't stack their buffers all at once.
+            let encWeight = snap.sizeBytes * Constants.Media.encryptionMemoryFactor
+            await memoryBudget.acquire(encWeight)
             do {
                 let (nonce, encSize) = try EncryptionService.encryptFileWithKey(
                     at: item.activeFileURL, to: encryptedURL, sha256: snap.sha256, key: encKey
@@ -1045,6 +1060,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 mutableItem.error = errMsg
                 await MainActor.run { progress.errors.append(errMsg) }
             }
+            await memoryBudget.release(encWeight)
 
             await outputCh.send(mutableItem)
         }
@@ -1060,6 +1076,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         staging: URL,
         cancelFlag: OSAllocatedUnfairLock<Bool>,
         recordsBySHA: RecordLookup,
+        memoryBudget: MemoryBudgetSemaphore,
         progress: PhotosImportProgress
     ) async {
         defer { outputCh.finish() }
@@ -1085,6 +1102,10 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 progress.par2FileFraction = 0
             }
 
+            // Reserve budget for the whole-file load plus the Metal buffer
+            // (~2x file size in unified memory) before the GPU dispatch.
+            let par2Weight = snap.sizeBytes * Constants.Media.par2MemoryFactor
+            await memoryBudget.acquire(par2Weight)
             do {
                 let par2URL = try self.redundancyService.generatePAR2(
                     for: item.activeFileURL,
@@ -1117,6 +1138,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                     progress.currentFile += 1
                 }
             }
+            await memoryBudget.release(par2Weight)
 
             await outputCh.send(mutableItem)
         }

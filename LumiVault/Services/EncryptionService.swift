@@ -153,7 +153,10 @@ actor EncryptionService {
         guard let combined = sealedBox.combined else {
             throw EncryptionError.sealFailed
         }
-        let ciphertextAndTag = Data(combined.dropFirst(12))
+        // `combined` is nonce(12) + ciphertext + tag; the nonce is stored
+        // separately. `dropFirst` already returns a `Data` slice, so write it
+        // directly — wrapping it in `Data(...)` would force a full-file copy.
+        let ciphertextAndTag = combined.dropFirst(12)
         try ciphertextAndTag.write(to: destination, options: .atomic)
         return (Data(nonce), Int64(ciphertextAndTag.count))
     }
