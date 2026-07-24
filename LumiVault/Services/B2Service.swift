@@ -230,7 +230,7 @@ actor B2Service {
 
     private func uploadLargeFile(
         fileURL: URL,
-        encodedPath: String,
+        remotePath: String,
         fileSize: Int64,
         credentials: B2Credentials,
         onAttempt: (@Sendable (Int) -> Void)?,
@@ -243,7 +243,12 @@ actor B2Service {
             if self.authorization == nil {
                 try await self.authorize(credentials: credentials)
             }
-            return try await self.startLargeFile(fileName: encodedPath, bucketId: credentials.bucketId)
+            // b2_start_large_file takes the file name in the JSON body, which B2
+            // stores verbatim — it must be the RAW name, not percent-encoded.
+            // (Only the X-Bz-File-Name *header* on the single-call upload path is
+            // percent-encoded, and B2 decodes that back.) Passing an encoded path
+            // here stores a literal "%20" and forks the album into a second folder.
+            return try await self.startLargeFile(fileName: remotePath, bucketId: credentials.bucketId)
         }
 
         do {
@@ -484,7 +489,7 @@ actor B2Service {
             if fileSize > Constants.Media.b2LargeFileThreshold {
                 return try await uploadLargeFile(
                     fileURL: fileURL,
-                    encodedPath: encodedPath,
+                    remotePath: remotePath,
                     fileSize: fileSize,
                     credentials: credentials,
                     onAttempt: onAttempt,
