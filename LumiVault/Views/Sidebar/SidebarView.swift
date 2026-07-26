@@ -3,6 +3,7 @@ import SwiftData
 
 struct SidebarView: View {
     @Binding var selectedAlbum: AlbumRecord?
+    @Binding var selectedImage: ImageRecord?
     @Query(sort: \AlbumRecord.year, order: .reverse) private var albums: [AlbumRecord]
     @Query private var volumes: [VolumeRecord]
     @Environment(\.modelContext) private var modelContext
@@ -142,7 +143,7 @@ struct SidebarView: View {
         }
         .sheet(item: $albumToResync) { album in
             if let delta = resyncDelta {
-                AlbumResyncSheet(album: album, delta: delta)
+                AlbumResyncSheet(album: album, delta: delta, selectedImage: $selectedImage)
             }
         }
         .onChange(of: albumToResync) { _, new in

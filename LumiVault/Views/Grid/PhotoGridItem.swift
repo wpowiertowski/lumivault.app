@@ -8,6 +8,15 @@ struct PhotoGridItem: View {
     @Environment(\.encryptionService) private var encryptionService
     @State private var thumbnail: NSImage?
 
+    /// False once the backing record has been deleted (detached from its context) —
+    /// e.g. a Photos re-sync removes this photo from the album while a thumbnail
+    /// regeneration is still in flight. Touching a detached record's persisted
+    /// attributes traps ("backing data was detached from a context"), and doing so
+    /// corrupts SwiftData enough to crash unrelated reads (the album's `images`
+    /// relationship in the sidebar). Every post-`await` write-back below is gated on
+    /// this; reading `modelContext` is safe on a detached record.
+    private var recordIsLive: Bool { image.modelContext != nil }
+
     var body: some View {
         ZStack {
             if let thumbnail {
@@ -97,7 +106,7 @@ struct PhotoGridItem: View {
     private func loadThumbnail() async {
         if let cached = await thumbnailService.thumbnail(for: image.sha256, size: .grid) {
             thumbnail = cached
-            if image.thumbnailState != .generated {
+            if recordIsLive, image.thumbnailState != .generated {
                 image.thumbnailState = .generated
             }
             return
@@ -106,6 +115,7 @@ struct PhotoGridItem: View {
     }
 
     private func regenerateFromOriginal() async {
+        guard recordIsLive else { return }
         let sha256 = image.sha256
         let isEncrypted = image.isEncrypted
         let nonce = image.encryptionNonce
@@ -123,7 +133,7 @@ struct PhotoGridItem: View {
                 try await generate(at: fileURL, sha256: sha256, isEncrypted: isEncrypted, nonce: nonce)
                 if scoped { mountURL.stopAccessingSecurityScopedResource() }
                 thumbnail = await thumbnailService.thumbnail(for: sha256, size: .grid)
-                image.thumbnailState = .generated
+                if recordIsLive { image.thumbnailState = .generated }
                 return
             } catch {
                 if scoped { mountURL.stopAccessingSecurityScopedResource() }
@@ -149,7 +159,7 @@ struct PhotoGridItem: View {
 
         // Only flag `.failed` if we actually reached a mounted volume and generation threw.
         // No mounted volumes → stay `.pending` so it retries when a drive is reconnected.
-        if didAttemptGeneration {
+        if didAttemptGeneration, recordIsLive {
             image.thumbnailState = .failed
         }
     }
@@ -160,7 +170,7 @@ struct PhotoGridItem: View {
     private func regenerateFromDerivedPath(
         sha256: String, isEncrypted: Bool, nonce: Data?, known: [StorageLocation]
     ) async -> Bool {
-        guard let album = image.album else { return false }
+        guard recordIsLive, let album = image.album else { return false }
         let relativePath = "\(album.year)/\(album.month)/\(album.day)/\(album.name)/\(image.filename)"
 
         var candidates = [StorageLocation(volumeID: Constants.Storage.libraryVolumeID, relativePath: relativePath)]
@@ -182,9 +192,10 @@ struct PhotoGridItem: View {
                 continue
             }
 
+            guard recordIsLive else { return false }
             image.storageLocations.append(candidate)
             thumbnail = await thumbnailService.thumbnail(for: sha256, size: .grid)
-            image.thumbnailState = .generated
+            if recordIsLive { image.thumbnailState = .generated }
             return true
         }
         return false
@@ -193,7 +204,7 @@ struct PhotoGridItem: View {
     /// Download the original from B2 and thumbnail it. Network failures leave the
     /// state `.pending` so the grid retries on a later appearance.
     private func regenerateFromB2(sha256: String, isEncrypted: Bool, nonce: Data?) async -> Bool {
-        guard let fileId = image.b2FileId,
+        guard recordIsLive, let fileId = image.b2FileId,
               let credentials = B2Credentials.load() else { return false }
 
         guard let raw = await B2ThumbnailFetcher.shared.fetchOriginal(fileId: fileId, credentials: credentials) else {
@@ -210,6 +221,7 @@ struct PhotoGridItem: View {
             plaintext = raw
         }
 
+        guard recordIsLive else { return false }
         if image.mediaType == .video {
             let ext = (image.filename as NSString).pathExtension
             guard (try? await thumbnailService.generateVideoThumbnail(
@@ -221,7 +233,7 @@ struct PhotoGridItem: View {
             return false
         }
         thumbnail = await thumbnailService.thumbnail(for: sha256, size: .grid)
-        image.thumbnailState = .generated
+        if recordIsLive { image.thumbnailState = .generated }
         return true
     }
 }
