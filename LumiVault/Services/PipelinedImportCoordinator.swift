@@ -580,6 +580,13 @@ class PipelinedImportCoordinator: @unchecked Sendable {
 
         // 1. Removals (best-effort — collect errors, continue to additions).
         if !delta.removed.isEmpty {
+            // Drive the progress modal's "Removing items" label + bar. The
+            // additions pipeline below resets these if it runs.
+            await MainActor.run {
+                progress.phase = .removing
+                progress.totalFiles = delta.removed.count
+                progress.currentFile = 0
+            }
             let albumPath = "\(albumRecord.year)/\(albumRecord.month)/\(albumRecord.day)/\(albumRecord.name)"
             let inputs = delta.removed.map { image in
                 DeletionService.ImageDeletionInput(
@@ -617,6 +624,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 )
                 await thumbnailService.removeThumbnails(for: image.sha256)
                 modelContext.delete(image)
+                await MainActor.run { progress.currentFile += 1 }
             }
             try? modelContext.save()
         }

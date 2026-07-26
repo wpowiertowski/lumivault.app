@@ -128,6 +128,8 @@ final class PhotosImportProgress: @unchecked Sendable {
         let albumFraction: Double
         if phase == .importing {
             albumFraction = Double(currentFile) / Double(totalFiles) * 0.1
+        } else if phase == .removing {
+            albumFraction = Double(currentFile) / Double(totalFiles)
         } else if phase == .complete {
             albumFraction = 1.0
         } else {
@@ -157,6 +159,7 @@ struct NearDuplicateMatch: Identifiable, Sendable {
 
 enum ImportPhase: String, Sendable {
     case importing = "Importing from Photos"
+    case removing = "Removing items"
     case converting = "Converting items"
     case hashing = "Hashing & finding duplicates"
     case encrypting = "Encrypting files"
@@ -170,6 +173,7 @@ enum ImportPhase: String, Sendable {
     var verb: String {
         switch self {
         case .importing: "Importing"
+        case .removing: "Removing"
         case .converting: "Converting"
         case .hashing: "Hashing"
         case .encrypting: "Encrypting"

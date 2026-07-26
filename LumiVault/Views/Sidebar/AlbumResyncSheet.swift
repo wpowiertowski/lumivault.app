@@ -6,6 +6,9 @@ import os
 struct AlbumResyncSheet: View {
     let album: AlbumRecord
     let delta: AlbumDelta
+    /// The detail-pane selection, so a removal can drop it before deleting the
+    /// backing record (see `startResync`).
+    @Binding var selectedImage: ImageRecord?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -210,6 +213,18 @@ struct AlbumResyncSheet: View {
         // targeted recheck below refreshes this album once it finishes.
         photosMonitor.pause()
 
+        // If the detail pane is showing a photo we're about to remove, drop the
+        // selection now — synchronously, before the async delete+save below.
+        // Deleting a SwiftData @Model that a live view still references is a hard
+        // crash ("this model instance was invalidated because its backing data
+        // could no longer be found"). Clearing here lets SwiftUI tear down
+        // PhotoDetailView ahead of the deletion, mirroring the per-image and
+        // per-album delete flows, which clear their selection the same way.
+        if includeRemovals, let selected = selectedImage,
+           delta.removed.contains(where: { $0.persistentModelID == selected.persistentModelID }) {
+            selectedImage = nil
+        }
+
         nonisolated(unsafe) let ctx = modelContext
         let appliedDelta = AlbumDelta(
             added: includeAdditions ? delta.added : [],
@@ -283,7 +298,12 @@ struct AlbumResyncSheet: View {
                 url.stopAccessingSecurityScopedResource()
             }
 
-            await syncCoordinator.pushAfterLocalChange(reloadFromDisk: false)
+            // Reload before distributing: the resync mutated its own CatalogService
+            // instance and wrote the updated catalog to disk. syncCoordinator's
+            // in-memory catalog is a *separate* instance and is now stale (still
+            // holds the removed images), so pushing without reloading would
+            // re-upload them to iCloud/volumes/B2 and resurrect the deletions.
+            await syncCoordinator.pushAfterLocalChange(reloadFromDisk: true)
             photosMonitor.resume()
             photosMonitor.clearDelta(for: resolvedAlbum)
             await photosMonitor.recheck(album: resolvedAlbum)

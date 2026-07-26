@@ -214,7 +214,7 @@ final class SyncCoordinator: @unchecked Sendable {
     @MainActor
     private func hydrateSwiftDataIfStale(catalog: Catalog) {
         guard let container = modelContainer else { return }
-        let context = ModelContext(container)
+        let context = container.mainContext
         let recordCount = (try? context.fetchCount(FetchDescriptor<ImageRecord>())) ?? 0
         if recordCount != catalog.totalImageCount {
             hydrateSwiftData(from: catalog)
@@ -224,7 +224,14 @@ final class SyncCoordinator: @unchecked Sendable {
     @MainActor
     private func hydrateSwiftData(from catalog: Catalog) {
         guard let container = modelContainer else { return }
-        let context = ModelContext(container)
+        // Hydrate on the SAME context the UI observes (mainContext), not a fresh
+        // ModelContext(container). Deleting records via a second context leaves
+        // the sidebar's @Query — bound to mainContext — holding rows the other
+        // context removed, and reading them then hits a use-after-free
+        // (EXC_BAD_ACCESS in AlbumRecord.images / Query.wrappedValue). The
+        // cross-context change propagation is also what surfaced the "context
+        // instantiated on the main queue but used off it" warnings.
+        let context = container.mainContext
 
         // Batch-load both models once and match in memory. Fetching per image
         // inside the loop made hydration O(N²) — SwiftData evaluated the

@@ -20,7 +20,7 @@ struct ContentView: View {
             let contentIdeal = max(200, proxy.size.width * 0.6)
 
             NavigationSplitView(columnVisibility: $columnVisibility) {
-                SidebarView(selectedAlbum: $selectedAlbum)
+                SidebarView(selectedAlbum: $selectedAlbum, selectedImage: $selectedImage)
                     .navigationSplitViewColumnWidth(min: 200, ideal: sidebarIdeal, max: 320)
                     .accessibilityIdentifier("nav.sidebar")
             } content: {

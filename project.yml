@@ -13,9 +13,8 @@ settings:
     SWIFT_VERSION: "6.2"
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_TREAT_WARNINGS_AS_ERRORS: true
-    SWIFT_DEFAULT_ISOLATION: MainActor
     PRODUCT_NAME: LumiVault
-    MARKETING_VERSION: "1.1.0"
+    MARKETING_VERSION: "1.1.1"
     CURRENT_PROJECT_VERSION: "1"
     GENERATE_INFOPLIST_FILE: true
     ARCHS: arm64
@@ -60,6 +59,20 @@ targets:
         buildPhase: resources
     settings:
       base:
+        # MainActor-by-default isolation for the app target (mirrors Package.swift's
+        # `.defaultIsolation(MainActor)`, which SwiftPM applies to the LumiVault
+        # target only). IMPORTANT: the `SWIFT_DEFAULT_ISOLATION` build setting is
+        # silently ignored by this Xcode/toolchain — it never reaches the compiler
+        # as `-default-isolation` (verified in the build log) — so without the
+        # explicit OTHER_SWIFT_FLAGS below the app builds with a *nonisolated*
+        # default. Code written for MainActor (e.g. SwiftData mutations in the
+        # import/sync coordinators) then runs OFF the main actor, corrupting the
+        # main-bound ModelContext and crashing with EXC_BAD_ACCESS in @Query /
+        # relationship reads. Scoped to the app target: the test targets rely on
+        # the default (nonisolated) isolation (URLProtocol stubs, XCTestCase).
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+        SWIFT_DEFAULT_ISOLATION: MainActor
+        OTHER_SWIFT_FLAGS: "$(inherited) -default-isolation MainActor"
         INFOPLIST_FILE: LumiVault/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: app.lumivault
         DEVELOPMENT_TEAM: 6AS496S47T
