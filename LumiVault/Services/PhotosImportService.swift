@@ -4,6 +4,64 @@ import AVFoundation
 import UniformTypeIdentifiers
 import os
 
+/// Decides what the resource-download watchdog should do on each tick.
+///
+/// Extracted from `PhotosImportService.writeResource` so the arithmetic can be
+/// unit-tested: the surrounding loop is bound to `PHAssetResourceManager` and a
+/// live `CheckedContinuation`, but every decision it makes is a pure function of
+/// the attempt number, how long the byte stream has been idle, and how long the
+/// asset has been struggling overall.
+///
+/// Regressions this encodes:
+/// - `c4cf7ee` / `5233888`: a stalled iCloud download must be cancelled and
+///   retried on a doubling schedule (1, 2, 4 … 512s over 10 attempts) rather than
+///   parking the import behind a 10-minute hard skip.
+/// - `aedc03b`: the "Waiting on iCloud download…" message must stay hidden until
+///   the asset has struggled for `slowMessageDelay`, or a brief assetsd hiccup
+///   produces a sub-second flicker.
+nonisolated enum StallPolicy {
+    /// Total attempts before the asset is given up on.
+    static let maxAttempts = 10
+
+    /// Suppress the user-facing "downloading from iCloud" message until the asset
+    /// has been struggling for at least this long.
+    static let slowMessageDelay: TimeInterval = 5
+
+    enum Decision: Equatable, Sendable {
+        /// Bytes are flowing.
+        case healthy
+        /// Idling, but too early to bother the user about it.
+        case quiet
+        /// Idling long enough to report, with a live retry countdown.
+        case slow(secondsUntilRetry: Int)
+        /// Idle past the threshold — cancel this request and let the retry loop
+        /// start a fresh one.
+        case stalled
+    }
+
+    /// Per-attempt idle threshold: 1, 2, 4, 8 … seconds, doubling each retry.
+    static func threshold(forAttempt attempt: Int) -> TimeInterval {
+        TimeInterval(1 << attempt)
+    }
+
+    static func decide(
+        attempt: Int,
+        idleFor: TimeInterval,
+        elapsedForAsset: TimeInterval
+    ) -> Decision {
+        let stallThreshold = threshold(forAttempt: attempt)
+
+        if idleFor >= stallThreshold {
+            return .stalled
+        }
+        if idleFor > stallThreshold / 2 {
+            guard elapsedForAsset >= slowMessageDelay else { return .quiet }
+            return .slow(secondsUntilRetry: max(0, Int(ceil(stallThreshold - idleFor))))
+        }
+        return .healthy
+    }
+}
+
 struct PhotosAlbum: Identifiable, Sendable {
     let id: String
     let title: String
@@ -474,12 +532,8 @@ actor PhotosImportService {
 
     // MARK: - writeResource with retry + cancellable + exponential watchdog
 
-    static let maxStallAttempts = 10
-    /// Suppress the user-facing "downloading from iCloud" message until the
-    /// asset has been struggling for at least this long. Without this, a brief
-    /// stall on attempt 0 that resolves on attempt 1 produces a sub-second
-    /// flicker of the message.
-    static let slowMessageDelay: TimeInterval = 5
+    static let maxStallAttempts = StallPolicy.maxAttempts
+    static let slowMessageDelay: TimeInterval = StallPolicy.slowMessageDelay
     /// Once the slow message is shown, keep it visible for at least this long
     /// even if the underlying stall resolves immediately. Prevents the message
     /// from appearing and disappearing within the same animation frame.
@@ -594,23 +648,28 @@ actor PhotosImportService {
                 )
                 state.setRequestID(id)
 
-                // Watchdog: observe chunk activity. When the stream goes idle
-                // longer than the per-attempt threshold (1, 2, 4, 8 … seconds,
-                // doubling each retry), cancel the request and surface a stall
-                // so the outer retry loop restarts with a fresh requestData.
-                let stallThreshold = TimeInterval(1 << attempt)
+                // Watchdog: observe chunk activity. The arithmetic — per-attempt
+                // threshold, when to surface the iCloud-download message, and the
+                // retry countdown — lives in `StallPolicy` so it can be unit-tested;
+                // this loop only performs the side effects.
+                let stallAttempt = attempt
                 let maxAttempts = Self.maxStallAttempts
-                let slowMessageDelay = Self.slowMessageDelay
                 let watchdog = Task.detached { [state, callbacks] in
                     let tickInterval: TimeInterval = 0.5
 
-                    while !Task.isCancelled {
+                    watchdogLoop: while !Task.isCancelled {
                         try? await Task.sleep(for: .seconds(tickInterval))
                         if state.isComplete { break }
 
-                        let idleFor = Date().timeIntervalSince(state.lastActivity)
+                        let now = Date()
+                        let decision = StallPolicy.decide(
+                            attempt: stallAttempt,
+                            idleFor: now.timeIntervalSince(state.lastActivity),
+                            elapsedForAsset: now.timeIntervalSince(assetStart)
+                        )
 
-                        if idleFor >= stallThreshold {
+                        switch decision {
+                        case .stalled:
                             if let rid = state.requestID {
                                 PHAssetResourceManager.default().cancelDataRequest(rid)
                             }
@@ -618,22 +677,17 @@ actor PhotosImportService {
                             if state.claimResume() {
                                 continuation.resume(throwing: PhotosImportError.stalled)
                             }
-                            break
-                        } else if idleFor > stallThreshold / 2 {
-                            // Only surface the iCloud-download message after the
-                            // asset has been struggling long enough to matter.
-                            // Skips the sub-second flicker when attempt 1 succeeds
-                            // immediately after a brief attempt 0 stall.
-                            let elapsed = Date().timeIntervalSince(assetStart)
-                            guard elapsed >= slowMessageDelay else { continue }
-                            let secondsUntilRetry = max(0, Int(ceil(stallThreshold - idleFor)))
+                            break watchdogLoop
+                        case .slow(let secondsUntilRetry):
                             callbacks.health(.slow(.photosDownload(
                                 filename: state.filename,
-                                attempt: attempt,
+                                attempt: stallAttempt,
                                 maxAttempts: maxAttempts,
                                 secondsUntilRetry: secondsUntilRetry
                             )))
-                        } else {
+                        case .quiet:
+                            continue
+                        case .healthy:
                             callbacks.health(.normal)
                         }
                     }

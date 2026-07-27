@@ -35,10 +35,24 @@ actor ThumbnailService {
     private let storageRoot: URL
     private let memoryCache = NSCache<NSString, NSImage>()
 
-    init() {
-        self.storageRoot = URL.applicationSupportDirectory
+    /// Thumbnails live in Application Support, not `Caches`: macOS purges the
+    /// caches directory under disk pressure, which silently emptied the grid
+    /// (regression: bf00a05). `cacheRoot` is injectable so tests can exercise the
+    /// on-disk layout without touching the real container.
+    nonisolated static var defaultCacheRoot: URL {
+        URL.applicationSupportDirectory
             .appendingPathComponent("Thumbnails", isDirectory: true)
+    }
+
+    init(cacheRoot: URL? = nil) {
+        self.storageRoot = cacheRoot ?? Self.defaultCacheRoot
         memoryCache.totalCostLimit = 128 * 1024 * 1024 // 128 MB
+    }
+
+    /// Where a thumbnail for `sha256` at `size` is stored. Exposed so tests can
+    /// assert the on-disk layout and simulate a cache miss.
+    func cacheLocation(for sha256: String, size: ThumbnailSize) -> URL {
+        storageURL(for: sha256, size: size)
     }
 
     // MARK: - Public API

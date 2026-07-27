@@ -3349,3 +3349,154 @@ struct ChannelCancellationDrainTests {
         #expect(processed.value < 6)
     }
 }
+
+// MARK: - Photos Stall Policy (regression: c4cf7ee, 5233888, aedc03b, 1da8a89)
+//
+// The watchdog around PHAssetResourceManager is untestable as a whole — it needs a
+// live continuation and assetsd — but every decision it makes is arithmetic, now
+// isolated in StallPolicy.
+
+@Suite
+struct StallPolicyTests {
+
+    @Test func thresholdsDoubleAcrossTenAttempts() {
+        // 1, 2, 4 … 512 seconds. Before 5233888 a stall waited on a flat 10-minute
+        // hard skip instead of retrying.
+        let expected: [TimeInterval] = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+        #expect(StallPolicy.maxAttempts == expected.count)
+        for (attempt, seconds) in expected.enumerated() {
+            #expect(StallPolicy.threshold(forAttempt: attempt) == seconds)
+        }
+    }
+
+    @Test func flowingBytesReportHealthy() {
+        #expect(StallPolicy.decide(attempt: 0, idleFor: 0, elapsedForAsset: 30) == .healthy)
+        // Just under half the threshold is still healthy.
+        #expect(StallPolicy.decide(attempt: 3, idleFor: 3.9, elapsedForAsset: 60) == .healthy)
+    }
+
+    @Test func idlePastTheThresholdStalls() {
+        #expect(StallPolicy.decide(attempt: 0, idleFor: 1.0, elapsedForAsset: 0) == .stalled)
+        #expect(StallPolicy.decide(attempt: 2, idleFor: 4.5, elapsedForAsset: 99) == .stalled)
+    }
+
+    @Test func slowMessageIsSuppressedForTheFirstFiveSeconds() {
+        // aedc03b: attempt 0's threshold is 1s, so the message would otherwise fire
+        // after 0.5s of idling and vanish again when attempt 1 succeeded.
+        #expect(StallPolicy.decide(attempt: 0, idleFor: 0.6, elapsedForAsset: 0.6) == .quiet)
+        #expect(StallPolicy.decide(attempt: 0, idleFor: 0.6, elapsedForAsset: 4.99) == .quiet)
+
+        // Past the delay it surfaces, with a countdown.
+        #expect(StallPolicy.decide(attempt: 0, idleFor: 0.6, elapsedForAsset: 5.0)
+                == .slow(secondsUntilRetry: 1))
+    }
+
+    @Test func countdownReportsWholeSecondsRemainingAndNeverGoesNegative() {
+        // attempt 3 → 8s threshold; idle 5s → 3s left.
+        #expect(StallPolicy.decide(attempt: 3, idleFor: 5, elapsedForAsset: 30)
+                == .slow(secondsUntilRetry: 3))
+        // Fractional remainders round up so the countdown never displays 0 while
+        // the retry has not fired.
+        #expect(StallPolicy.decide(attempt: 3, idleFor: 7.2, elapsedForAsset: 30)
+                == .slow(secondsUntilRetry: 1))
+
+        for idle in stride(from: 4.05, to: 8.0, by: 0.25) {
+            guard case .slow(let seconds) = StallPolicy.decide(
+                attempt: 3, idleFor: idle, elapsedForAsset: 30
+            ) else {
+                Issue.record("Expected .slow at idle \(idle)")
+                continue
+            }
+            #expect(seconds >= 0)
+            #expect(seconds <= 8)
+        }
+    }
+
+    @Test func laterAttemptsTolerateLongerIdlePeriods() {
+        // The same 40s idle is a stall early on and merely slow later — that is what
+        // lets a genuinely slow iCloud download finish instead of being killed.
+        // attempt 2 → 4s threshold; attempt 6 → 64s threshold (half = 32s).
+        #expect(StallPolicy.decide(attempt: 2, idleFor: 40, elapsedForAsset: 60) == .stalled)
+        #expect(StallPolicy.decide(attempt: 6, idleFor: 40, elapsedForAsset: 60)
+                == .slow(secondsUntilRetry: 24))
+        // Still comfortably healthy at the same attempt with a shorter idle.
+        #expect(StallPolicy.decide(attempt: 6, idleFor: 30, elapsedForAsset: 60) == .healthy)
+    }
+}
+
+// MARK: - Thumbnail Cache Location (regression: bf00a05)
+//
+// Thumbnails lived in the sandboxed Caches directory, which macOS purges under disk
+// pressure, so the grid went blank and nothing regenerated them.
+
+@Suite
+struct ThumbnailCacheTests {
+
+    private func makeScratchRoot() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumivault-thumbs-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    @Test func defaultCacheRootLivesInApplicationSupportNotCaches() {
+        let path = ThumbnailService.defaultCacheRoot.path
+        #expect(path.contains("Application Support"))
+        // The exact regression: a Caches path is purgeable.
+        #expect(!path.contains("/Caches/"))
+        #expect(ThumbnailService.defaultCacheRoot.lastPathComponent == "Thumbnails")
+    }
+
+    @Test func thumbnailsAreWrittenUnderTheShaKeyedLayout() async throws {
+        let root = try makeScratchRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let sourceURL = root.appendingPathComponent("source.jpg")
+        try TestFixtures.createTinyJPEG(at: sourceURL, width: 64, height: 64)
+
+        let sha = "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234"
+        let service = ThumbnailService(cacheRoot: root.appendingPathComponent("Thumbnails"))
+        try await service.generateThumbnail(for: sourceURL, sha256: sha)
+
+        for size in [ThumbnailSize.grid, ThumbnailSize.list] {
+            let location = await service.cacheLocation(for: sha, size: size)
+            #expect(FileManager.default.fileExists(atPath: location.path))
+            // Sharded by size then by the first two hash characters.
+            #expect(location.deletingLastPathComponent().lastPathComponent == "ab")
+            #expect(location.deletingLastPathComponent().deletingLastPathComponent()
+                        .lastPathComponent == "\(size.rawValue)")
+        }
+    }
+
+    @Test func missingThumbnailReadsAsNilSoCallersCanRegenerate() async throws {
+        let root = try makeScratchRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let service = ThumbnailService(cacheRoot: root.appendingPathComponent("Thumbnails"))
+        let missing = await service.thumbnail(
+            for: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            size: .grid
+        )
+        // A purged cache must read as a miss, not a crash — that miss is what
+        // drives regeneration from the source volume.
+        #expect(missing == nil)
+    }
+
+    @Test func removingThumbnailsClearsBothSizesFromDisk() async throws {
+        let root = try makeScratchRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let sourceURL = root.appendingPathComponent("source.jpg")
+        try TestFixtures.createTinyJPEG(at: sourceURL, width: 64, height: 64)
+
+        let sha = "beef0000beef0000beef0000beef0000beef0000beef0000beef0000beef0000"
+        let service = ThumbnailService(cacheRoot: root.appendingPathComponent("Thumbnails"))
+        try await service.generateThumbnail(for: sourceURL, sha256: sha)
+        await service.removeThumbnails(for: sha)
+
+        for size in [ThumbnailSize.grid, ThumbnailSize.list] {
+            let location = await service.cacheLocation(for: sha, size: size)
+            #expect(!FileManager.default.fileExists(atPath: location.path))
+        }
+    }
+}
