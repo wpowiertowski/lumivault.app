@@ -195,6 +195,40 @@ enum TestFixtures {
         try data.write(to: url)
     }
 
+    /// Creates a PNG with a real alpha channel — half the pixels fully transparent.
+    /// JPEG and HEIC cannot carry alpha, so an RGBA source must have it stripped
+    /// before encoding or the output is corrupt (regression: 25a3a7c).
+    nonisolated static func createTransparentPNG(at url: URL, width: Int = 16, height: Int = 16) throws {
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: width,
+            pixelsHigh: height,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            throw NSError(domain: "TestFixtures", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to create bitmap"])
+        }
+
+        for y in 0..<height {
+            for x in 0..<width {
+                let alpha: CGFloat = x < width / 2 ? 0.0 : 1.0
+                let color = NSColor(red: CGFloat(x) / CGFloat(max(width - 1, 1)),
+                                    green: 0.4, blue: 0.8, alpha: alpha)
+                rep.setColor(color, atX: x, y: y)
+            }
+        }
+
+        guard let data = rep.representation(using: .png, properties: [:]) else {
+            throw NSError(domain: "TestFixtures", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to encode PNG"])
+        }
+        try data.write(to: url)
+    }
+
     /// Creates a visually distinct JPEG (checkerboard pattern) for perceptual hash difference tests.
     /// The checkerboard has alternating bright/dark blocks, producing a very different dHash
     /// from the smooth gradient in createTinyJPEG.

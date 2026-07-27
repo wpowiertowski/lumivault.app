@@ -3,6 +3,7 @@ import Foundation
 import SwiftData
 import CryptoKit
 import AppKit
+import ImageIO
 @testable import LumiVault
 
 // MARK: - Catalog Tests
@@ -2890,5 +2891,461 @@ struct BookmarkResolverTests {
         #expect(throws: Error.self) {
             _ = try BookmarkResolver.resolve(garbage)
         }
+    }
+}
+
+// MARK: - SwiftData Hydration (regression: 8cef649, b151c71, 1da8a89, 6dd8ad4)
+//
+// 8cef649: restore wrote catalog.json but never hydrated SwiftData, so the UI
+// stayed empty under a "restored successfully" message.
+// b151c71: performSync() merged and saved but never hydrated, so a second Mac
+// showed an empty library.
+// 1da8a89: launch hydration didn't rebuild when the store's count disagreed with
+// the catalog, so a reset store never repopulated.
+// 6dd8ad4: hydration fetched per image, making it O(N²) and hanging the main
+// thread for seconds per sync cycle.
+
+@Suite
+@MainActor
+struct HydrationTests {
+
+    private func makeContainer() throws -> ModelContainer {
+        try ModelContainer(
+            for: ImageRecord.self, AlbumRecord.self, VolumeRecord.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+    }
+
+    private func makeCatalog(
+        albums: [String: [CatalogImage]],
+        year: String = "2026",
+        month: String = "07",
+        day: String = "20",
+        addedAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
+        deletions: [CatalogTombstone]? = nil
+    ) -> Catalog {
+        var catalogAlbums: [String: CatalogAlbum] = [:]
+        for (name, images) in albums {
+            catalogAlbums[name] = CatalogAlbum(addedAt: addedAt, images: images)
+        }
+        return Catalog(
+            version: 1,
+            lastUpdated: addedAt,
+            years: [year: CatalogYear(months: [month: CatalogMonth(days: [day: CatalogDay(albums: catalogAlbums)])])],
+            deletions: deletions
+        )
+    }
+
+    private func image(_ sha: String, _ filename: String, addedAt: Date? = nil) -> CatalogImage {
+        CatalogImage(
+            filename: filename,
+            sha256: sha,
+            sizeBytes: 1234,
+            par2Filename: "\(filename).par2",
+            addedAt: addedAt
+        )
+    }
+
+    @Test func hydrationPopulatesAnEmptyStoreFromTheCatalog() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let catalog = makeCatalog(albums: ["Trip": [image("aa", "one.heic"), image("bb", "two.heic")]])
+
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+
+        let albums = try context.fetch(FetchDescriptor<AlbumRecord>())
+        #expect(albums.count == 1)
+        #expect(albums.first?.name == "Trip")
+        #expect(try context.fetchCount(FetchDescriptor<ImageRecord>()) == 2)
+    }
+
+    @Test func hydrationIsAnIdempotentUpsert() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let catalog = makeCatalog(albums: ["Trip": [image("aa", "one.heic"), image("bb", "two.heic")]])
+
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+
+        // Re-running restore must not duplicate anything.
+        #expect(try context.fetchCount(FetchDescriptor<AlbumRecord>()) == 1)
+        #expect(try context.fetchCount(FetchDescriptor<ImageRecord>()) == 2)
+    }
+
+    @Test func hydrationPreservesLocalOnlyFieldsOnExistingRecords() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        // A record that already carries state the catalog does not describe.
+        let existing = ImageRecord(
+            sha256: "aa",
+            filename: "stale.heic",
+            sizeBytes: 1,
+            storageLocations: [StorageLocation(volumeID: "vol-1", relativePath: "2026/07/20/Trip/one.heic")],
+            thumbnailState: .generated,
+            perceptualHash: Data([1, 2, 3, 4, 5, 6, 7, 8]),
+            phAssetLocalIdentifier: "PH-1"
+        )
+        context.insert(existing)
+        try context.save()
+
+        SyncCoordinator.hydrate(
+            catalog: makeCatalog(albums: ["Trip": [image("aa", "one.heic")]]),
+            into: context
+        )
+
+        // Catalog-owned fields refresh...
+        #expect(existing.filename == "one.heic")
+        #expect(existing.sizeBytes == 1234)
+        #expect(existing.album?.name == "Trip")
+        // ...local-only fields survive. 8cef649 states this invariant; nothing
+        // enforced it until now.
+        #expect(existing.storageLocations.count == 1)
+        #expect(existing.thumbnailState == .generated)
+        #expect(existing.perceptualHash?.count == 8)
+        #expect(existing.allPHAssetIdentifiers == ["PH-1"])
+    }
+
+    @Test func staleDetectionFiresWhenTheStoreIsEmptyButTheCatalogIsNot() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let catalog = makeCatalog(albums: ["Trip": [image("aa", "one.heic"), image("bb", "two.heic")]])
+
+        // A lost/reset store that catalog.json already agrees with — the case that
+        // never repopulated before 1da8a89.
+        #expect(SyncCoordinator.isHydrationStale(catalog: catalog, context: context))
+
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        #expect(!SyncCoordinator.isHydrationStale(catalog: catalog, context: context))
+    }
+
+    @Test func hydrationSkipsEntriesWithTraversingPathComponents() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        let catalog = makeCatalog(albums: [
+            "Trip": [image("aa", "ok.heic")],
+            "../../escape": [image("bb", "bad.heic")]
+        ])
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+
+        let albums = try context.fetch(FetchDescriptor<AlbumRecord>())
+        #expect(albums.count == 1)
+        #expect(albums.first?.name == "Trip")
+        #expect(try context.fetchCount(FetchDescriptor<ImageRecord>()) == 1)
+    }
+
+    @Test func tombstonesRemoveRecordsThatPredateTheDeletion() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        let added = Date(timeIntervalSince1970: 1_700_000_000)
+        SyncCoordinator.hydrate(
+            catalog: makeCatalog(albums: ["Trip": [image("aa", "one.heic", addedAt: added),
+                                                  image("bb", "two.heic", addedAt: added)]]),
+            into: context
+        )
+        #expect(try context.fetchCount(FetchDescriptor<ImageRecord>()) == 2)
+
+        // "bb" deleted on a peer, after the record was added.
+        let tombstone = CatalogTombstone(
+            year: "2026", month: "07", day: "20", album: "Trip",
+            sha256: "bb", deletedAt: added.addingTimeInterval(60)
+        )
+        SyncCoordinator.hydrate(
+            catalog: makeCatalog(albums: ["Trip": [image("aa", "one.heic", addedAt: added)]],
+                                 deletions: [tombstone]),
+            into: context
+        )
+
+        let remaining = try context.fetch(FetchDescriptor<ImageRecord>())
+        #expect(remaining.count == 1)
+        #expect(remaining.first?.sha256 == "aa")
+    }
+
+    @Test func tombstonesDoNotDeleteARecordAddedAfterTheDeletion() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        let deletedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        // An in-flight local import: the record exists and postdates the tombstone,
+        // and the catalog no longer lists it. It must survive.
+        let fresh = ImageRecord(
+            sha256: "cc",
+            filename: "fresh.heic",
+            sizeBytes: 10,
+            addedAt: deletedAt.addingTimeInterval(600)
+        )
+        context.insert(fresh)
+        try context.save()
+
+        let tombstone = CatalogTombstone(
+            year: "2026", month: "07", day: "20", album: "Trip",
+            sha256: "cc", deletedAt: deletedAt
+        )
+        SyncCoordinator.hydrate(
+            catalog: makeCatalog(albums: ["Trip": [image("aa", "one.heic")]], deletions: [tombstone]),
+            into: context
+        )
+
+        let shas = Set(try context.fetch(FetchDescriptor<ImageRecord>()).map(\.sha256))
+        #expect(shas.contains("cc"))
+    }
+
+    @Test func hydrationScalesLinearlyWithCatalogSize() throws {
+        // 6dd8ad4 replaced a per-image FetchDescriptor with two batch loads. Under
+        // the old shape, quadrupling the catalog quadrupled the *per-image* scan
+        // too — ~16x the work rather than ~4x.
+        //
+        // Asserted as a ratio with a wide margin rather than an absolute time, so
+        // a slow shared runner cannot fail it: 8x cleanly separates linear (~4x)
+        // from quadratic (~16x). Skipped when the small run is too fast to measure
+        // (below the timer's noise floor).
+        func hydrationDuration(imageCount: Int) throws -> TimeInterval {
+            // Hold the container: `mainContext` alone would let it deallocate.
+            let container = try makeContainer()
+            let context = container.mainContext
+            let images = (0..<imageCount).map { image(String(format: "%08x", $0), "img\($0).heic") }
+            let catalog = makeCatalog(albums: ["Bulk": images])
+            let start = Date()
+            SyncCoordinator.hydrate(catalog: catalog, into: context)
+            let elapsed = Date().timeIntervalSince(start)
+            #expect(try context.fetchCount(FetchDescriptor<ImageRecord>()) == imageCount)
+            return elapsed
+        }
+
+        let small = try hydrationDuration(imageCount: 500)
+        let large = try hydrationDuration(imageCount: 2000)
+
+        guard small > 0.02 else { return }
+        #expect(large < small * 8)
+    }
+}
+
+// MARK: - Legacy Catalog Migration & Storage Resolution (regression: 2f44cfb)
+//
+// Apple rejected 1.0 under 2.4.5(i) (catalog inside the hidden sandbox container,
+// container path shown in Settings) and 2.1(a) (import dead-ended with "No Storage
+// Configured"). The fix moved the catalog to ~/Pictures/LumiVault, migrating any
+// existing one on first launch, and modelled the library as a reserved volumeID so
+// it behaves like any other storage target.
+
+@Suite
+@MainActor
+struct CatalogMigrationTests {
+
+    private func makeDirs() throws -> (legacy: URL, target: URL) {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumivault-migrate-\(UUID().uuidString)", isDirectory: true)
+        let legacy = base.appendingPathComponent("legacy", isDirectory: true)
+        let target = base.appendingPathComponent("library", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        return (legacy, target)
+    }
+
+    @Test func migrationMovesTheCatalogAndItsRecoverySidecars() throws {
+        let fm = FileManager.default
+        let (legacy, target) = try makeDirs()
+        defer { try? fm.removeItem(at: legacy.deletingLastPathComponent()) }
+
+        for name in ["catalog.json", "catalog.json.sha256", "catalog.json.par2", "catalog.json.vol0+16.par2"] {
+            try Data(name.utf8).write(to: legacy.appendingPathComponent(name))
+        }
+        // An unrelated neighbour must be left alone.
+        try Data("keep".utf8).write(to: legacy.appendingPathComponent("notes.txt"))
+
+        SyncCoordinator.migrateCatalog(from: legacy, to: target)
+
+        for name in ["catalog.json", "catalog.json.sha256", "catalog.json.par2", "catalog.json.vol0+16.par2"] {
+            #expect(fm.fileExists(atPath: target.appendingPathComponent(name).path))
+            #expect(!fm.fileExists(atPath: legacy.appendingPathComponent(name).path))
+        }
+        #expect(fm.fileExists(atPath: legacy.appendingPathComponent("notes.txt").path))
+    }
+
+    @Test func migrationNeverClobbersAnExistingCatalog() throws {
+        let fm = FileManager.default
+        let (legacy, target) = try makeDirs()
+        defer { try? fm.removeItem(at: legacy.deletingLastPathComponent()) }
+
+        try Data("legacy".utf8).write(to: legacy.appendingPathComponent("catalog.json"))
+        try Data("current".utf8).write(to: target.appendingPathComponent("catalog.json"))
+
+        SyncCoordinator.migrateCatalog(from: legacy, to: target)
+
+        let contents = try String(contentsOf: target.appendingPathComponent("catalog.json"), encoding: .utf8)
+        #expect(contents == "current")
+        // The legacy copy stays put rather than being silently discarded.
+        #expect(fm.fileExists(atPath: legacy.appendingPathComponent("catalog.json").path))
+    }
+
+    @Test func migrationIsANoOpWhenThereIsNothingToMove() throws {
+        let fm = FileManager.default
+        let (legacy, target) = try makeDirs()
+        defer { try? fm.removeItem(at: legacy.deletingLastPathComponent()) }
+
+        SyncCoordinator.migrateCatalog(from: legacy, to: target)
+        #expect(((try? fm.contentsOfDirectory(atPath: target.path)) ?? []).isEmpty)
+    }
+
+    @Test func libraryResolvesAsAStorageTargetWithoutABookmark() {
+        let location = StorageLocation(
+            volumeID: Constants.Storage.libraryVolumeID,
+            relativePath: "2026/07/20/Trip/one.heic"
+        )
+        let resolved = StorageResolver.resolveMount(for: location, volumes: [])
+        #expect(resolved?.mountURL.path == Constants.Paths.libraryURL.path)
+        // The library is reached via the Pictures entitlement, so there is no
+        // security-scoped resource for the caller to release.
+        #expect(resolved?.securityScoped == false)
+    }
+
+    @Test func unknownVolumeDoesNotResolve() {
+        let location = StorageLocation(volumeID: "not-a-registered-volume", relativePath: "x.heic")
+        #expect(StorageResolver.resolveMount(for: location, volumes: []) == nil)
+    }
+
+    @Test func librarySnapshotAndMountedPairAgreeOnOnePath() {
+        let snapshot = StorageResolver.librarySnapshot()
+        let mounted = StorageResolver.libraryMounted()
+        #expect(snapshot.volumeID == Constants.Storage.libraryVolumeID)
+        #expect(mounted.volumeID == Constants.Storage.libraryVolumeID)
+        #expect(snapshot.mountURL.path == mounted.mountURL.path)
+        #expect(snapshot.mountURL.path == Constants.Paths.libraryURL.path)
+    }
+}
+
+// MARK: - HEIC Encoding & Alpha Stripping (regression: b428117, 25a3a7c)
+//
+// b428117: CIImage-based HEIC encoding silently failed, so files configured for
+// HEIC were left as JPG with no error surfaced. 25a3a7c: RGBA sources were encoded
+// without stripping alpha, producing corrupt JPEG/HEIC output. Existing conversion
+// tests only cover the JPEG path from an opaque source.
+
+@Suite
+@MainActor
+struct ImageConversionFormatTests {
+
+    private func convert(
+        sourceName: String,
+        makeSource: (URL) throws -> Void,
+        format: ImageFormat
+    ) throws -> URL {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-fmt-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        let sourceURL = tmpDir.appendingPathComponent(sourceName)
+        try makeSource(sourceURL)
+
+        let staging = tmpDir.appendingPathComponent("staging", isDirectory: true)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        let asset = ImportedAsset(fileURL: sourceURL, originalFilename: sourceName, creationDate: nil)
+        let result = ImageConversionService.convertImage(
+            asset: asset, format: format, quality: 0.85,
+            maxDimension: MaxDimension.original, staging: staging
+        )
+        return result.fileURL
+    }
+
+    @Test func heicConversionProducesARealHEICFile() throws {
+        let output = try convert(
+            sourceName: "photo.jpg",
+            makeSource: { try TestFixtures.createTinyJPEG(at: $0, width: 32, height: 32) },
+            format: ImageFormat.heic
+        )
+
+        #expect(output.pathExtension == "heic")
+        // The silent failure in b428117 left the *original* bytes in place, so the
+        // decoded container type is the assertion that actually catches it.
+        let source = try #require(CGImageSourceCreateWithURL(output as CFURL, nil))
+        #expect((CGImageSourceGetType(source) as String?) == "public.heic")
+        #expect(CGImageSourceGetCount(source) >= 1)
+    }
+
+    @Test func jpegConversionStripsAlphaFromAnRGBASource() throws {
+        let output = try convert(
+            sourceName: "transparent.png",
+            makeSource: { try TestFixtures.createTransparentPNG(at: $0, width: 32, height: 32) },
+            format: ImageFormat.jpeg
+        )
+
+        #expect(output.pathExtension == "jpg")
+        let source = try #require(CGImageSourceCreateWithURL(output as CFURL, nil))
+        let cgImage = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        #expect(cgImage.alphaInfo == .none || cgImage.alphaInfo == .noneSkipLast
+                || cgImage.alphaInfo == .noneSkipFirst)
+    }
+
+    @Test func heicConversionStripsAlphaFromAnRGBASource() throws {
+        let output = try convert(
+            sourceName: "transparent.png",
+            makeSource: { try TestFixtures.createTransparentPNG(at: $0, width: 32, height: 32) },
+            format: ImageFormat.heic
+        )
+
+        #expect(output.pathExtension == "heic")
+        let source = try #require(CGImageSourceCreateWithURL(output as CFURL, nil))
+        let cgImage = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        #expect(cgImage.alphaInfo == .none || cgImage.alphaInfo == .noneSkipLast
+                || cgImage.alphaInfo == .noneSkipFirst)
+    }
+}
+
+// MARK: - Cancellation Drains vs Breaks (regression: abe7b51)
+//
+// Every pipeline phase used `continue` on cancellation, which drained the channel's
+// buffer instead of exiting — so cancelling an import kept working through
+// everything already queued. The fix changed them to `break`.
+//
+// The contract that makes `break` load-bearing is asserted here: `cancel()`
+// terminates the stream but does NOT discard items already yielded. If someone
+// "fixes" cancel() to drop the backlog, these tests document why the consumer-side
+// break still has to exist.
+
+@Suite
+struct ChannelCancellationDrainTests {
+
+    @Test func cancelDoesNotDiscardAlreadyBufferedItems() async {
+        let channel = AsyncChannel<Int>(bufferSize: 8)
+        for i in 0..<5 { await channel.send(i) }
+        await channel.cancel()
+
+        // A consumer that keeps looping still sees the backlog — this is exactly
+        // what `continue` did.
+        var drained = 0
+        for await _ in channel.stream { drained += 1 }
+        #expect(drained == 5)
+    }
+
+    @Test func breakingConsumerStopsWellBeforeDrainingTheBacklog() async {
+        let channel = AsyncChannel<Int>(bufferSize: 16)
+        for i in 0..<6 { await channel.send(i) }
+        channel.finish()
+
+        let processed = Locked(0)
+        let firstItemDone = AsyncSemaphore(count: 0)
+
+        let task = Task {
+            for await _ in channel.stream {
+                if Task.isCancelled { break }
+                processed.mutate { $0 += 1 }
+                await channel.consumed()
+                await firstItemDone.signal()
+                // Hold the loop open long enough for the test to cancel. A
+                // cancelled sleep throws immediately, so teardown stays fast.
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
+
+        await firstItemDone.wait()
+        task.cancel()
+        _ = await task.value
+
+        // With `continue` this would be 6 — the whole buffer drained after cancel.
+        #expect(processed.value >= 1)
+        #expect(processed.value < 6)
     }
 }

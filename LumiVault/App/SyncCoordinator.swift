@@ -215,9 +215,8 @@ final class SyncCoordinator: @unchecked Sendable {
     private func hydrateSwiftDataIfStale(catalog: Catalog) {
         guard let container = modelContainer else { return }
         let context = container.mainContext
-        let recordCount = (try? context.fetchCount(FetchDescriptor<ImageRecord>())) ?? 0
-        if recordCount != catalog.totalImageCount {
-            hydrateSwiftData(from: catalog)
+        if Self.isHydrationStale(catalog: catalog, context: context) {
+            Self.hydrate(catalog: catalog, into: context)
         }
     }
 
@@ -231,8 +230,27 @@ final class SyncCoordinator: @unchecked Sendable {
         // (EXC_BAD_ACCESS in AlbumRecord.images / Query.wrappedValue). The
         // cross-context change propagation is also what surfaced the "context
         // instantiated on the main queue but used off it" warnings.
-        let context = container.mainContext
+        Self.hydrate(catalog: catalog, into: container.mainContext)
+    }
 
+    /// Whether SwiftData's image count disagrees with the catalog — a cheap proxy
+    /// for "the store was lost or is stale". Keeps launch fast in the common case
+    /// (counts match → no full hydration) while still repairing an empty/reset
+    /// store even when catalog.json already agrees with iCloud.
+    ///
+    /// Static and context-injected so it can be exercised against an in-memory
+    /// ModelContainer; the instance wrappers above supply `mainContext`.
+    @MainActor
+    static func isHydrationStale(catalog: Catalog, context: ModelContext) -> Bool {
+        let recordCount = (try? context.fetchCount(FetchDescriptor<ImageRecord>())) ?? 0
+        return recordCount != catalog.totalImageCount
+    }
+
+    /// Upsert the catalog into SwiftData. Never deletes except via tombstones, so
+    /// it is safe to re-run: local-only fields (storageLocations, perceptualHash,
+    /// thumbnailState, phAssetLocalIdentifiers) on existing records are preserved.
+    @MainActor
+    static func hydrate(catalog: Catalog, into context: ModelContext) {
         // Batch-load both models once and match in memory. Fetching per image
         // inside the loop made hydration O(N²) — SwiftData evaluated the
         // #Predicate against every registered record for each lookup, which
@@ -464,17 +482,30 @@ final class SyncCoordinator: @unchecked Sendable {
     /// (`~/Pictures/LumiVault/`). No-op when an explicit `catalogPath` override is set, when the
     /// library already has a catalog, or when there's nothing to migrate.
     private func migrateLegacyCatalogIfNeeded() {
-        let fm = FileManager.default
         StorageResolver.ensureLibraryExists()
 
+        // An explicit override means the user chose where the catalog lives; never
+        // move it out from under them.
         guard UserDefaults.standard.string(forKey: "catalogPath") == nil else { return }
 
-        let target = Constants.Paths.libraryURL.appendingPathComponent("catalog.json")
-        let legacy = Constants.Paths.legacyContainerCatalogURL
+        Self.migrateCatalog(
+            from: Constants.Paths.legacyContainerCatalogURL.deletingLastPathComponent(),
+            to: Constants.Paths.libraryURL
+        )
+    }
+
+    /// Move `catalog.json` and its `.sha256`/`.par2` recovery sidecars out of the
+    /// sandbox container and into the user-accessible library. No-ops when the
+    /// target already holds a catalog, so it can never clobber a newer one.
+    ///
+    /// Takes explicit directories rather than reading `Constants.Paths` so it can
+    /// be exercised against temp directories.
+    nonisolated static func migrateCatalog(from legacyDir: URL, to targetDir: URL) {
+        let fm = FileManager.default
+        let target = targetDir.appendingPathComponent("catalog.json")
+        let legacy = legacyDir.appendingPathComponent("catalog.json")
         guard !fm.fileExists(atPath: target.path), fm.fileExists(atPath: legacy.path) else { return }
 
-        let legacyDir = legacy.deletingLastPathComponent()
-        let targetDir = target.deletingLastPathComponent()
         let names = (try? fm.contentsOfDirectory(atPath: legacyDir.path)) ?? []
         for name in names where name == "catalog.json" || name.hasPrefix("catalog.json.") {
             let to = targetDir.appendingPathComponent(name)
