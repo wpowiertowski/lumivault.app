@@ -2956,7 +2956,8 @@ struct HydrationTests {
         let albums = try context.fetch(FetchDescriptor<AlbumRecord>())
         #expect(albums.count == 1)
         #expect(albums.first?.name == "Trip")
-        #expect(try context.fetchCount(FetchDescriptor<ImageRecord>()) == 2)
+        let imageCount = try context.fetchCount(FetchDescriptor<ImageRecord>())
+        #expect(imageCount == 2)
     }
 
     @Test func hydrationIsAnIdempotentUpsert() throws {
@@ -2969,8 +2970,10 @@ struct HydrationTests {
         SyncCoordinator.hydrate(catalog: catalog, into: context)
 
         // Re-running restore must not duplicate anything.
-        #expect(try context.fetchCount(FetchDescriptor<AlbumRecord>()) == 1)
-        #expect(try context.fetchCount(FetchDescriptor<ImageRecord>()) == 2)
+        let albumCount = try context.fetchCount(FetchDescriptor<AlbumRecord>())
+        let imageCount = try context.fetchCount(FetchDescriptor<ImageRecord>())
+        #expect(albumCount == 1)
+        #expect(imageCount == 2)
     }
 
     @Test func hydrationPreservesLocalOnlyFieldsOnExistingRecords() throws {
@@ -3033,7 +3036,8 @@ struct HydrationTests {
         let albums = try context.fetch(FetchDescriptor<AlbumRecord>())
         #expect(albums.count == 1)
         #expect(albums.first?.name == "Trip")
-        #expect(try context.fetchCount(FetchDescriptor<ImageRecord>()) == 1)
+        let keptImages = try context.fetchCount(FetchDescriptor<ImageRecord>())
+        #expect(keptImages == 1)
     }
 
     @Test func tombstonesRemoveRecordsThatPredateTheDeletion() throws {
@@ -3046,7 +3050,8 @@ struct HydrationTests {
                                                   image("bb", "two.heic", addedAt: added)]]),
             into: context
         )
-        #expect(try context.fetchCount(FetchDescriptor<ImageRecord>()) == 2)
+        let seeded = try context.fetchCount(FetchDescriptor<ImageRecord>())
+        #expect(seeded == 2)
 
         // "bb" deleted on a peer, after the record was added.
         let tombstone = CatalogTombstone(
@@ -3111,7 +3116,8 @@ struct HydrationTests {
             let start = Date()
             SyncCoordinator.hydrate(catalog: catalog, into: context)
             let elapsed = Date().timeIntervalSince(start)
-            #expect(try context.fetchCount(FetchDescriptor<ImageRecord>()) == imageCount)
+            let hydrated = try context.fetchCount(FetchDescriptor<ImageRecord>())
+            #expect(hydrated == imageCount)
             return elapsed
         }
 
@@ -3498,5 +3504,325 @@ struct ThumbnailCacheTests {
             let location = await service.cacheLocation(for: sha, size: size)
             #expect(!FileManager.default.fileExists(atPath: location.path))
         }
+    }
+}
+
+// MARK: - Pipeline Phase Routing (regression guard for the wiring itself)
+//
+// Each stage forwards to the next *enabled* stage, so a disabled phase has to be
+// skipped over rather than fed. Expressed inline this was a nested ternary chain
+// per stage; a mistake there sends items into a channel nobody consumes, and the
+// import wedges on backpressure rather than failing.
+
+@Suite
+struct PipelinePhaseRoutingTests {
+
+    private func phases(encryption: Bool = false, par2: Bool = false,
+                        copy: Bool = false, upload: Bool = false) -> PipelinePhases {
+        PipelinePhases(encryption: encryption, par2: par2, copy: copy, upload: upload)
+    }
+
+    @Test func allPhasesEnabledFormsTheFullChain() {
+        let p = phases(encryption: true, par2: true, copy: true, upload: true)
+        #expect(p.next(after: .hashing) == .encryption)
+        #expect(p.next(after: .encryption) == .par2)
+        #expect(p.next(after: .par2) == .copy)
+        #expect(p.next(after: .copy) == .upload)
+        #expect(p.next(after: .upload) == .catalog)
+    }
+
+    @Test func noOptionalPhasesRoutesStraightToTheCatalogSink() {
+        let p = phases()
+        for stage in [PipelinePhases.Stage.hashing, .encryption, .par2, .copy, .upload] {
+            #expect(p.next(after: stage) == .catalog)
+        }
+    }
+
+    @Test func disabledPhasesAreSkippedOverNotFed() {
+        // PAR2 + upload only: hashing must jump past encryption to par2, and par2
+        // must jump past copy to upload.
+        let p = phases(encryption: false, par2: true, copy: false, upload: true)
+        #expect(p.next(after: .hashing) == .par2)
+        #expect(p.next(after: .par2) == .upload)
+        #expect(p.next(after: .upload) == .catalog)
+        // Even though encryption and copy do not run, asking where they *would*
+        // forward must still name a live stage — the coordinator computes all of
+        // these unconditionally.
+        #expect(p.next(after: .encryption) == .par2)
+        #expect(p.next(after: .copy) == .upload)
+    }
+
+    @Test func routingNeverTargetsADisabledStage() {
+        // Exhaustive over all 16 combinations: whatever a stage forwards to must
+        // itself be enabled (or the always-on catalog sink).
+        for mask in 0..<16 {
+            let p = phases(
+                encryption: mask & 1 != 0,
+                par2: mask & 2 != 0,
+                copy: mask & 4 != 0,
+                upload: mask & 8 != 0
+            )
+            for stage in [PipelinePhases.Stage.hashing, .encryption, .par2, .copy, .upload] {
+                let target = p.next(after: stage)
+                #expect(p.isEnabled(target), "mask \(mask): \(stage) → disabled \(target)")
+            }
+        }
+    }
+
+    @Test func routingAlwaysMovesForwardAndTerminates() {
+        // Following the chain from hashing must reach .catalog without revisiting a
+        // stage — a cycle would deadlock the pipeline.
+        for mask in 0..<16 {
+            let p = phases(
+                encryption: mask & 1 != 0,
+                par2: mask & 2 != 0,
+                copy: mask & 4 != 0,
+                upload: mask & 8 != 0
+            )
+            var seen: [PipelinePhases.Stage] = []
+            var stage = PipelinePhases.Stage.hashing
+            while stage != .catalog {
+                #expect(!seen.contains(stage), "mask \(mask): revisited \(stage)")
+                seen.append(stage)
+                stage = p.next(after: stage)
+                if seen.count > 6 { break }
+            }
+            #expect(stage == .catalog, "mask \(mask): chain did not terminate")
+        }
+    }
+
+    @Test func catalogIsTerminal() {
+        #expect(phases(encryption: true, par2: true, copy: true, upload: true)
+            .next(after: .catalog) == .catalog)
+    }
+}
+
+// MARK: - Copy-Stage Mirroring (regression: 2f44cfb, 5568b41)
+//
+// `ensureFileMirrored` is what makes a re-run of an interrupted import cheap and
+// what stops a truncated leftover from being trusted as a complete copy.
+
+@Suite
+struct EnsureFileMirroredTests {
+
+    private func scratch() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumivault-mirror-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test func copiesWhenDestinationIsAbsent() throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let source = dir.appendingPathComponent("a.bin")
+        let dest = dir.appendingPathComponent("b.bin")
+        try Data("payload".utf8).write(to: source)
+
+        try PipelinedImportCoordinator.ensureFileMirrored(from: source, to: dest)
+        let copied = try Data(contentsOf: dest)
+        #expect(copied == Data("payload".utf8))
+    }
+
+    @Test func leavesAMatchingDestinationUntouched() throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let source = dir.appendingPathComponent("a.bin")
+        let dest = dir.appendingPathComponent("b.bin")
+        try Data("12345".utf8).write(to: source)
+        // Same size, different bytes: the size check is deliberately cheap, and a
+        // same-size destination is trusted rather than re-copied.
+        try Data("abcde".utf8).write(to: dest)
+
+        try PipelinedImportCoordinator.ensureFileMirrored(from: source, to: dest)
+        let untouched = try Data(contentsOf: dest)
+        #expect(untouched == Data("abcde".utf8))
+    }
+
+    @Test func replacesATruncatedOrEmptyDestination() throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let source = dir.appendingPathComponent("a.bin")
+        try Data("full payload".utf8).write(to: source)
+
+        // Partial leftover from an interrupted copy.
+        let partial = dir.appendingPathComponent("partial.bin")
+        try Data("full".utf8).write(to: partial)
+        try PipelinedImportCoordinator.ensureFileMirrored(from: source, to: partial)
+        let repaired = try Data(contentsOf: partial)
+        #expect(repaired == Data("full payload".utf8))
+
+        // A zero-byte file is never trusted, even against a zero-byte source.
+        let empty = dir.appendingPathComponent("empty.bin")
+        try Data().write(to: empty)
+        try PipelinedImportCoordinator.ensureFileMirrored(from: source, to: empty)
+        let filled = try Data(contentsOf: empty)
+        #expect(filled == Data("full payload".utf8))
+    }
+
+    @Test func missingSourceThrows() throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        #expect(throws: Error.self) {
+            try PipelinedImportCoordinator.ensureFileMirrored(
+                from: dir.appendingPathComponent("nope.bin"),
+                to: dir.appendingPathComponent("dest.bin")
+            )
+        }
+    }
+}
+
+// MARK: - Replica Healing (regression: 5568b41)
+//
+// The heal pass restores a file missing from one storage target by copying it from
+// a healthy sibling volume or re-downloading it from B2. Volume-to-volume healing
+// is exercised here; the B2 source needs live credentials and stays manual.
+
+@Suite
+@MainActor
+struct HealReplicasTests {
+
+    private func snapshot(
+        for spec: TestFixtures.FileSpec,
+        volumeIDs: [String],
+        isEncrypted: Bool = false,
+        relativePathOverride: String? = nil
+    ) -> ImageSnapshot {
+        ImageSnapshot(
+            sha256: spec.sha256,
+            filename: spec.name,
+            par2Filename: spec.par2Name,
+            b2FileId: nil,
+            storageLocations: volumeIDs.map {
+                StorageLocation(
+                    volumeID: $0,
+                    relativePath: relativePathOverride ?? "\(spec.albumPath)/\(spec.name)"
+                )
+            },
+            albumPath: spec.albumPath,
+            isEncrypted: isEncrypted
+        )
+    }
+
+    @Test func restoresAMissingFileFromASiblingVolume() async throws {
+        let fm = FileManager.default
+        let volA = try TestFixtures.materializeVolume(label: "heal-a")
+        let volB = try TestFixtures.materializeVolume(label: "heal-b")
+        defer {
+            try? fm.removeItem(at: volA)
+            try? fm.removeItem(at: volB)
+        }
+
+        let spec = TestFixtures.files[0]
+        let missing = volA.appendingPathComponent("\(spec.albumPath)/\(spec.name)")
+        try fm.removeItem(at: missing)
+        #expect(!fm.fileExists(atPath: missing.path))
+
+        let results = await ReconciliationService().healReplicas(
+            discrepancies: [Discrepancy(sha256: spec.sha256, filename: spec.name,
+                                        kind: .danglingLocation(volumeID: "vol-a"))],
+            snapshots: [snapshot(for: spec, volumeIDs: ["vol-a", "vol-b"])],
+            volumes: [
+                VolumeSnapshot(volumeID: "vol-a", label: "A", mountURL: volA),
+                VolumeSnapshot(volumeID: "vol-b", label: "B", mountURL: volB)
+            ],
+            b2Credentials: nil,
+            progress: ReconciliationProgress()
+        )
+
+        #expect(results.count == 1)
+        guard case .restoredToVolume(let volumeID, let source) = results[0].outcome else {
+            Issue.record("Expected a volume restore, got \(results[0].outcome)")
+            return
+        }
+        #expect(volumeID == "vol-a")
+        guard case .volume(let sourceID) = source else {
+            Issue.record("Expected a sibling-volume source")
+            return
+        }
+        #expect(sourceID == "vol-b")
+
+        // The restored bytes must be the real thing, not a placeholder.
+        #expect(fm.fileExists(atPath: missing.path))
+        let restored = try Data(contentsOf: missing)
+        #expect(restored == TestFixtures.content(for: spec))
+    }
+
+    @Test func reportsFailureWhenNoHealthySourceExists() async throws {
+        let fm = FileManager.default
+        let volA = try TestFixtures.materializeVolume(label: "heal-lonely")
+        defer { try? fm.removeItem(at: volA) }
+
+        let spec = TestFixtures.files[1]
+        try fm.removeItem(at: volA.appendingPathComponent("\(spec.albumPath)/\(spec.name)"))
+
+        let results = await ReconciliationService().healReplicas(
+            discrepancies: [Discrepancy(sha256: spec.sha256, filename: spec.name,
+                                        kind: .danglingLocation(volumeID: "vol-a"))],
+            snapshots: [snapshot(for: spec, volumeIDs: ["vol-a"])],
+            volumes: [VolumeSnapshot(volumeID: "vol-a", label: "A", mountURL: volA)],
+            b2Credentials: nil,
+            progress: ReconciliationProgress()
+        )
+
+        guard case .failed(let reason) = results[0].outcome else {
+            Issue.record("Expected a failure, got \(results[0].outcome)")
+            return
+        }
+        // A discrepancy that cannot be healed must be reported, not silently dropped.
+        #expect(!reason.isEmpty)
+    }
+
+    @Test func refusesToWriteOutsideTheTargetVolume() async throws {
+        let fm = FileManager.default
+        let volA = try TestFixtures.materializeVolume(label: "heal-traversal-a")
+        let volB = try TestFixtures.materializeVolume(label: "heal-traversal-b")
+        defer {
+            try? fm.removeItem(at: volA)
+            try? fm.removeItem(at: volB)
+        }
+
+        let spec = TestFixtures.files[2]
+        let results = await ReconciliationService().healReplicas(
+            discrepancies: [Discrepancy(sha256: spec.sha256, filename: spec.name,
+                                        kind: .danglingLocation(volumeID: "vol-a"))],
+            snapshots: [snapshot(for: spec, volumeIDs: ["vol-a", "vol-b"],
+                                 relativePathOverride: "../../escaped.heic")],
+            volumes: [
+                VolumeSnapshot(volumeID: "vol-a", label: "A", mountURL: volA),
+                VolumeSnapshot(volumeID: "vol-b", label: "B", mountURL: volB)
+            ],
+            b2Credentials: nil,
+            progress: ReconciliationProgress()
+        )
+
+        guard case .failed = results[0].outcome else {
+            Issue.record("A traversing relativePath must not be written")
+            return
+        }
+        #expect(!fm.fileExists(atPath: volA.appendingPathComponent("../../escaped.heic").path))
+    }
+
+    @Test func healingIgnoresDiscrepancyKindsItCannotFix() async throws {
+        let volA = try TestFixtures.materializeVolume(label: "heal-noop")
+        defer { try? FileManager.default.removeItem(at: volA) }
+
+        let spec = TestFixtures.files[3]
+        let results = await ReconciliationService().healReplicas(
+            discrepancies: [
+                Discrepancy(sha256: spec.sha256, filename: spec.name,
+                            kind: .orphanOnVolume(volumeID: "vol-a", path: "stray.heic"))
+            ],
+            snapshots: [snapshot(for: spec, volumeIDs: ["vol-a"])],
+            volumes: [VolumeSnapshot(volumeID: "vol-a", label: "A", mountURL: volA)],
+            b2Credentials: nil,
+            progress: ReconciliationProgress()
+        )
+        // Orphans are a user decision (keep or delete), never something heal acts on.
+        #expect(results.isEmpty)
     }
 }
