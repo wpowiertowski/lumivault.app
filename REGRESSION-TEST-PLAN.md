@@ -7,6 +7,11 @@ CI catch it?*
 
 Scope: all 50 commits on `main` (`54fb0f3` … `12632f7`). 28 of them fix defects.
 
+> **Status:** phases 0–4 are implemented; phase 5 is partial. The suite went from
+> 228 to 295 tests. See §7 for what landed and §7.1 for what is deliberately
+> outstanding. The status column in §2 still describes coverage *before* this
+> work — it is the audit that motivated the plan, kept as written.
+
 ---
 
 ## 1. Headline findings
@@ -417,18 +422,45 @@ local runs; leave them out of CI.
 
 ## 7. Sequencing
 
-| Phase | Contents | Effort | Bugs fenced |
+| Phase | Contents | Status | Bugs fenced |
 | --- | --- | --- | --- |
-| **0** | C1, C2, C4 — isolation-flag assertion, drift check, Xcode version assertion | ~2 h, no product code | #18, #25, #35 |
-| **1** | T0, T1, T3, T4, T8, T11, T13 — zero-refactor tests | ~1 day | #1, #6, #7, #10, #12, #14, #22, #34, #37 |
-| **2** | C3, C5, C6 — xcodebuild test job, Release archive, committed hook | ~half day | class of #35 |
-| **3** | S1+T9/T16, S3+T10, T2, T5 | ~2 days | #21, #23, #26, #30, #33, plus #3, #8, #5-partial |
-| **4** | S2+T6/T7, S4+T12 | ~2 days | #11, #13, #15, #16, #32 |
-| **5** | S5+T-DI, T14, T15 | ~3 days | #1 end-to-end, #2, #5, #9, #24 |
+| **0** | C1, C2, C4 — isolation-flag assertion, drift check, Xcode version assertion | **Done** | #18, #25, #35 |
+| **1** | T0, T1, T3, T4, T8, T11, T13 — zero-refactor tests | **Done** | #1, #6, #7, #10, #12, #14, #22, #34, #37 |
+| **2** | C3, C5, C6 — xcodebuild test job, Release archive, committed hook | **Done** | class of #35 |
+| **3** | S1+T9/T16, S3+T10, T2, T5 | **Done** | #21, #23, #26, #30, #33, plus #3, #8, #5-partial |
+| **4** | S2+T6/T7, S4+T12 | **Done** | #11, #13, #15, #16, #32 |
+| **5** | S5+T-DI, T14, T15 | **Partial** — see §7.1 | #24 done; #2, #5, #9 outstanding |
 
-Phases 0–2 are the ones I would insist on: they cost under two days combined and
-they close the only gap that has produced a *shipped, user-visible crash* and an
-*App Store rejection*.
+Phases 0–2 are the ones I would insist on: they close the only gap that has
+produced a *shipped, user-visible crash* and an *App Store rejection*.
+
+### 7.1 What is still outstanding
+
+**S5 — six-service protocol injection into `PipelinedImportCoordinator`, and the
+`T-DI` orchestration tests that depend on it.** The coordinator constructs its
+services as stored properties and drives eight concurrent stages over channels, a
+memory budget, and a cancellation sentinel. Injection means touching every stage.
+The safely-extractable part — the stage-to-stage routing — was pulled out into
+`PipelinePhases` and covered exhaustively, and `ensureFileMirrored` was opened up
+and covered. The rest still needs a compiler and a real run before it lands.
+
+Still uncovered, and what T-DI would assert once injection exists:
+- cancellation mid-phase processes zero further items and cleans staging (#5)
+- a converted item reaches the copy stage under its converted name, end to end
+  (#1 — the `PipelineItem` accessors are covered, the wiring through the stages
+  is not)
+- a copy-stage failure does not block the independent B2 upload (`copyError` vs
+  `error`, an invariant documented in `PipelineItem` and tested nowhere)
+- every stage's `defer`-finish runs on abnormal exit so downstream consumers
+  cannot wedge (#11)
+
+**T14 — post-deletion push (#2).** `pushAfterLocalChange(reloadFromDisk:)` needs
+`syncService`, `backupService`, UserDefaults, and resolved volumes. Testing it
+means injecting into `SyncCoordinator` the way `SyncService` already allows via
+its test-only init. Not attempted.
+
+**The three view-body bugs (#9, #17, #20)** remain out of scope for the reasons
+in §6.
 
 ---
 
