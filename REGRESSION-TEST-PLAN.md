@@ -17,10 +17,13 @@ Scope: all 50 commits on `main` (`54fb0f3` … `12632f7`). 28 of them fix defect
 
 ## 1. Headline findings
 
-**Finding 1 — CI cannot see two of the three build environments.**
-`.github/workflows/ci.yml` runs `xcodebuild build` (app target only) and
-`swift test` (SwiftPM). It never runs `xcodebuild test`, never builds Release, and
-never regenerates the `.xcodeproj`. Three shipped bugs were invisible to it by
+**Finding 1 — CI cannot see two of the three build environments.** *(Addressed —
+see §3. CI now runs `xcodebuild test`, archives Release, verifies the pinned Xcode,
+asserts the isolation flag reaches the compiler, and fails on XcodeGen drift.)*
+
+As audited: `.github/workflows/ci.yml` ran `xcodebuild build` (app target only) and
+`swift test` (SwiftPM). It never ran `xcodebuild test`, never built Release, and
+never regenerated the `.xcodeproj`. Three shipped bugs were invisible to it by
 construction:
 
 | Bug | Why CI missed it |
@@ -41,63 +44,70 @@ five areas that share one property: *no seam to call them from a test.*
 5. Everything that lives inside a SwiftUI view body
 
 **Finding 3 — the most recent bug (`519c0d1`, B2 `%20` album fork) is one
-character away from being caught by a test that already exists.**
+character away from being caught by a test that already exists.** *(Addressed — see
+T0; the fixture now uses a path with a space and both routes are asserted.)*
 `uploadImageRoutesLargeFilesThroughPartAPI` uploads to `remotePath: "big.mov"`.
 Change that fixture to `"2024/06/12/Album Name/big.mov"` and assert the JSON body
 of `b2_start_large_file` and the `X-Bz-File-Name` header of the single-call path
 encode *differently*, and the bug is permanently fenced. This is the cheapest
 high-value item in the plan.
 
-**Finding 4 — the suite is only enforced by a local pre-commit hook.**
-No hook is committed (`core.hooksPath` unset, `.git/hooks` empty). CI is the only
-shared gate, which makes Finding 1 more serious than it looks.
+**Finding 4 — the suite is only enforced by a local pre-commit hook.** *(Addressed
+— `.githooks/pre-commit` is now committed and enabled with `make hooks`.)*
+
+As audited: no hook was committed (`core.hooksPath` unset, `.git/hooks` empty). CI
+was the only shared gate, which made Finding 1 more serious than it looked.
 
 ---
 
 ## 2. Bug inventory and coverage status
 
-Status legend: **✅ Covered** (a CI test fails if reintroduced) · **◐ Partial**
-(related logic covered, the specific failure mode is not) · **❌ None**.
+Legend: **✅ Covered** (a CI test fails if reintroduced) · **◐ Partial** (related
+logic covered, the specific failure mode is not) · **❌ None**.
 
-| # | Commit | Bug scenario | Failure mode | Status | Guard proposed |
-| --- | --- | --- | --- | --- | --- |
-| 1 | `54fb0f3` | Pipelined import converted to JPEG/HEIC but never propagated the converted filename downstream | Records and volume copies carried `.HEIC` extensions over JPEG bytes | ❌ | T1 |
-| 2 | `b428117`a | `pushAfterLocalChange` reloaded the catalog after a deletion | Deleted album resurrected when the prior save had silently failed | ❌ | T14 |
-| 3 | `b428117`b | CIImage-based HEIC encoding silently failed | "Converted" files stayed JPG; no error surfaced | ❌ | T2 |
-| 4 | `f03135d` | Album deletion keyed off empty/stale `storageLocations` | Deletion silently no-opped; files orphaned on volumes and B2 | ✅ | — |
-| 5 | `abe7b51` | Pipeline phases used `continue` on cancellation, draining channel buffers; `PhotosImportService` had no cancel check | Cancel kept importing for the length of the buffer | ❌ | T5 |
-| 6 | `b97ed6d` | Single-image deletion removed `<name>.par2` but not `<name>.vol0+N.par2` | Orphan recovery volumes accumulate on every volume forever | ❌ | T3 |
-| 7 | `25a3a7c`a | Stale bookmarks threw instead of refreshing | Volumes became inaccessible after a reboot | ❌ | T8 |
-| 8 | `25a3a7c`b | Alpha channel not stripped before JPEG/HEIC encode | Corrupt output from RGBA sources | ❌ | T2 |
-| 9 | `25a3a7c`c | `VolumeSyncSheet` copy loop concurrency | Data race on `ImageRecord` across isolation | ❌ | (view — see §6) |
-| 10 | `154c011` | Catalog/sidecar/PAR2 uploads bypassed `withRetry` | One flaky request failed the entire catalog backup | ❌ | T11 |
-| 11 | `c4cf7ee` | `writeData` had no cancellation/timeout; orphaned assetsd requests | Import wedged; assetsd refused with 46104 | ◐ | T6, T7 |
-| 12 | `55e400e` | Photos import buffered whole albums; B2 retries too thin | Memory spikes, transient upload failures | ◐ | T11 |
-| 13 | `5233888`a | No retry for stalled iCloud downloads (10-min hard skip) | Import parked for minutes on an assetsd stall | ❌ | T6 |
-| 14 | `5233888`b | `filesCataloged` not reset between albums | Progress bar exceeded 100% when a later album was smaller | ❌ | T4 |
-| 15 | `aedc03b` | Slow-download banner fired at half the attempt-0 threshold | Sub-second UI flicker on every brief hiccup | ❌ | T6 |
-| 16 | `bf00a05` | Thumbnails stored in `Caches`, purged by macOS; no regeneration | Grid went blank after disk pressure | ❌ | T12 |
-| 17 | `147b362` | Detail view couldn't distinguish disconnected volume from missing file | Misleading "Unable to load preview" | ❌ | (view — see §6) |
-| 18 | `b98a4da` | Toolchain drift: `AlbumDelta` Sendable inference | Xcode Cloud build failed; GH CI green | ◐ | C1, C4 |
-| 19 | `1a85372` | Orphan `catalog.json.vol*.par2` never evicted on backup | Stale recovery volumes accumulate on each volume | ✅ | — |
-| 20 | `cbf5f3a` | `NSApp.sendAction(showSettingsWindow:)` from inside a modal sheet | "Open Settings" buttons did nothing | ❌ | (view — see §6) |
-| 21 | `8cef649` | Restore wrote `catalog.json` but never hydrated SwiftData | "Restored successfully" over an empty sidebar | ❌ | T9 |
-| 22 | `f3c5fae` | Catalog path components unvalidated; B2 creds in UserDefaults | Path traversal via catalog contents; creds at rest | ✅ (traversal) ◐ (keychain) | T13 |
-| 23 | `2f44cfb` | Catalog inside the sandbox container; import dead-ended with no storage | **App Store rejection** (2.4.5(i) and 2.1(a)) | ❌ | T10 |
-| 24 | `5568b41` | No way to restore a replica missing from one target | Manual recovery only | ❌ | T15 |
-| 25 | `e824865` | `[weak self]` inside a strongly-capturing outer closure | Xcode Cloud build failure | ✅ (build job) | C4 |
-| 26 | `b151c71`a | `performSync()` merged and saved but never hydrated | Second Mac showed an empty library | ❌ | T9 |
-| 27 | `b151c71`b | Per-device PBKDF2 salt | Encrypted files undecryptable on any other Mac | ✅ | — |
-| 28 | `0034bda` | Conversion output collided in a shared staging dir | Duplicated-with-edits photos collapsed into one; wrong bytes archived under a recorded hash | ✅ | — |
-| 29 | `f171795` | Monitor work on the main actor's critical path | Periodic UI stalls | ◐ | T16 |
-| 30 | `6dd8ad4` | Sync echo loop + O(N²) hydration | Main thread hung every ~2s | ✅ (loop) ❌ (O(N²)) | T16 |
-| 31 | `1da8a89`a | `merge()` non-convergent; no deletion propagation | Write loop could reappear; deletions resurrected by a peer | ✅ | — |
-| 32 | `1da8a89`b | `importRenderedAsset` could wedge on a never-firing PhotoKit callback | Process-global gate held forever | ❌ | T7 |
-| 33 | `1da8a89`c | Launch hydration didn't rebuild on catalog/store count mismatch | A reset store never repopulated | ❌ | T9 |
-| 34 | `519c0d1` | `startLargeFile` sent the percent-encoded name in a JSON body | Albums forked into `Album Name/` **and** `Album%20Name/` on B2 | ❌ | T0 |
-| 35 | `12632f7`a | `SWIFT_DEFAULT_ISOLATION` silently ignored by the toolchain | App ran coordinators off-main; `EXC_BAD_ACCESS` in `@Query` | ❌ | C1, C2, C3 |
-| 36 | `12632f7`b | Thumbnail write-back to a detached record | Trap on a photo removed mid-regeneration | ✅ | — |
-| 37 | `12632f7`c | Removal progress labelled "Importing from Photos" | Mislabeled, indeterminate progress | ❌ | T4 |
+**Was** is the audit that motivated this plan — coverage before any of the work
+below. **Now** is coverage on this branch. The gap between the two columns is what
+shipped; every remaining **❌** and **◐** is accounted for in §6 or §7.1.
+
+| # | Commit | Bug scenario | Failure mode | Was | Guard | **Now** |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `54fb0f3` | Pipelined import converted to JPEG/HEIC but never propagated the converted filename downstream | Records and volume copies carried `.HEIC` extensions over JPEG bytes | ❌ | T1 | ◐ accessors |
+| 2 | `b428117`a | `pushAfterLocalChange` reloaded the catalog after a deletion | Deleted album resurrected when the prior save had silently failed | ❌ | T14 | ❌ |
+| 3 | `b428117`b | CIImage-based HEIC encoding silently failed | "Converted" files stayed JPG; no error surfaced | ❌ | T2 | ✅ |
+| 4 | `f03135d` | Album deletion keyed off empty/stale `storageLocations` | Deletion silently no-opped; files orphaned on volumes and B2 | ✅ | — | ✅ |
+| 5 | `abe7b51` | Pipeline phases used `continue` on cancellation, draining channel buffers; `PhotosImportService` had no cancel check | Cancel kept importing for the length of the buffer | ❌ | T5 | ◐ contract |
+| 6 | `b97ed6d` | Single-image deletion removed `<name>.par2` but not `<name>.vol0+N.par2` | Orphan recovery volumes accumulate on every volume forever | ❌ | T3 | ✅ |
+| 7 | `25a3a7c`a | Stale bookmarks threw instead of refreshing | Volumes became inaccessible after a reboot | ❌ | T8 | ◐ skips unentitled |
+| 8 | `25a3a7c`b | Alpha channel not stripped before JPEG/HEIC encode | Corrupt output from RGBA sources | ❌ | T2 | ✅ |
+| 9 | `25a3a7c`c | `VolumeSyncSheet` copy loop concurrency | Data race on `ImageRecord` across isolation | ❌ | (view — see §6) | ❌ view |
+| 10 | `154c011` | Catalog/sidecar/PAR2 uploads bypassed `withRetry` | One flaky request failed the entire catalog backup | ❌ | T11 | ✅ |
+| 11 | `c4cf7ee` | `writeData` had no cancellation/timeout; orphaned assetsd requests | Import wedged; assetsd refused with 46104 | ◐ | T6, T7 | ◐ policy only |
+| 12 | `55e400e` | Photos import buffered whole albums; B2 retries too thin | Memory spikes, transient upload failures | ◐ | T11 | ◐ |
+| 13 | `5233888`a | No retry for stalled iCloud downloads (10-min hard skip) | Import parked for minutes on an assetsd stall | ❌ | T6 | ✅ |
+| 14 | `5233888`b | `filesCataloged` not reset between albums | Progress bar exceeded 100% when a later album was smaller | ❌ | T4 | ✅ |
+| 15 | `aedc03b` | Slow-download banner fired at half the attempt-0 threshold | Sub-second UI flicker on every brief hiccup | ❌ | T6 | ✅ |
+| 16 | `bf00a05` | Thumbnails stored in `Caches`, purged by macOS; no regeneration | Grid went blank after disk pressure | ❌ | T12 | ◐ on-disk only |
+| 17 | `147b362` | Detail view couldn't distinguish disconnected volume from missing file | Misleading "Unable to load preview" | ❌ | (view — see §6) | ❌ view |
+| 18 | `b98a4da` | Toolchain drift: `AlbumDelta` Sendable inference | Xcode Cloud build failed; GH CI green | ◐ | C1, C4 | ✅ |
+| 19 | `1a85372` | Orphan `catalog.json.vol*.par2` never evicted on backup | Stale recovery volumes accumulate on each volume | ✅ | — | ✅ |
+| 20 | `cbf5f3a` | `NSApp.sendAction(showSettingsWindow:)` from inside a modal sheet | "Open Settings" buttons did nothing | ❌ | (view — see §6) | ❌ view |
+| 21 | `8cef649` | Restore wrote `catalog.json` but never hydrated SwiftData | "Restored successfully" over an empty sidebar | ❌ | T9 | ✅ |
+| 22 | `f3c5fae` | Catalog path components unvalidated; B2 creds in UserDefaults | Path traversal via catalog contents; creds at rest | ✅ (traversal) ◐ (keychain) | T13 | ✅ / ◐ keychain |
+| 23 | `2f44cfb` | Catalog inside the sandbox container; import dead-ended with no storage | **App Store rejection** (2.4.5(i) and 2.1(a)) | ❌ | T10 | ✅ |
+| 24 | `5568b41` | No way to restore a replica missing from one target | Manual recovery only | ❌ | T15 | ◐ volume path |
+| 25 | `e824865` | `[weak self]` inside a strongly-capturing outer closure | Xcode Cloud build failure | ✅ (build job) | C4 | ✅ |
+| 26 | `b151c71`a | `performSync()` merged and saved but never hydrated | Second Mac showed an empty library | ❌ | T9 | ✅ |
+| 27 | `b151c71`b | Per-device PBKDF2 salt | Encrypted files undecryptable on any other Mac | ✅ | — | ✅ |
+| 28 | `0034bda` | Conversion output collided in a shared staging dir | Duplicated-with-edits photos collapsed into one; wrong bytes archived under a recorded hash | ✅ | — | ✅ |
+| 29 | `f171795` | Monitor work on the main actor's critical path | Periodic UI stalls | ◐ | T16 | ◐ |
+| 30 | `6dd8ad4` | Sync echo loop + O(N²) hydration | Main thread hung every ~2s | ✅ (loop) ❌ (O(N²)) | T16 | ✅ loop / ❌ cost |
+| 31 | `1da8a89`a | `merge()` non-convergent; no deletion propagation | Write loop could reappear; deletions resurrected by a peer | ✅ | — | ✅ |
+| 32 | `1da8a89`b | `importRenderedAsset` could wedge on a never-firing PhotoKit callback | Process-global gate held forever | ❌ | T7 | ❌ |
+| 33 | `1da8a89`c | Launch hydration didn't rebuild on catalog/store count mismatch | A reset store never repopulated | ❌ | T9 | ✅ |
+| 34 | `519c0d1` | `startLargeFile` sent the percent-encoded name in a JSON body | Albums forked into `Album Name/` **and** `Album%20Name/` on B2 | ❌ | T0 | ✅ |
+| 35 | `12632f7`a | `SWIFT_DEFAULT_ISOLATION` silently ignored by the toolchain | App ran coordinators off-main; `EXC_BAD_ACCESS` in `@Query` | ❌ | C1, C2, C3 | ✅ |
+| 36 | `12632f7`b | Thumbnail write-back to a detached record | Trap on a photo removed mid-regeneration | ✅ | — | ✅ |
+| 37 | `12632f7`c | Removal progress labelled "Importing from Photos" | Mislabeled, indeterminate progress | ❌ | T4 | ✅ |
 
 ---
 

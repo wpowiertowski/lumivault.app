@@ -7,7 +7,7 @@
 
 ## Existing Automated Test Assessment
 
-### Summary: 154 tests across 28 suites
+### Summary: 295 tests across 56 suites
 
 | Rating | Suite | Tests | Assessment |
 | -------- | ------- | ------- | ------------ |
@@ -40,6 +40,21 @@
 | Low Value | SnakeGameTests | 7 | Easter-egg Snake game state machine: initial segments, hold-before-start, tick movement, no-direct-reverse, wall collision, food growth/score, reset. |
 | Low Value | FlappyGameTests | 5 | Easter-egg Flappy game state machine: hover-before-flap, flap impulse, gravity, floor collision, reset. |
 
+| High Value | HydrationTests | 8 | Rebuilding SwiftData from `catalog.json`: empty store, idempotent upsert, local-only fields preserved, staleness detection, tombstone application, and a 2,000-image pass. Guards the "restored successfully over an empty sidebar" class of bug. |
+| High Value | SingleImagePAR2DeletionTests | 3 | Single-image deletion removes the `.vol0+N.par2` recovery volumes, leaves siblings' PAR2 sets intact, and derives the index name when the record carries none. |
+| High Value | HealReplicasTests | 4 | Volume-to-volume replica healing: real bytes restored, failure reasons reported, traversing `relativePath` refused, unhealable discrepancy kinds ignored. |
+| High Value | PipelinePhaseRoutingTests | 6 | Stage-to-stage routing over all 16 combinations of enabled phases: never forwards into a disabled stage, always terminates at the catalog sink. |
+| High Value | CatalogMigrationTests | 6 | Legacy catalog + sidecar migration out of the sandbox container, never clobbering an existing catalog, plus library-as-storage-target resolution. |
+| High Value | StallPolicyTests | 6 | iCloud-download watchdog arithmetic: doubling thresholds 1→512s over 10 attempts, slow-message suppression below 5s, retry countdown never negative. |
+| Medium Value | PipelineItemTests | 5 | Converted filename reaches downstream stages; encrypted/converted/original URL precedence, including the conversion+encryption combination. |
+| Medium Value | ImportProgressBoundsTests | 4 | Progress fraction stays within 0…1 across every phase (incl. counts leaking between albums) and the removal phase is labelled and determinate. |
+| Medium Value | ThumbnailCacheTests | 4 | Cache root is Application Support and not the purgeable `Caches`; sha-sharded layout for both sizes, miss reads nil, removal clears disk. |
+| Medium Value | EnsureFileMirroredTests | 4 | Copy-stage mirroring skips a same-size destination and replaces truncated or empty leftovers. |
+| Medium Value | CatalogPathResolutionTests | 4 | Catalog path override and tilde expansion; the library path is symlink-resolved so no container path reaches the UI. |
+| Medium Value | ImageConversionFormatTests | 3 | HEIC output really decodes as `public.heic`; alpha stripped from RGBA sources for both JPEG and HEIC. |
+| Medium Value | BookmarkResolverTests | 3 | Bookmark round-trip, no rewrite when not stale, corrupt data still throws. Skips where security-scoped bookmarks need entitlements the SwiftPM process lacks. |
+| Low Value | ChannelCancellationDrainTests | 2 | `cancel()` does not discard buffered items — the contract that makes the consumer-side `break` load-bearing. |
+
 ### Redundancy & Overlap
 
 No truly redundant tests. Each test has a distinct scenario. Some suites have tests that are very close (e.g., `deleteRemovesFilesFromVolume` vs `deleteAllFixtureFilesFromVolume` differ only in batch size), but they serve as single-file vs bulk regression guards.
@@ -50,13 +65,13 @@ No truly redundant tests. Each test has a distinct scenario. Some suites have te
 | ------ | ------ | -------- |
 | EncryptionService | High | **Covered** — 20 tests across 3 suites: key derivation, round-trips, wrong key/AD, nonce uniqueness, file ops, edge cases, encrypt-PAR2-decrypt integration |
 | B2Service (network layer) | High | **Covered** — 18 tests total: 7 pure helpers (SHA-1, HTTP response validation) + 11 network methods via URLProtocol stub (authorize, getUploadURL, uploadFile, list pagination, fileExists, delete). |
-| PipelinedImportCoordinator | High | **Partially covered** — 5 tests on image conversion, 5 on ExportProgress, plus AsyncChannel/AsyncSemaphore primitives now covered by 10 dedicated tests (backpressure, finish, cancel-unblocks-producer). Full pipeline orchestration and phase-skipping wiring still rely on manual QA (TC-2, TC-4). |
+| PipelinedImportCoordinator | High | **Partially covered** — phase-skipping wiring is now exhaustively covered (PipelinePhaseRoutingTests, all 16 combinations), plus PipelineItem filename propagation, copy-stage mirroring, conversion, and the channel/semaphore primitives. Full orchestration — sentinel task, per-stage cancellation, `copyError` vs `error` isolation — still needs protocol-based service injection and relies on manual QA (TC-2, TC-4). |
 | CatalogBackupService | Medium | **Covered** — 6 tests: volume backup/restore round-trip, error reporting, missing catalog, happy path restore |
 | Volume sync (VolumeSyncSheet inline copy loop) | Medium | **Not unit-tested** — loop lives in a SwiftUI view. Hash-dedup + PAR2 companion behavior validated by manual QA (TC-8, TC-9). |
 | PerceptualHash | Medium | **Covered** — 10 tests across 2 suites: hammingDistance (7 pure math) + compute (3 with real images) |
-| SyncService / SyncCoordinator | Medium | **SyncService covered** — 7 tests exercise push/pull/merge against a temp directory via a test-only init that bypasses NSFileCoordinator (round-trip, missing-file, corrupt JSON, remote/local union). SyncCoordinator orchestration still requires iCloud provisioning. |
-| ThumbnailService | Low | **Not tested** — ImageIO + NSCache. Visual correctness validated by manual QA. |
-| PhotosImportService | Low | **Not testable** — requires Photos.app sandbox entitlement. Covered by manual QA. |
+| SyncService / SyncCoordinator | Medium | **SyncService covered** — 20 tests on push/pull/merge, echo suppression, convergent merge and tombstone propagation. **SyncCoordinator hydration covered** — 8 tests drive `hydrate`/`isHydrationStale` against an in-memory ModelContainer, and 6 more cover legacy catalog migration. The remaining orchestration (iCloud monitoring, settings debounce) still requires provisioning. |
+| ThumbnailService | Low | **Partially covered** — 4 tests on the on-disk contract (Application Support root, sha-sharded layout, miss-reads-nil, removal) plus video poster frames. The NSCache layer and regeneration from a mounted source volume remain manual QA; visual correctness always was. |
+| PhotosImportService | Low | **Mostly not testable** — requires the Photos entitlement. The download watchdog's arithmetic is extracted into `StallPolicy` and covered by 6 tests; the surrounding `PHAssetResourceManager` loop remains manual QA. |
 
 ### Remaining Automated Test TODOs
 
@@ -64,9 +79,10 @@ These items would further improve coverage but require architectural changes:
 
 | Item | Blocker | Effort |
 | ------ | --------- | -------- |
-| PipelinedImportCoordinator end-to-end | AsyncChannel/AsyncSemaphore primitives are now covered (AsyncPrimitivesTests). Full pipeline orchestration — sentinel task, phase-skipping wiring, service interactions — still needs protocol-based service injection. | Medium |
-| SyncCoordinator state machine | Orchestrates 3 services + UserDefaults + SwiftData; needs dependency injection | Medium — requires constructor refactor |
-| ThumbnailService cache logic | Two-level cache (NSCache + disk); needs real image rendering which is unreliable in headless CI (CIContext renders all-white at small sizes) | Low — limited value vs manual QA |
+| PipelinedImportCoordinator end-to-end | Phase-skipping wiring is now covered (PipelinePhaseRoutingTests) and the primitives before it. What remains — sentinel task, per-stage cancellation, `copyError` vs `error` isolation, `defer`-finish on abnormal exit — needs protocol-based injection of the six services the coordinator constructs. | Medium |
+| SyncCoordinator orchestration | Hydration and catalog migration are now covered via static, context-injected entry points. The rest (iCloud monitoring, settings debounce, push-after-local-change) still orchestrates 3 services + UserDefaults + SwiftData and needs dependency injection. | Medium — requires constructor refactor |
+| Hydration complexity (O(N) vs O(N²)) | Attempted and removed. CI measured 4x the catalog costing 8.5x the time *with* the batch-load fix in place (exponent ~1.5), because SwiftData's per-insert cost grows with store size — so no ratio threshold separates the fixed shape from the quadratic one. Counting `FetchDescriptor` executions would be the right guard, but `ModelContext` offers no seam. Correctness at 2,000 images is covered; the shape is not. | Blocked |
+| ThumbnailService cache logic | The on-disk contract is covered (root, layout, miss, removal). The NSCache layer and regeneration-from-volume still need real image rendering, unreliable headless (CIContext renders all-white at small sizes). | Low — limited value vs manual QA |
 | PerceptualHash visual distinctness | CIContext.render produces all-white pixels in headless test environments at 9x8 resolution; cannot reliably test that different images produce different hashes | Low — CI environment limitation |
 
 ---
@@ -85,7 +101,7 @@ hardware before release.
 | ------- | --------- | -------- |
 | CatalogVideoSchemaTests | PR 1 (schema) | `media_type`/`duration_seconds` encode/decode round-trip; legacy catalog (no video fields) decodes with nil → image; catalog containing videos re-encodes deterministically; `reconciled(with:)` commutativity over the new fields; `contentEquals` stability across a save/load round-trip |
 | SwiftData migration smoke | PR 1 (schema) | Legacy store opens with defaulted `mediaTypeRaw = "image"` and nil duration (same pattern as PhotosSyncSchemaTests) |
-| B2LargeFileNetworkTests | PR 2 (B2) | Via the existing URLProtocol stub: start_large_file → get_upload_part_url → upload_part (per-part SHA-1 headers, part numbering) → finish_large_file (part SHA-1 array); cancel_large_file on mid-flight failure; threshold routing (≤ 200 MB single-call, > 200 MB parts); single-call path streams from file instead of `Data(contentsOf:)` |
+| B2LargeFileTests | PR 2 (B2) | Via the existing URLProtocol stub: start_large_file → get_upload_part_url → upload_part (per-part SHA-1 headers, part numbering) → finish_large_file (part SHA-1 array); cancel_large_file on mid-flight failure; threshold routing (≤ 200 MB single-call, > 200 MB parts); single-call path streams from file instead of `Data(contentsOf:)` |
 | VideoThumbnailTests | PR 3 (pipeline) | Poster frame from a fixture `.mov` writes 256/64px HEICs into the standard SHA-keyed cache; duration/dimension probe returns expected values; non-video input throws. (AVAssetImageGenerator decodes without a display, so this is headless-safe — unlike the CIContext-based image cases.) |
 | Pipeline media-type routing | PR 3 (pipeline) | Video `PipelineItem` skips conversion (output URL == input, no re-encode); pHash skipped (stays nil); encryption size cap: over-cap video imports unencrypted and surfaces a warning, under-cap encrypts normally; catalog sink persists `media_type`/`duration_seconds` |
 | PhotosLibraryMonitor scope | PR 4 (Photos) | `computeDeltaParts` parity when the tracked set includes video asset ids — badges must match the import scope in both includeVideos states |
@@ -147,10 +163,11 @@ Key identifier groups:
 
 ```bash
 # Build and run all UI tests
-xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultUITests -destination 'platform=macOS'
+xcodebuild test -project LumiVault.xcodeproj -scheme LumiVault \
+  -destination 'platform=macOS' -only-testing:LumiVaultUITests
 
 # Run a specific UI test
-xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultUITests \
+xcodebuild test -project LumiVault.xcodeproj -scheme LumiVault \
   -destination 'platform=macOS' -only-testing:LumiVaultUITests/LumiVaultUITests/testSettingsTabsExist
 ```
 

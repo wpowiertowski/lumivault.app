@@ -62,12 +62,12 @@ regenerates and fails the build if the commit is stale.
 
 ## Testing
 
-Tests use Swift Testing (`import Testing`, `@Test`, `@Suite`). Test suite is `@MainActor` because Codable conformances require it under default isolation.
+Tests use Swift Testing (`import Testing`, `@Test`, `@Suite`). Most suites are `@MainActor`: the app target is built MainActor-by-default, so its Codable conformances, SwiftData models and most value types are MainActor-isolated. Suites that only touch `nonisolated` API (e.g. `StallPolicy`, `PipelinePhases`, `AsyncChannel`) can and do omit it.
 
 ```bash
 swift test                                    # Run all tests
 swift test --filter LumiVaultTests            # Run specific suite
-xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultTests -destination 'platform=macOS'
+xcodebuild test -project LumiVault.xcodeproj -scheme LumiVault -destination 'platform=macOS' -only-testing:LumiVaultTests
 ```
 
 Run `make hooks` once per clone to enable the committed pre-commit hook
