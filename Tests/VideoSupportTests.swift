@@ -241,6 +241,11 @@ func makeLargeFileStubSession() -> URLSession {
     return URLSession(configuration: config)
 }
 
+/// Album path containing a space — the fixture that exposes the encoding split in
+/// 519c0d1. File-scope (not a `static` on the `@MainActor` suite) so the
+/// `@Sendable` stub responders can read it without crossing an isolation boundary.
+let spacedRemotePath = "2026/06/12/Album Name/clip.mov"
+
 @Suite(.serialized)
 @MainActor
 struct B2LargeFileTests {
@@ -434,6 +439,137 @@ struct B2LargeFileTests {
         #expect(fileId == "large-route")
         #expect(partNumbers.value == [1, 2, 3])
         #expect(finished.value == true)
+    }
+
+    // MARK: - Remote path encoding (regression: 519c0d1)
+    //
+    // The two upload routes encode the file name differently and only one was
+    // handled correctly, so an album containing large videos forked into two B2
+    // folders — "Album Name/" and a literal "Album%20Name/":
+    //
+    //   • ≤ 200 MB → uploadFile, name in the X-Bz-File-Name *header*. B2 requires
+    //     that header percent-encoded and decodes it back.
+    //   • > 200 MB → startLargeFile, name in a JSON *body*. B2 stores body names
+    //     verbatim, so an already-encoded path is stored with a literal "%20".
+    //
+    // The invariant that actually broke is the last test here: both routes must
+    // land on the same B2 path. Note the fixtures use a name *with a space* —
+    // `uploadImageRoutesLargeFilesThroughPartAPI` above uses "big.mov", which
+    // cannot observe this bug.
+
+    /// Sparse file just over the large-file threshold. APFS materializes no data.
+    private func makeSparseLargeFile() throws -> URL {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("b2-encoding-\(UUID().uuidString).mov")
+        FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: fileURL)
+        try handle.truncate(atOffset: UInt64(Constants.Media.b2LargeFileThreshold + 1024))
+        try handle.close()
+        return fileURL
+    }
+
+    @Test func largeFileUploadSendsRawUnencodedNameInJSONBody() async throws {
+        LargeFileStubURLProtocol.reset()
+        let service = B2Service(session: makeLargeFileStubSession())
+
+        let fileURL = try makeSparseLargeFile()
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let startName = Locked<String?>(nil)
+
+        LargeFileStubURLProtocol.responder = { request in
+            switch request.url?.path ?? "" {
+            case let p where p.hasSuffix("/b2_authorize_account"):
+                return authorizeResponse(for: request)
+            case let p where p.hasSuffix("/b2_start_large_file"):
+                let body = bodyJSON(from: request) as? [String: Any]
+                startName.value = body?["fileName"] as? String
+                return jsonResponse(for: request, status: 200, json: ["fileId": "spaced-1"])
+            case let p where p.hasSuffix("/b2_get_upload_part_url"):
+                return jsonResponse(for: request, status: 200, json: [
+                    "uploadUrl": "https://pod.backblazeb2.com/part/abc",
+                    "authorizationToken": "part-token"
+                ])
+            case let p where p.contains("/part/"):
+                let number = Int(request.value(forHTTPHeaderField: "X-Bz-Part-Number") ?? "") ?? -1
+                return jsonResponse(for: request, status: 200, json: ["partNumber": number])
+            case let p where p.hasSuffix("/b2_finish_large_file"):
+                return jsonResponse(for: request, status: 200, json: [
+                    "fileId": "spaced-1", "fileName": spacedRemotePath, "contentSha1": "none"
+                ])
+            default:
+                return failure(URLError(.badURL))
+            }
+        }
+
+        _ = try await service.uploadImage(
+            fileURL: fileURL,
+            remotePath: spacedRemotePath,
+            sha256: "unused",
+            credentials: credentials
+        )
+
+        #expect(startName.value == spacedRemotePath)
+        #expect(startName.value?.contains("%20") == false)
+    }
+
+    @Test func singleCallUploadSendsPercentEncodedNameInHeader() async throws {
+        LargeFileStubURLProtocol.reset()
+        let service = B2Service(session: makeLargeFileStubSession())
+
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("b2-small-\(UUID().uuidString).jpg")
+        try Data("small".utf8).write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let headerName = Locked<String?>(nil)
+
+        LargeFileStubURLProtocol.responder = { request in
+            switch request.url?.path ?? "" {
+            case let p where p.hasSuffix("/b2_authorize_account"):
+                return authorizeResponse(for: request)
+            case let p where p.hasSuffix("/b2_get_upload_url"):
+                return jsonResponse(for: request, status: 200, json: [
+                    "uploadUrl": "https://pod-upload.backblazeb2.com/upload/abc",
+                    "authorizationToken": "upload-token-xyz"
+                ])
+            case let p where p.contains("/upload/"):
+                headerName.value = request.value(forHTTPHeaderField: "X-Bz-File-Name")
+                return jsonResponse(for: request, status: 200, json: [
+                    "fileId": "small-1", "fileName": spacedRemotePath, "contentSha1": "none"
+                ])
+            default:
+                return failure(URLError(.badURL))
+            }
+        }
+
+        _ = try await service.uploadImage(
+            fileURL: fileURL,
+            remotePath: spacedRemotePath,
+            sha256: "unused",
+            credentials: credentials
+        )
+
+        // The header MUST be encoded — B2 rejects raw spaces there.
+        #expect(headerName.value == "2026/06/12/Album%20Name/clip.mov")
+        // Path separators stay literal so the album hierarchy survives.
+        #expect(headerName.value?.contains("/") == true)
+    }
+
+    @Test func bothUploadRoutesResolveToTheSameB2Path() async throws {
+        // The user-visible invariant: whichever route a file takes, it lands in
+        // one folder. Decoding the header form must reproduce the body form.
+        let encoded = spacedRemotePath
+            .addingPercentEncoding(withAllowedCharacters: B2Service.b2AllowedCharacters)
+        let decoded = encoded?.removingPercentEncoding
+        #expect(decoded == spacedRemotePath)
+
+        // "~" is B2-safe and must survive un-encoded — disambiguated filenames
+        // (see 0034bda) embed it, and encoding it would fork those too.
+        let tilde = "2026/06/12/Album Name/photo~a1b2c3.jpg"
+        let tildeEncoded = tilde.addingPercentEncoding(withAllowedCharacters: B2Service.b2AllowedCharacters)
+        #expect(tildeEncoded?.contains("~") == true)
+        #expect(tildeEncoded?.removingPercentEncoding == tilde)
     }
 }
 

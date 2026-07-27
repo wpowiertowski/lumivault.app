@@ -136,7 +136,12 @@ final class PhotosImportProgress: @unchecked Sendable {
             albumFraction = 0.1 + Double(filesCataloged) / Double(totalFiles) * 0.9
         }
 
-        return globalFraction(for: albumFraction)
+        // Clamp. `filesCataloged` is per-album state that the multi-album path has
+        // to reset between albums; when it leaked across (5233888) a later, smaller
+        // album drove the bar past 100%. Resetting is still correct, but a progress
+        // fraction outside 0...1 is never meaningful, so make the bound structural
+        // rather than dependent on every caller remembering.
+        return min(max(globalFraction(for: albumFraction), 0), 1)
     }
 
     /// Maps a per-album fraction (0–1) to a global fraction weighted by file count.

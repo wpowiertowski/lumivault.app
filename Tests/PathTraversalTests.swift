@@ -125,3 +125,73 @@ struct CatalogMergeSanitizationTests {
         #expect(images.first?.filename == "sunset.jpg")
     }
 }
+
+// MARK: - Catalog Path Resolution (regression: f3c5fae, 2f44cfb)
+//
+// Apple rejected 1.0 under guideline 2.4.5(i) because the catalog lived inside the
+// hidden sandbox container and Settings displayed that container path. The fix
+// moved it to `~/Pictures/LumiVault` and resolves symlinks so the UI shows the real
+// user-visible location — under the sandbox, `.picturesDirectory` returns a
+// container-scoped alias to `~/Pictures`.
+
+@Suite(.serialized)
+@MainActor
+struct CatalogPathResolutionTests {
+
+    /// The override key read by `Constants.Paths.resolvedCatalogURL`.
+    private static let overrideKey = "catalogPath"
+
+    private func withCatalogPathOverride(_ value: String?, _ body: () -> Void) {
+        let defaults = UserDefaults.standard
+        let original = defaults.string(forKey: Self.overrideKey)
+        defer {
+            if let original {
+                defaults.set(original, forKey: Self.overrideKey)
+            } else {
+                defaults.removeObject(forKey: Self.overrideKey)
+            }
+        }
+        if let value {
+            defaults.set(value, forKey: Self.overrideKey)
+        } else {
+            defaults.removeObject(forKey: Self.overrideKey)
+        }
+        body()
+    }
+
+    @Test func defaultsToCatalogJSONInsideTheLibrary() {
+        withCatalogPathOverride(nil) {
+            let url = Constants.Paths.resolvedCatalogURL
+            #expect(url.lastPathComponent == "catalog.json")
+            #expect(url.deletingLastPathComponent().path == Constants.Paths.libraryURL.path)
+        }
+    }
+
+    @Test func honoursAnExplicitOverrideAndExpandsTilde() {
+        withCatalogPathOverride("/Volumes/Archive/catalog.json") {
+            #expect(Constants.Paths.resolvedCatalogURL.path == "/Volumes/Archive/catalog.json")
+        }
+
+        withCatalogPathOverride("~/Documents/catalog.json") {
+            let expected = ("~/Documents/catalog.json" as NSString).expandingTildeInPath
+            #expect(Constants.Paths.resolvedCatalogURL.path == expected)
+            #expect(!Constants.Paths.resolvedCatalogURL.path.hasPrefix("~"))
+        }
+    }
+
+    @Test func libraryPathIsSymlinkResolvedAndUserVisible() {
+        let library = Constants.Paths.libraryURL
+        // Resolving is what keeps a container alias out of the Settings UI.
+        #expect(library.path == library.resolvingSymlinksInPath().path)
+        #expect(library.lastPathComponent == "LumiVault")
+    }
+
+    @Test func legacyContainerCatalogPathIsDistinctFromTheLibrary() {
+        // Migration only makes sense while these two differ; if they ever collide
+        // the launch-time move would be a no-op that silently strands a catalog.
+        let legacy = Constants.Paths.legacyContainerCatalogURL
+        #expect(legacy.lastPathComponent == "catalog.json")
+        #expect(legacy.deletingLastPathComponent().path != Constants.Paths.libraryURL.path)
+        #expect(!legacy.path.hasPrefix("~"))
+    }
+}

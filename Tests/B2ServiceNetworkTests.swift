@@ -314,6 +314,119 @@ struct B2ServiceNetworkTests {
         #expect(deleteBody.value?["fileId"] == "file-1")
         #expect(deleteBody.value?["fileName"] == "doomed.jpg")
     }
+
+    // MARK: - Retry (regression: 154c011, c4cf7ee)
+    //
+    // `154c011` routed the catalog/sidecar/PAR2 uploads through `uploadImage` so
+    // they inherit the exponential-backoff retry — before that a single flaky
+    // request failed the entire catalog backup. Nothing asserted the retry
+    // actually fires, so a future path that bypasses `withRetry` would go
+    // unnoticed exactly the way the catalog backup did.
+    //
+    // These tests pay real backoff sleeps (1s for one retry, +2s for two), so
+    // they deliberately use the minimum retry count that proves the behaviour.
+
+    @Test func uploadRetriesAfterTransientServerErrorAndReportsAttempts() async throws {
+        StubURLProtocol.reset()
+        let service = B2Service(session: makeStubSession())
+
+        let payload = Data("retry me".utf8)
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("b2-retry-\(UUID().uuidString).jpg")
+        try payload.write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let uploadCalls = Locked(0)
+        let attempts = Locked<[Int]>([])
+
+        StubURLProtocol.responder = { request in
+            switch request.url?.path ?? "" {
+            case let p where p.hasSuffix("/b2_authorize_account"):
+                return authorizeResponse(for: request)
+            case let p where p.hasSuffix("/b2_get_upload_url"):
+                return jsonResponse(for: request, status: 200, json: [
+                    "uploadUrl": "https://pod-upload.backblazeb2.com/upload/abc",
+                    "authorizationToken": "upload-token-xyz"
+                ])
+            case let p where p.contains("/upload/"):
+                let n = uploadCalls.mutate { (count: inout Int) -> Int in
+                    count += 1
+                    return count
+                }
+                // 503 is retryable per B2Error.isRetryable (500...599).
+                if n == 1 {
+                    return jsonResponse(for: request, status: 503, json: [
+                        "code": "service_unavailable", "message": "try again"
+                    ])
+                }
+                return jsonResponse(for: request, status: 200, json: [
+                    "fileId": "recovered-1", "fileName": "retry.jpg", "contentSha1": "none"
+                ])
+            default:
+                return failure(URLError(.badURL))
+            }
+        }
+
+        let fileId = try await service.uploadImage(
+            fileURL: fileURL,
+            remotePath: "album/retry.jpg",
+            sha256: "unused",
+            credentials: credentials,
+            onAttempt: { attempt in attempts.mutate { $0.append(attempt) } }
+        )
+
+        #expect(fileId == "recovered-1")
+        #expect(uploadCalls.value == 2)
+        // Attempt 1 is reported when the retry starts, then 0 signals recovery.
+        #expect(attempts.value == [1, 0])
+    }
+
+    @Test func uploadSurfacesFileNameAndPathAfterRetriesAreExhausted() async throws {
+        StubURLProtocol.reset()
+        let service = B2Service(session: makeStubSession())
+
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("b2-doomed-\(UUID().uuidString).jpg")
+        try Data("nope".utf8).write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        // 403 is NOT retryable, so this fails on the first attempt with no sleeps.
+        StubURLProtocol.responder = { request in
+            switch request.url?.path ?? "" {
+            case let p where p.hasSuffix("/b2_authorize_account"):
+                return authorizeResponse(for: request)
+            case let p where p.hasSuffix("/b2_get_upload_url"):
+                return jsonResponse(for: request, status: 200, json: [
+                    "uploadUrl": "https://pod-upload.backblazeb2.com/upload/abc",
+                    "authorizationToken": "upload-token-xyz"
+                ])
+            case let p where p.contains("/upload/"):
+                return jsonResponse(for: request, status: 403, json: [
+                    "code": "access_denied", "message": "no permission"
+                ])
+            default:
+                return failure(URLError(.badURL))
+            }
+        }
+
+        // The user-facing error must name the file and its remote path — that is
+        // what makes a failed catalog backup diagnosable.
+        do {
+            _ = try await service.uploadImage(
+                fileURL: fileURL,
+                remotePath: "2026/06/12/Album Name/doomed.jpg",
+                sha256: "unused",
+                credentials: credentials
+            )
+            Issue.record("Expected the upload to throw after a non-retryable 403")
+        } catch let error as B2Service.B2UploadError {
+            #expect(error.remotePath == "2026/06/12/Album Name/doomed.jpg")
+            #expect(error.fileName == fileURL.lastPathComponent)
+            #expect(!error.reason.isEmpty)
+        } catch {
+            Issue.record("Expected B2UploadError, got \(type(of: error)): \(error)")
+        }
+    }
 }
 
 // MARK: - URLProtocol Stub

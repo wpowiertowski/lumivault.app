@@ -2586,3 +2586,309 @@ struct PhotosSyncSchemaTests {
         #expect(image.allPHAssetIdentifiers.sorted() == ["PH-asset-1", "PH-asset-2"])
     }
 }
+
+// MARK: - PipelineItem Filename Propagation (regression: 54fb0f3)
+//
+// The pipelined import converted images to JPEG/HEIC correctly but never
+// propagated the converted filename to downstream stages, so records and volume
+// copies kept the original extension (.HEIC) while containing converted bytes.
+// `activeFilename` / `activeFileURL` are the accessors that fix carries; they are
+// `nonisolated` computed properties on a plain Sendable struct, so they are
+// directly testable without running the pipeline.
+
+@Suite
+@MainActor
+struct PipelineItemTests {
+
+    private func makeItem(originalFilename: String = "IMG_0001.HEIC") -> PipelineItem {
+        PipelineItem(
+            albumName: "Trip",
+            importDate: Date(timeIntervalSince1970: 1_700_000_000),
+            fileURL: URL(fileURLWithPath: "/tmp/staging/\(originalFilename)"),
+            originalFilename: originalFilename,
+            phAssetLocalIdentifier: nil
+        )
+    }
+
+    @Test func activeFilenameFallsBackToOriginalWhenNoConversion() {
+        let item = makeItem()
+        #expect(item.activeFilename == "IMG_0001.HEIC")
+        #expect(item.activeFileURL == item.fileURL)
+    }
+
+    @Test func activeFilenameUsesConvertedNameOnceConverted() {
+        var item = makeItem()
+        item.convertedFilename = "IMG_0001.jpg"
+        item.convertedURL = URL(fileURLWithPath: "/tmp/staging/converted/abc/IMG_0001.jpg")
+
+        // The exact regression: downstream stages must see the .jpg name, not .HEIC.
+        #expect(item.activeFilename == "IMG_0001.jpg")
+        #expect(item.activeFileURL.lastPathComponent == "IMG_0001.jpg")
+    }
+
+    @Test func activeFileURLPrefersEncryptedOverConvertedOverOriginal() {
+        var item = makeItem()
+        #expect(item.activeFileURL.path == "/tmp/staging/IMG_0001.HEIC")
+
+        item.convertedURL = URL(fileURLWithPath: "/tmp/staging/converted/abc/IMG_0001.jpg")
+        #expect(item.activeFileURL.path == "/tmp/staging/converted/abc/IMG_0001.jpg")
+
+        item.encryptedURL = URL(fileURLWithPath: "/tmp/staging/encrypted/IMG_0001.jpg.enc")
+        #expect(item.activeFileURL.path == "/tmp/staging/encrypted/IMG_0001.jpg.enc")
+    }
+
+    @Test func encryptionDoesNotDisturbTheStoredFilename() {
+        // Conversion + encryption together is the combination that made records
+        // disagree with the bytes on disk: the name must stay the converted one
+        // while the URL points at the ciphertext.
+        var item = makeItem()
+        item.convertedFilename = "IMG_0001.jpg"
+        item.convertedURL = URL(fileURLWithPath: "/tmp/staging/converted/abc/IMG_0001.jpg")
+        item.encryptedURL = URL(fileURLWithPath: "/tmp/staging/encrypted/IMG_0001.jpg.enc")
+
+        #expect(item.activeFilename == "IMG_0001.jpg")
+        #expect(item.activeFileURL.lastPathComponent == "IMG_0001.jpg.enc")
+    }
+
+    @Test func videoItemsCarryTheirOriginalNameThroughThePipeline() {
+        // Videos skip conversion entirely, so convertedFilename stays nil.
+        var item = makeItem(originalFilename: "clip.mov")
+        item.mediaType = .video
+        #expect(item.activeFilename == "clip.mov")
+        #expect(item.convertedFilename == nil)
+    }
+}
+
+// MARK: - Single-Image PAR2 Cleanup (regression: b97ed6d)
+//
+// Single-image deletion removed `<name>.par2` but left every `<name>.vol0+N.par2`
+// behind, so orphan recovery volumes accumulated on the volume forever. The
+// existing `deleteRemovesPAR2Companion` cannot see this: it deletes the whole
+// album directory and asserts the directory is gone.
+
+@Suite
+@MainActor
+struct SingleImagePAR2DeletionTests {
+
+    private func input(for spec: TestFixtures.FileSpec, par2Filename: String) -> DeletionService.ImageDeletionInput {
+        DeletionService.ImageDeletionInput(
+            sha256: spec.sha256,
+            filename: spec.name,
+            par2Filename: par2Filename,
+            b2FileId: nil,
+            storageLocations: [],
+            albumPath: spec.albumPath
+        )
+    }
+
+    @Test func singleImageDeletionRemovesPAR2IndexAndVolumeFiles() async throws {
+        let fm = FileManager.default
+        let root = try TestFixtures.materializeVolumeWithPAR2(label: "single-par2")
+        defer { try? fm.removeItem(at: root) }
+
+        let vacation = TestFixtures.files(inAlbum: "Vacation")
+        let target = vacation[0]
+        let albumDir = root.appendingPathComponent(target.albumPath, isDirectory: true)
+
+        // Precondition: PAR2 generation really did produce volume files here.
+        let before = RedundancyService.companionFiles(forIndex: target.par2Name, in: albumDir)
+        #expect(before.contains { $0.lastPathComponent.contains(".vol") })
+
+        let result = await DeletionService().deleteImageFiles(
+            images: [input(for: target, par2Filename: target.par2Name)],
+            mountedVolumes: [("vol-1", root)],
+            b2Credentials: nil,
+            progress: DeletionProgress(),
+            entireAlbum: false
+        )
+
+        // The image itself is the only thing counted; PAR2 companions go with it.
+        #expect(result.volumeFilesRemoved == 1)
+        #expect(!fm.fileExists(atPath: albumDir.appendingPathComponent(target.name).path))
+
+        let leftovers = RedundancyService.companionFiles(forIndex: target.par2Name, in: albumDir)
+        #expect(leftovers.isEmpty)
+
+        // Nothing named `<target>.vol*.par2` may survive anywhere in the album.
+        let remaining = (try? fm.contentsOfDirectory(atPath: albumDir.path)) ?? []
+        #expect(!remaining.contains { $0.hasPrefix("\(target.name).vol") })
+    }
+
+    @Test func singleImageDeletionLeavesSiblingPAR2SetsIntact() async throws {
+        let fm = FileManager.default
+        let root = try TestFixtures.materializeVolumeWithPAR2(label: "single-par2-siblings")
+        defer { try? fm.removeItem(at: root) }
+
+        let vacation = TestFixtures.files(inAlbum: "Vacation")
+        let target = vacation[0]
+        let survivor = vacation[1]
+        let albumDir = root.appendingPathComponent(target.albumPath, isDirectory: true)
+
+        let survivorBefore = Set(
+            RedundancyService.companionFiles(forIndex: survivor.par2Name, in: albumDir)
+                .map(\.lastPathComponent)
+        )
+        #expect(!survivorBefore.isEmpty)
+
+        _ = await DeletionService().deleteImageFiles(
+            images: [input(for: target, par2Filename: target.par2Name)],
+            mountedVolumes: [("vol-1", root)],
+            b2Credentials: nil,
+            progress: DeletionProgress(),
+            entireAlbum: false
+        )
+
+        #expect(fm.fileExists(atPath: albumDir.appendingPathComponent(survivor.name).path))
+        let survivorAfter = Set(
+            RedundancyService.companionFiles(forIndex: survivor.par2Name, in: albumDir)
+                .map(\.lastPathComponent)
+        )
+        #expect(survivorAfter == survivorBefore)
+    }
+
+    @Test func deletionDerivesPAR2NameWhenRecordCarriesNone() async throws {
+        // A re-synced "second copy" record never had par2Filename populated (the
+        // PAR2 stage skips duplicates). Before the fix the empty string produced
+        // no companion lookup at all, orphaning the whole recovery set.
+        let fm = FileManager.default
+        let root = try TestFixtures.materializeVolumeWithPAR2(label: "single-par2-derived")
+        defer { try? fm.removeItem(at: root) }
+
+        let target = TestFixtures.files(inAlbum: "Nature")[0]
+        let albumDir = root.appendingPathComponent(target.albumPath, isDirectory: true)
+
+        _ = await DeletionService().deleteImageFiles(
+            images: [input(for: target, par2Filename: "")],
+            mountedVolumes: [("vol-1", root)],
+            b2Credentials: nil,
+            progress: DeletionProgress(),
+            entireAlbum: false
+        )
+
+        #expect(!fm.fileExists(atPath: albumDir.appendingPathComponent(target.name).path))
+        let leftovers = RedundancyService.companionFiles(forIndex: target.par2Name, in: albumDir)
+        #expect(leftovers.isEmpty)
+    }
+}
+
+// MARK: - Import Progress Bounds (regression: 5233888, 12632f7)
+//
+// 5233888: `filesCataloged` was not reset between albums, so a later, smaller
+// album drove the bar past 100%. 12632f7: a Photos re-sync removal was labelled
+// "Importing from Photos" with an indeterminate bar.
+
+@Suite
+@MainActor
+struct ImportProgressBoundsTests {
+
+    @Test func fractionNeverExceedsOneWhenCatalogedCountLeaksAcrossAlbums() {
+        let progress = PhotosImportProgress()
+        progress.phase = .hashing
+        // Album A finished with 20 cataloged; album B has only 5 files.
+        progress.totalFiles = 5
+        progress.filesCataloged = 20
+
+        // Uncapped this is 0.1 + (20/5)*0.9 = 3.7 — the overshoot users saw.
+        #expect(progress.fraction <= 1.0)
+        #expect(progress.fraction >= 0.0)
+    }
+
+    @Test func fractionStaysInRangeAcrossPhasesAndCounts() {
+        let phases: [ImportPhase] = [.importing, .removing, .hashing, .encrypting,
+                                     .par2, .copying, .uploading, .cataloging, .complete]
+        for phase in phases {
+            for total in [1, 5, 20] {
+                for done in [0, 1, total, total * 4] {
+                    let progress = PhotosImportProgress()
+                    progress.phase = phase
+                    progress.totalFiles = total
+                    progress.currentFile = done
+                    progress.filesCataloged = done
+                    let f = progress.fraction
+                    #expect(f >= 0.0)
+                    #expect(f <= 1.0)
+                }
+            }
+        }
+    }
+
+    @Test func globalFractionStaysInRangeWhenAlbumOvershoots() {
+        let progress = PhotosImportProgress()
+        progress.phase = .hashing
+        progress.globalTotalFiles = 100
+        progress.completedAlbumFiles = 95
+        progress.totalFiles = 5
+        progress.filesCataloged = 40
+
+        #expect(progress.fraction <= 1.0)
+    }
+
+    @Test func removalPhaseIsLabelledAndDeterminate() {
+        // The removal pass must not read as an import, and it must advance a real
+        // bar rather than sitting in the import phase's flat 10% band.
+        #expect(ImportPhase.removing.rawValue == "Removing items")
+        #expect(ImportPhase.removing.rawValue != ImportPhase.importing.rawValue)
+
+        let progress = PhotosImportProgress()
+        progress.phase = .removing
+        progress.totalFiles = 4
+        progress.currentFile = 2
+        #expect(abs(progress.fraction - 0.5) < 0.001)
+        #expect(progress.displayLabel == "Removing items")
+    }
+}
+
+// MARK: - Bookmark Refresh (regression: 25a3a7c)
+//
+// Stale bookmarks threw instead of refreshing, so external volumes became
+// inaccessible after a reboot. `resolveAccessAndRefresh` is the API that fix
+// introduced.
+//
+// Security-scoped bookmarks require the app-sandbox entitlement. The SwiftPM test
+// process has none, so bookmark creation can fail there; these tests skip in that
+// case rather than fail, and run for real under `xcodebuild test`, where the
+// bundle is hosted by the entitled app.
+
+@Suite
+@MainActor
+struct BookmarkResolverTests {
+
+    private func makeScratchDirectory() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumivault-bookmark-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test func resolveRoundTripsAFreshBookmark() throws {
+        let dir = try makeScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        guard let data = try? BookmarkResolver.createBookmark(for: dir) else { return }
+
+        let (url, isStale) = try BookmarkResolver.resolve(data)
+        #expect(url.resolvingSymlinksInPath().path == dir.resolvingSymlinksInPath().path)
+        #expect(isStale == false)
+    }
+
+    @Test func refreshReturnsNoNewBookmarkWhenNotStale() throws {
+        let dir = try makeScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        guard let data = try? BookmarkResolver.createBookmark(for: dir) else { return }
+        guard let (url, refreshed) = try? BookmarkResolver.resolveAccessAndRefresh(data) else { return }
+        defer { url.stopAccessingSecurityScopedResource() }
+
+        // A fresh bookmark is not stale, so there is nothing to write back.
+        #expect(refreshed == nil)
+    }
+
+    @Test func corruptBookmarkDataStillThrows() {
+        // The fix must silently refresh *stale* bookmarks without also swallowing
+        // genuinely unusable ones.
+        let garbage = Data(repeating: 0x7F, count: 64)
+        #expect(throws: Error.self) {
+            _ = try BookmarkResolver.resolve(garbage)
+        }
+    }
+}
