@@ -20,14 +20,11 @@ xcodegen generate
 xcodebuild -project LumiVault.xcodeproj -scheme LumiVault -configuration Debug build
 ```
 
-`LumiVault.xcodeproj` is **generated from `project.yml` and is not committed** — it is
-gitignored, so it can never drift from its source. Run `make xcode` (or `xcodegen
-generate`) once after cloning, and again after adding, removing, or moving files.
-GitHub CI and Xcode Cloud (`ci_scripts/ci_post_clone.sh`) generate it themselves.
-
-`project.yml` is therefore the only thing to edit for project structure — there is
-no regenerate-and-commit step, and adding files (including new test files) needs no
-special handling.
+The `.xcodeproj` is generated from `project.yml` by `xcodegen generate` and **committed
+to the repo** — Xcode Cloud builds from the committed project and has no XcodeGen step,
+so it has to be there. Regenerate and commit it after any structural change
+(added/removed/moved files or `project.yml` edits); CI's **XcodeGen Drift** job
+regenerates and fails the build if the commit is stale.
 
 ## Architecture
 
@@ -83,8 +80,8 @@ exercises the same isolation the shipped app is built with. CI also asserts that
 `-default-isolation MainActor` reaches the compiler — grepping the build log, not
 the build settings, because the setting is silently ignored by this toolchain.
 
-New test files need no project bookkeeping: every environment generates the
-`.xcodeproj` from `project.yml`, whose `Tests` source entry is the whole directory.
+New test files require `xcodegen generate` + committing the regenerated project —
+the drift job fails otherwise. Adding tests to existing files avoids that step.
 
 ## Approach Guidelines
 
@@ -127,5 +124,5 @@ When asked to create a release:
 
 - **catalog.json changes require extra care** — the catalog is synced via iCloud and re-read across app versions, so any schema change must be backwards-compatible (older catalogs must still decode).
 - **Entitlements must match between Debug and Release** — both `.entitlements` files should stay in sync unless there's a specific reason to diverge.
-- **The .xcodeproj is generated, never committed** — edit `project.yml` for structural changes and run `xcodegen generate` locally to pick them up. CI and Xcode Cloud generate their own.
+- **Regenerate and commit .xcodeproj after structural changes** — if you add/remove/move Swift files or change `project.yml`, run `xcodegen generate`, verify the build, and commit the result. Xcode Cloud builds from the committed project; CI's drift job fails if it is stale.
 - **Privacy descriptions in Info.plist** — any new framework requiring user permission (e.g., Contacts, Location) needs a usage description added *before* the code ships.

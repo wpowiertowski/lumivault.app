@@ -133,29 +133,39 @@ invocation for the app target:
 Grep the log, not `-showBuildSettings`: the whole point of `12632f7` is that the
 build *setting* was present while the compiler *flag* was not.
 
-### C2 — Never commit the generated project
+### C2 — XcodeGen drift check
 
-`CLAUDE.md` used to require regenerating the committed `.xcodeproj` after any
-`project.yml` change. Nothing enforced it, so a correct `project.yml` could sit
-next to a stale `project.pbxproj` — exactly how a build-setting fix silently fails
-to ship.
+`CLAUDE.md` requires regenerating the committed `.xcodeproj` after any `project.yml`
+change. Nothing enforced it, so a correct `project.yml` could sit next to a stale
+`project.pbxproj` — exactly how a build-setting fix silently fails to ship.
 
-A drift check was the first answer, but removing the artifact is strictly better:
-`LumiVault.xcodeproj` is now gitignored and generated from `project.yml` by every
-consumer, so it cannot drift by construction.
+The artifact has to stay committed: **Xcode Cloud builds from the committed project
+and has no XcodeGen step**, so removing it breaks the App Store pipeline. (This was
+tried and reverted — see the note below.) The fix is therefore to keep the artifact
+and verify it against its source on every run:
 
-- Each CI job that needs it runs `brew install xcodegen && xcodegen generate`.
-- Xcode Cloud generates it in `ci_scripts/ci_post_clone.sh`, which runs after the
-  clone and before the build. **This file is load-bearing for App Store
-  releases** — without it Xcode Cloud cannot find a project.
-- `make generate` (or `make xcode`) covers local clones.
+```yaml
+  project-drift:
+    name: XcodeGen Drift
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Fail if the committed project drifted
+        run: git diff --exit-code -- LumiVault.xcodeproj
+```
 
-The build job additionally greps the *generated* `project.pbxproj` for
-`-default-isolation MainActor`, so a `project.yml` regression is named directly
-instead of being inferred from a build-log miss.
+Cheap job, no Xcode build. It also greps the committed `project.pbxproj` for
+`-default-isolation MainActor` directly, so the setting that caused #54 stays fenced
+even if the regeneration step has to be skipped for an XcodeGen upgrade.
 
-A side benefit: adding a new test file no longer needs any project bookkeeping,
-because `project.yml` sources the whole `Tests` directory.
+> **Rejected alternative — gitignoring the project.** Generating it in every CI job
+> and in an Xcode Cloud `ci_post_clone.sh` also removes drift by construction, and
+> it was implemented and CI-verified on this branch. It was reverted: it makes the
+> App Store release pipeline depend on a Homebrew install and a post-clone hook that
+> no PR ever exercises, trading a cheap, observable check for an unobservable new
+> failure mode in the one pipeline that must not break.
 
 ### C3 — Add an `xcodebuild test` job
 
