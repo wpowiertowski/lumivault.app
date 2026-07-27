@@ -7,7 +7,7 @@
 
 ## Existing Automated Test Assessment
 
-### Summary: 295 tests across 56 suites
+### Summary: 296 tests across 56 suites
 
 | Rating | Suite | Tests | Assessment |
 | -------- | ------- | ------- | ------------ |
@@ -47,7 +47,7 @@
 | High Value | CatalogMigrationTests | 6 | Legacy catalog + sidecar migration out of the sandbox container, never clobbering an existing catalog, plus library-as-storage-target resolution. |
 | High Value | StallPolicyTests | 6 | iCloud-download watchdog arithmetic: doubling thresholds 1→512s over 10 attempts, slow-message suppression below 5s, retry countdown never negative. |
 | Medium Value | PipelineItemTests | 5 | Converted filename reaches downstream stages; encrypted/converted/original URL precedence, including the conversion+encryption combination. |
-| Medium Value | ImportProgressBoundsTests | 4 | Progress fraction stays within 0…1 across every phase (incl. counts leaking between albums) and the removal phase is labelled and determinate. |
+| Medium Value | ImportProgressBoundsTests | 5 | Progress fraction stays within 0…1 across every phase and on the between-albums exit (incl. counts leaking across albums), and the removal phase is labelled and determinate. |
 | Medium Value | ThumbnailCacheTests | 4 | Cache root is Application Support and not the purgeable `Caches`; sha-sharded layout for both sizes, miss reads nil, removal clears disk. |
 | Medium Value | EnsureFileMirroredTests | 4 | Copy-stage mirroring skips a same-size destination and replaces truncated or empty leftovers. |
 | Medium Value | CatalogPathResolutionTests | 4 | Catalog path override and tilde expansion; the library path is symlink-resolved so no container path reaches the UI. |

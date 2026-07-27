@@ -118,30 +118,34 @@ final class PhotosImportProgress: @unchecked Sendable {
     }
 
     var fraction: Double {
-        guard totalFiles > 0 else {
-            if globalTotalFiles > 0 {
-                return Double(completedAlbumFiles) / Double(globalTotalFiles)
+        let raw: Double
+        if totalFiles > 0 {
+            let albumFraction: Double
+            if phase == .importing {
+                albumFraction = Double(currentFile) / Double(totalFiles) * 0.1
+            } else if phase == .removing {
+                albumFraction = Double(currentFile) / Double(totalFiles)
+            } else if phase == .complete {
+                albumFraction = 1.0
+            } else {
+                albumFraction = 0.1 + Double(filesCataloged) / Double(totalFiles) * 0.9
             }
-            return 0
-        }
-
-        let albumFraction: Double
-        if phase == .importing {
-            albumFraction = Double(currentFile) / Double(totalFiles) * 0.1
-        } else if phase == .removing {
-            albumFraction = Double(currentFile) / Double(totalFiles)
-        } else if phase == .complete {
-            albumFraction = 1.0
+            raw = globalFraction(for: albumFraction)
+        } else if globalTotalFiles > 0 {
+            // Between albums: no per-album total yet, so report the global share
+            // already finished.
+            raw = Double(completedAlbumFiles) / Double(globalTotalFiles)
         } else {
-            albumFraction = 0.1 + Double(filesCataloged) / Double(totalFiles) * 0.9
+            raw = 0
         }
 
-        // Clamp. `filesCataloged` is per-album state that the multi-album path has
-        // to reset between albums; when it leaked across (5233888) a later, smaller
-        // album drove the bar past 100%. Resetting is still correct, but a progress
-        // fraction outside 0...1 is never meaningful, so make the bound structural
-        // rather than dependent on every caller remembering.
-        return min(max(globalFraction(for: albumFraction), 0), 1)
+        // Clamp. `filesCataloged` and `completedAlbumFiles` are counters the
+        // multi-album path resets and accumulates by hand; when `filesCataloged`
+        // leaked across albums (5233888) a later, smaller album drove the bar past
+        // 100%. Resetting is still correct, but a progress fraction outside 0...1 is
+        // never meaningful — so bound it on *every* exit, including the
+        // between-albums one, rather than depending on each caller remembering.
+        return min(max(raw, 0), 1)
     }
 
     /// Maps a per-album fraction (0–1) to a global fraction weighted by file count.

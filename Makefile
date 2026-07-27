@@ -1,7 +1,9 @@
 .PHONY: generate xcode test hooks clean prune-branches
 
-# LumiVault.xcodeproj is generated from project.yml and gitignored — run this
-# after cloning, and after adding/removing/moving files.
+# LumiVault.xcodeproj is generated from project.yml but *committed* — Xcode Cloud
+# builds from the committed project and has no XcodeGen step. Run this after
+# adding/removing/moving files or editing project.yml, then commit the result;
+# CI's XcodeGen Drift job fails if the commit is stale.
 generate:
 	xcodegen generate
 

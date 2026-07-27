@@ -556,13 +556,19 @@ struct B2LargeFileTests {
         #expect(headerName.value?.contains("/") == true)
     }
 
-    @Test func bothUploadRoutesResolveToTheSameB2Path() async throws {
-        // The user-visible invariant: whichever route a file takes, it lands in
-        // one folder. Decoding the header form must reproduce the body form.
+    @Test func b2NameEncodingRoundTripsAndLeavesSeparatorsAndTildeAlone() {
+        // The two tests above establish the user-visible invariant — each route
+        // sends the form B2 expects, so both land in one folder. This one pins the
+        // character set that makes those two agree: whatever the header route
+        // encodes, B2's decode must reproduce exactly what the body route sends.
         let encoded = spacedRemotePath
             .addingPercentEncoding(withAllowedCharacters: B2Service.b2AllowedCharacters)
         let decoded = encoded?.removingPercentEncoding
         #expect(decoded == spacedRemotePath)
+
+        // Path separators stay literal, or the album hierarchy collapses into one
+        // long filename instead of a folder tree.
+        #expect(encoded?.contains("/") == true)
 
         // "~" is B2-safe and must survive un-encoded — disambiguated filenames
         // (see 0034bda) embed it, and encoding it would fork those too.

@@ -8,7 +8,7 @@ CI catch it?*
 Scope: all 50 commits on `main` (`54fb0f3` … `12632f7`). 28 of them fix defects.
 
 > **Status:** phases 0–4 are implemented; phase 5 is partial. The suite went from
-> 228 to 295 tests, green under both `swift test` and `xcodebuild test` on CI. See
+> 228 to 296 tests, green under both `swift test` and `xcodebuild test` on CI. See
 > §7 for what landed and §7.1 for what is deliberately outstanding. The status
 > column in §2 still describes coverage *before* this work — it is the audit that
 > motivated the plan, kept as written.
@@ -160,7 +160,13 @@ and verify it against its source on every run:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
-      - run: brew install xcodegen
+      - name: Install XcodeGen ${{ env.XCODEGEN_VERSION }}   # pinned + checksummed
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip"
+          echo "${XCODEGEN_SHA256}  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
       - run: xcodegen generate
       - name: Fail if the committed project drifted
         run: git diff --exit-code -- LumiVault.xcodeproj
@@ -169,6 +175,16 @@ and verify it against its source on every run:
 Cheap job, no Xcode build. It also greps the committed `project.pbxproj` for
 `-default-isolation MainActor` directly, so the setting that caused #54 stays fenced
 even if the regeneration step has to be skipped for an XcodeGen upgrade.
+
+The generator is **pinned to an exact version and checksum** rather than installed
+with `brew install xcodegen`. This job compares generated output byte-for-byte, so on
+an unpinned install any XcodeGen release that changes that output reddens every
+unrelated PR — and the failure message tells the author to commit a regenerated
+project, which would then break everyone still on the old version. Pinning makes a
+drift failure mean what it says; the checksum makes the pin tamper-evident, which
+matters because this tool generates the project the App Store build is compiled from.
+Bump `XCODEGEN_VERSION` and `XCODEGEN_SHA256` in the same commit as the project
+regenerated with that version.
 
 > **Rejected alternative — gitignoring the project.** Generating it in every CI job
 > and in an Xcode Cloud `ci_post_clone.sh` also removes drift by construction, and
@@ -279,6 +295,10 @@ asserts the directory is gone), and `deleteSingleImagePreservesOtherFiles` passe
   of 5 starts → `fraction <= 1.0` at every step. Today no test asserts the clamp.
 - Property-style sweep: for a grid of `(totalFiles, filesCataloged, phase)` the
   fraction stays within `0...1` and is monotonic within an album.
+- The between-albums exit (`totalFiles == 0`, `globalTotalFiles > 0`) is a *second*
+  return path reading a second hand-maintained counter, `completedAlbumFiles`. It
+  needs the same bound, and clamping must not flatten the ordinary case — a genuine
+  mid-run position still has to report the share already finished.
 - Removal phase reports the "Removing items" label with a determinate fraction.
 
 **T5 — Pipeline cancellation semantics (bug #5).** *Extend* `AsyncPrimitivesTests`.

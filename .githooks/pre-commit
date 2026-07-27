@@ -9,6 +9,11 @@
 #     git config core.hooksPath .githooks
 #
 # or `make hooks`.
+#
+# Caveat: this runs `swift test` against the working tree, not the staged
+# content, so a partial `git add` is validated against code that is not being
+# committed. It is also SwiftPM-only — the SwiftPM/Xcode isolation divergence
+# described in CLAUDE.md is caught by CI's "Unit Tests (Xcode)" job, not here.
 
 set -e
 

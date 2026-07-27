@@ -24,6 +24,11 @@ concurrency:
 # runner, see https://github.com/actions/runner-images/blob/main/images/macos/macos-26-Readme.md
 env:
   XCODE_VERSION: "26.4.1"
+  # Pinned so the XcodeGen Drift job compares against a fixed generator — see the
+  # comment on that job. Keep in lockstep with the version used locally
+  # (`xcodegen --version`) and with the committed LumiVault.xcodeproj.
+  XCODEGEN_VERSION: "2.46.0"
+  XCODEGEN_SHA256: "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
 
 permissions:
   contents: read
@@ -186,6 +191,17 @@ jobs:
       - name: Select Xcode ${{ env.XCODE_VERSION }}
         run: sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
 
+      # This job exists to match the toolchain Xcode Cloud ships with, so an
+      # unnoticed toolchain swap here defeats its entire purpose.
+      - name: Verify Xcode version
+        run: |
+          actual="$(xcodebuild -version | head -1 | awk '{print $2}')"
+          echo "xcodebuild reports: $actual (pinned: $XCODE_VERSION)"
+          if [ "$actual" != "$XCODE_VERSION" ]; then
+            echo "::error::Expected Xcode $XCODE_VERSION, got $actual"
+            exit 1
+          fi
+
       - name: Archive (Release)
         run: |
           xcodebuild archive \
@@ -222,8 +238,32 @@ jobs:
             exit 1
           fi
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      # Pinned rather than `brew install xcodegen`, because this job compares
+      # generated output byte-for-byte. On an unpinned install, any XcodeGen
+      # release that changes that output turns every unrelated PR red — and the
+      # failure tells the author to commit a regenerated project, which would then
+      # break everyone still on the old version. With the version fixed, a drift
+      # failure means what it says. The checksum makes the pin tamper-evident:
+      # this tool generates the project the App Store build is compiled from.
+      #
+      # Bump XCODEGEN_VERSION and XCODEGEN_SHA256 together, in the same commit as
+      # the project regenerated with that version.
+      - name: Install XcodeGen ${{ env.XCODEGEN_VERSION }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip"
+          echo "${XCODEGEN_SHA256}  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
+
+      - name: Verify XcodeGen version
+        run: |
+          actual="$(xcodegen --version | awk '{print $NF}')"
+          echo "xcodegen reports: $actual (pinned: $XCODEGEN_VERSION)"
+          if [ "$actual" != "$XCODEGEN_VERSION" ]; then
+            echo "::error::Expected XcodeGen $XCODEGEN_VERSION, got $actual"
+            exit 1
+          fi
 
       - name: Regenerate project from project.yml
         run: xcodegen generate
@@ -232,7 +272,7 @@ jobs:
         run: |
           if ! git diff --exit-code -- LumiVault.xcodeproj; then
             echo "::error::LumiVault.xcodeproj is out of date with project.yml."
-            echo "Run 'xcodegen generate' and commit the regenerated project."
+            echo "Run 'xcodegen generate' (XcodeGen ${XCODEGEN_VERSION}) and commit the result."
             exit 1
           fi
           echo "OK: committed project matches project.yml."

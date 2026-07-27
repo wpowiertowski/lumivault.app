@@ -2824,6 +2824,29 @@ struct ImportProgressBoundsTests {
         #expect(progress.fraction <= 1.0)
     }
 
+    @Test func betweenAlbumsFractionIsClampedAndOtherwiseReportsTheGlobalShare() {
+        // Between albums `totalFiles` is 0, so `fraction` takes the global-only
+        // exit. That branch reads `completedAlbumFiles` — the other counter the
+        // multi-album path accumulates by hand — so it needs the same bound as the
+        // per-album path, not an unclamped division.
+        let overshot = PhotosImportProgress()
+        overshot.globalTotalFiles = 100
+        overshot.completedAlbumFiles = 140
+
+        #expect(overshot.fraction <= 1.0)
+        #expect(overshot.fraction >= 0.0)
+
+        // Clamping must not flatten the ordinary case: a real between-albums
+        // position still reports the share already finished.
+        let midway = PhotosImportProgress()
+        midway.globalTotalFiles = 100
+        midway.completedAlbumFiles = 40
+        #expect(abs(midway.fraction - 0.4) < 0.001)
+
+        // No totals at all is still a determinate zero, not NaN.
+        #expect(PhotosImportProgress().fraction == 0)
+    }
+
     @Test func removalPhaseIsLabelledAndDeterminate() {
         // The removal pass must not read as an import, and it must advance a real
         // bar rather than sitting in the import phase's flat 10% band.

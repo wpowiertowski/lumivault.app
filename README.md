@@ -124,7 +124,7 @@ LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool
 
 ## Testing
 
-295 unit tests across 56 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
+296 unit tests across 56 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
 
 ```bash
 swift test                                    # Run all unit tests
@@ -185,7 +185,7 @@ xcodebuild test -project LumiVault.xcodeproj -scheme LumiVault -destination 'pla
 | VideoThumbnailTests | 2 | Poster frame + duration/dimension probe from a generated fixture; non-video input throws |
 | StallPolicyTests | 6 | iCloud download watchdog: doubling thresholds 1→512s, slow-message suppression, retry countdown |
 | PhotosImportProgressTests | 6 | Pipelined import progress: empty, mid-phase, complete, multi-album, dropped-files counter |
-| ImportProgressBoundsTests | 4 | Progress fraction stays in 0…1 across phases, incl. counts leaking between albums; removal phase labelling |
+| ImportProgressBoundsTests | 5 | Progress fraction stays in 0…1 across phases and between albums, incl. counts leaking across them; removal phase labelling |
 | PhotosLibraryMonitorDiffTests | 9 | Album diff: additions, removals, mixed delta, collapsed duplicates, legacy scalar ids |
 | ImportSettingsTests | 1 | Default near-duplicate threshold value matches `Constants.Dedup` |
 | VideoImportSettingsTests | 4 | `includeVideos` defaults, drop-filter accepts movies/images only, duration labels |
