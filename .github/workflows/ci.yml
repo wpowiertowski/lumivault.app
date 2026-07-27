@@ -64,10 +64,22 @@ jobs:
             exit 1
           fi
 
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          # Cheap pre-build check on the generated project, so a project.yml
+          # regression is named directly rather than inferred from the build log.
+          if ! grep -q -- '-default-isolation MainActor' LumiVault.xcodeproj/project.pbxproj; then
+            echo "::error::project.yml no longer passes -default-isolation MainActor to the app target."
+            exit 1
+          fi
+
       - name: Build macOS target
         run: |
           set -o pipefail
           xcodebuild \
+            -project LumiVault.xcodeproj \
             -scheme LumiVault \
             -destination "generic/platform=macOS" \
             -configuration Debug \
@@ -151,6 +163,11 @@ jobs:
             exit 1
           fi
 
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
       - name: Run unit tests
         run: |
           xcodebuild test \
@@ -185,6 +202,11 @@ jobs:
       - name: Select Xcode ${{ env.XCODE_VERSION }}
         run: sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
 
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
       - name: Archive (Release)
         run: |
           xcodebuild archive \
@@ -196,39 +218,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             COMPILER_INDEX_STORE_ENABLE=NO
 
-  # CLAUDE.md requires regenerating the committed .xcodeproj after any structural
-  # change or project.yml edit, but nothing enforced it — so a corrected
-  # project.yml could sit next to a stale project.pbxproj and the fix would never
-  # reach the build. That is precisely how a build-setting fix silently fails to
-  # ship (see the -default-isolation history in #54).
-  project-drift:
-    name: XcodeGen Drift
-    runs-on: macos-26
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      # Toolchain-independent guard: even if the regeneration step below has to be
-      # skipped for an XcodeGen upgrade, the setting that caused #54 stays fenced.
-      - name: Assert committed project carries the isolation flag
-        run: |
-          if ! grep -q -- '-default-isolation MainActor' LumiVault.xcodeproj/project.pbxproj; then
-            echo "::error::Committed project.pbxproj is missing -default-isolation MainActor."
-            echo "Run 'xcodegen generate' and commit the result."
-            exit 1
-          fi
-
-      - name: Install XcodeGen
-        run: brew install xcodegen
-
-      - name: Regenerate project
-        run: xcodegen generate
-
-      - name: Fail if the committed project is stale
-        run: |
-          if ! git diff --exit-code -- LumiVault.xcodeproj/project.pbxproj; then
-            echo "::error::LumiVault.xcodeproj is out of date with project.yml."
-            echo "Run 'xcodegen generate' and commit the regenerated project."
-            exit 1
-          fi
+  # The XcodeGen drift job that used to live here is gone: the .xcodeproj is no
+  # longer committed, so it cannot drift from project.yml by construction. Every
+  # job above generates it from source instead, and the build job asserts the
+  # generated project still carries `-default-isolation MainActor`.

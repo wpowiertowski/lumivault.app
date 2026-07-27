@@ -31,7 +31,11 @@ playground.xcworkspace
 
 .build/
 .swiftpm/
-# LumiVault.xcodeproj/
+
+# Generated from project.yml by `xcodegen generate` — never committed, so it can
+# never drift from its source. Run `make xcode` (or `xcodegen generate`) after
+# cloning; CI and Xcode Cloud generate it themselves.
+LumiVault.xcodeproj/
 
 # CocoaPods
 #

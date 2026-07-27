@@ -145,6 +145,9 @@ Key identifier groups:
 
 ### Running UI Tests
 
+`LumiVault.xcodeproj` is generated from `project.yml` and gitignored — run
+`make generate` (or `xcodegen generate`) before any `xcodebuild` command below.
+
 ```bash
 # Build and run all UI tests
 xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultUITests -destination 'platform=macOS'
@@ -160,7 +163,7 @@ Xcode 26 introduces **XCUIAutomation recording** (WWDC25 Session 344) which auto
 
 **How to record a UI test:**
 
-1. Open the project in Xcode: `open LumiVault.xcodeproj`
+1. Generate and open the project in Xcode: `make xcode`
 2. Open `UITests/LumiVaultUITests.swift`
 3. Place your cursor inside a test method body (or create a new empty `func testSomething()`)
 4. Click the **red record button** at the bottom of the editor (or **Product > Record UI Test**)

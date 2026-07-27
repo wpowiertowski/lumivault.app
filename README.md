@@ -130,7 +130,8 @@ LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool
 swift test                                    # Run all unit tests
 swift test --filter CatalogTests              # Run specific suite
 
-# UI tests (local only — launches the app)
+# UI tests (local only — launches the app).
+# LumiVault.xcodeproj is generated and gitignored; run `make generate` first.
 xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultUITests -destination 'platform=macOS'
 ```
 

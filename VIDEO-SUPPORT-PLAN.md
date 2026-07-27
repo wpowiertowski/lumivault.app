@@ -239,7 +239,7 @@ Audit-and-test (expected no-op, but each gets a test or explicit check):
 - Fixture: one tiny (< 1 s, ~100 KB) H.264 `.mov` under `Tests/Fixtures`, generated
   once with AVFoundation and committed (deterministic bytes → stable SHA-256 anchor,
   like the image fixtures).
-- `xcodegen generate` + commit the regenerated `.xcodeproj` after any file additions.
+- `xcodegen generate` after any file additions (the `.xcodeproj` is generated, not committed).
 - No `Info.plist` / entitlement changes: Photos read access and network client are
   already declared; AVFoundation playback of local files needs no new usage strings.
 

@@ -132,27 +132,29 @@ invocation for the app target:
 Grep the log, not `-showBuildSettings`: the whole point of `12632f7` is that the
 build *setting* was present while the compiler *flag* was not.
 
-### C2 — XcodeGen drift check
+### C2 — Never commit the generated project
 
-`CLAUDE.md` requires regenerating the committed `.xcodeproj` after any `project.yml`
-change. Nothing enforces it, so a correct `project.yml` can sit next to a stale
-`project.pbxproj` — exactly how a build-setting fix silently fails to ship.
+`CLAUDE.md` used to require regenerating the committed `.xcodeproj` after any
+`project.yml` change. Nothing enforced it, so a correct `project.yml` could sit
+next to a stale `project.pbxproj` — exactly how a build-setting fix silently fails
+to ship.
 
-```yaml
-  project-drift:
-    name: XcodeGen Drift
-    runs-on: macos-26
-    steps:
-      - uses: actions/checkout@v5
-      - run: brew install xcodegen
-      - run: xcodegen generate
-      - name: Fail if the committed project is stale
-        run: git diff --exit-code -- LumiVault.xcodeproj/project.pbxproj
-```
+A drift check was the first answer, but removing the artifact is strictly better:
+`LumiVault.xcodeproj` is now gitignored and generated from `project.yml` by every
+consumer, so it cannot drift by construction.
 
-Cheap job, no Xcode build. If `xcodegen` output proves unstable across versions,
-pin it (`brew install xcodegen@<v>`) and fall back to asserting the app target's
-`OTHER_SWIFT_FLAGS` line is present in the committed `pbxproj`.
+- Each CI job that needs it runs `brew install xcodegen && xcodegen generate`.
+- Xcode Cloud generates it in `ci_scripts/ci_post_clone.sh`, which runs after the
+  clone and before the build. **This file is load-bearing for App Store
+  releases** — without it Xcode Cloud cannot find a project.
+- `make generate` (or `make xcode`) covers local clones.
+
+The build job additionally greps the *generated* `project.pbxproj` for
+`-default-isolation MainActor`, so a `project.yml` regression is named directly
+instead of being inferred from a build-log miss.
+
+A side benefit: adding a new test file no longer needs any project bookkeeping,
+because `project.yml` sources the whole `Tests` directory.
 
 ### C3 — Add an `xcodebuild test` job
 

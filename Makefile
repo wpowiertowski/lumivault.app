@@ -1,11 +1,15 @@
-.PHONY: xcode test hooks clean prune-branches
+.PHONY: generate xcode test hooks clean prune-branches
+
+# LumiVault.xcodeproj is generated from project.yml and gitignored — run this
+# after cloning, and after adding/removing/moving files.
+generate:
+	xcodegen generate
 
 hooks:
 	git config core.hooksPath .githooks
 	@echo "pre-commit hook enabled (runs swift test)."
 
-xcode:
-	xcodegen generate
+xcode: generate
 	open LumiVault.xcodeproj
 
 test:
