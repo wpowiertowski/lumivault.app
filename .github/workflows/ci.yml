@@ -51,17 +51,47 @@ jobs:
       - name: Select Xcode ${{ env.XCODE_VERSION }}
         run: sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
 
-      - name: Show Xcode version
-        run: xcodebuild -version
+      # `xcode-select -s` succeeding is not proof the pinned version is active —
+      # a runner-image change can leave us silently on a different toolchain,
+      # which is how the Xcode Cloud data-race errors in #25 and #43 reached
+      # main while local Xcode and GH CI both stayed green.
+      - name: Verify Xcode version
+        run: |
+          actual="$(xcodebuild -version | head -1 | awk '{print $2}')"
+          echo "xcodebuild reports: $actual (pinned: $XCODE_VERSION)"
+          if [ "$actual" != "$XCODE_VERSION" ]; then
+            echo "::error::Expected Xcode $XCODE_VERSION, got $actual"
+            exit 1
+          fi
 
       - name: Build macOS target
         run: |
+          set -o pipefail
           xcodebuild \
             -scheme LumiVault \
             -destination "generic/platform=macOS" \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build | tee build.log
+
+      # Guards the root cause of #54: this toolchain silently ignores the
+      # SWIFT_DEFAULT_ISOLATION build setting — it never reaches the compiler as
+      # `-default-isolation` — so the app built with a *nonisolated* default and
+      # ran SwiftData mutations off the main actor (EXC_BAD_ACCESS in @Query).
+      # SwiftPM applies `.defaultIsolation(MainActor)` independently, so
+      # `swift test` stayed green and hid the divergence.
+      #
+      # Grep the build log, NOT `-showBuildSettings`: the whole point is that the
+      # setting was present while the compiler flag was absent.
+      - name: Assert MainActor default isolation reached the compiler
+        run: |
+          if ! grep -q -- '-default-isolation MainActor' build.log; then
+            echo "::error::The app target compiled WITHOUT -default-isolation MainActor."
+            echo "SWIFT_DEFAULT_ISOLATION alone is silently ignored by this toolchain."
+            echo "project.yml must pass it via OTHER_SWIFT_FLAGS for the app target."
+            exit 1
+          fi
+          echo "OK: -default-isolation MainActor present in the compile invocation."
 
   test:
     name: Unit Tests
@@ -85,8 +115,51 @@ jobs:
       - name: Select Xcode ${{ env.XCODE_VERSION }}
         run: sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
 
-      - name: Show Xcode version
-        run: xcodebuild -version
+      - name: Verify Xcode version
+        run: |
+          actual="$(xcodebuild -version | head -1 | awk '{print $2}')"
+          echo "xcodebuild reports: $actual (pinned: $XCODE_VERSION)"
+          if [ "$actual" != "$XCODE_VERSION" ]; then
+            echo "::error::Expected Xcode $XCODE_VERSION, got $actual"
+            exit 1
+          fi
 
-      - name: Run tests
+      - name: Run tests (SwiftPM)
         run: swift test
+
+  # CLAUDE.md requires regenerating the committed .xcodeproj after any structural
+  # change or project.yml edit, but nothing enforced it — so a corrected
+  # project.yml could sit next to a stale project.pbxproj and the fix would never
+  # reach the build. That is precisely how a build-setting fix silently fails to
+  # ship (see the -default-isolation history in #54).
+  project-drift:
+    name: XcodeGen Drift
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # Toolchain-independent guard: even if the regeneration step below has to be
+      # skipped for an XcodeGen upgrade, the setting that caused #54 stays fenced.
+      - name: Assert committed project carries the isolation flag
+        run: |
+          if ! grep -q -- '-default-isolation MainActor' LumiVault.xcodeproj/project.pbxproj; then
+            echo "::error::Committed project.pbxproj is missing -default-isolation MainActor."
+            echo "Run 'xcodegen generate' and commit the result."
+            exit 1
+          fi
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Regenerate project
+        run: xcodegen generate
+
+      - name: Fail if the committed project is stale
+        run: |
+          if ! git diff --exit-code -- LumiVault.xcodeproj/project.pbxproj; then
+            echo "::error::LumiVault.xcodeproj is out of date with project.yml."
+            echo "Run 'xcodegen generate' and commit the regenerated project."
+            exit 1
+          fi
