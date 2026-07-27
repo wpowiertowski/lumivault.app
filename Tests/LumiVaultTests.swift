@@ -3098,34 +3098,37 @@ struct HydrationTests {
         #expect(shas.contains("cc"))
     }
 
-    @Test func hydrationScalesLinearlyWithCatalogSize() throws {
-        // 6dd8ad4 replaced a per-image FetchDescriptor with two batch loads. Under
-        // the old shape, quadrupling the catalog quadrupled the *per-image* scan
-        // too — ~16x the work rather than ~4x.
+    @Test func hydratesALargeCatalogCorrectlyAndIdempotently() throws {
+        // 6dd8ad4 replaced a per-image FetchDescriptor with two batch loads,
+        // because the old shape evaluated a #Predicate against every registered
+        // record for each lookup and hung the main thread for seconds per sync.
         //
-        // Asserted as a ratio with a wide margin rather than an absolute time, so
-        // a slow shared runner cannot fail it: 8x cleanly separates linear (~4x)
-        // from quadratic (~16x). Skipped when the small run is too fast to measure
-        // (below the timer's noise floor).
-        func hydrationDuration(imageCount: Int) throws -> TimeInterval {
-            // Hold the container: `mainContext` alone would let it deallocate.
-            let container = try makeContainer()
-            let context = container.mainContext
-            let images = (0..<imageCount).map { image(String(format: "%08x", $0), "img\($0).heic") }
-            let catalog = makeCatalog(albums: ["Bulk": images])
-            let start = Date()
-            SyncCoordinator.hydrate(catalog: catalog, into: context)
-            let elapsed = Date().timeIntervalSince(start)
-            let hydrated = try context.fetchCount(FetchDescriptor<ImageRecord>())
-            #expect(hydrated == imageCount)
-            return elapsed
-        }
+        // This test does NOT assert the complexity. A ratio assertion was tried and
+        // removed: hydrating 4x the catalog took 8.5x the time on CI even with the
+        // batch-load fix in place (exponent ~1.5), because SwiftData's per-insert
+        // cost grows with store size. A ratio test therefore cannot separate the
+        // fixed shape from the quadratic one, and any threshold that passes today
+        // either flakes or would wave a real regression through.
+        //
+        // What is left is a deterministic correctness check at a size where the old
+        // per-image `FetchDescriptor` shape would be pathological — a genuine
+        // reintroduction shows up as a job timeout rather than a clean assertion.
+        // See REGRESSION-TEST-PLAN.md §7.1: bug #30's complexity is not fenced.
+        let container = try makeContainer()
+        let context = container.mainContext
+        let images = (0..<2000).map { image(String(format: "%08x", $0), "img\($0).heic") }
+        let catalog = makeCatalog(albums: ["Bulk": images])
 
-        let small = try hydrationDuration(imageCount: 500)
-        let large = try hydrationDuration(imageCount: 2000)
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        let hydrated = try context.fetchCount(FetchDescriptor<ImageRecord>())
+        #expect(hydrated == 2000)
 
-        guard small > 0.02 else { return }
-        #expect(large < small * 8)
+        // Re-hydrating a large catalog must stay an upsert, not a duplicate pass.
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        let afterSecondPass = try context.fetchCount(FetchDescriptor<ImageRecord>())
+        let albumCountAtScale = try context.fetchCount(FetchDescriptor<AlbumRecord>())
+        #expect(afterSecondPass == 2000)
+        #expect(albumCountAtScale == 1)
     }
 }
 

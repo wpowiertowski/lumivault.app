@@ -8,9 +8,10 @@ CI catch it?*
 Scope: all 50 commits on `main` (`54fb0f3` … `12632f7`). 28 of them fix defects.
 
 > **Status:** phases 0–4 are implemented; phase 5 is partial. The suite went from
-> 228 to 295 tests. See §7 for what landed and §7.1 for what is deliberately
-> outstanding. The status column in §2 still describes coverage *before* this
-> work — it is the audit that motivated the plan, kept as written.
+> 228 to 295 tests, green under both `swift test` and `xcodebuild test` on CI. See
+> §7 for what landed and §7.1 for what is deliberately outstanding. The status
+> column in §2 still describes coverage *before* this work — it is the audit that
+> motivated the plan, kept as written.
 
 ---
 
@@ -320,10 +321,15 @@ instance methods as thin call-throughs. Nothing else changes; an in-memory
 - A record newer than a propagated tombstone is **not** deleted (the in-flight-import
   guard from `1da8a89`).
 
-**T16 — Hydration cost** (same suite, guards bug #30's O(N²) regression):
-- Hydrate 2,000 images and assert the number of `FetchDescriptor` executions is
-  O(1) per hydration, not O(N). Assert the *call count* through a counting wrapper,
-  not wall-clock time — a timing assertion would be flaky on shared runners.
+**T16 — Hydration cost** (bug #30's O(N²) regression): **attempted, not achieved.**
+A ratio assertion (4x the catalog must not cost ~16x) was written and removed after
+CI measured 4x data → **8.5x** time *with* the batch-load fix in place — an exponent
+of roughly 1.5, because SwiftData's per-insert cost itself grows with store size.
+No threshold separates the fixed shape from the quadratic one, so any passing bound
+would either flake or wave a real regression through. Counting `FetchDescriptor`
+executions directly would be the right guard, but `ModelContext` offers no seam to
+intercept. What remains is a deterministic correctness+idempotency check at 2,000
+images, where a reintroduced per-image fetch surfaces as a job timeout.
 
 ### S2 — Stall/retry policy extraction (bugs #11, #13, #15, #32)
 
@@ -460,6 +466,10 @@ Still uncovered, and what T-DI would assert once injection exists:
 `syncService`, `backupService`, UserDefaults, and resolved volumes. Testing it
 means injecting into `SyncCoordinator` the way `SyncService` already allows via
 its test-only init. Not attempted.
+
+**T16 — hydration complexity (#30).** See §5: the ratio assertion was removed
+rather than loosened, so the complexity of `hydrate` is unguarded. Correctness at
+scale is covered; the shape is not.
 
 **The three view-body bugs (#9, #17, #20)** remain out of scope for the reasons
 in §6.
