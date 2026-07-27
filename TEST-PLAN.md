@@ -1,5 +1,10 @@
 # LumiVault — QA Test Plan
 
+> See also [REGRESSION-TEST-PLAN.md](REGRESSION-TEST-PLAN.md) — a bug-by-bug audit
+> of every defect fixed on `main`, with the CI guards and tests needed so each one
+> stays fixed. This document describes coverage as it stands; that one describes
+> the gaps and the plan to close them.
+
 ## Existing Automated Test Assessment
 
 ### Summary: 154 tests across 28 suites
