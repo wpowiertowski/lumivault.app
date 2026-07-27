@@ -1,0 +1,31 @@
+#!/bin/sh
+#
+# Runs the unit suite before every commit.
+#
+# Several commit messages in this repo reference "the pre-commit hook runs the
+# suite", but no hook was committed — it lived only in individual clones, so the
+# convention was unenforceable and CI was the only shared gate. Enable it with:
+#
+#     git config core.hooksPath .githooks
+#
+# or `make hooks`.
+
+set -e
+
+# Mirror ci.yml's paths-ignore: a docs-only commit does not need the suite.
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+if [ -z "$staged" ]; then
+    exit 0
+fi
+if ! printf '%s\n' "$staged" | grep -qv '\.md$'; then
+    echo "pre-commit: markdown-only change, skipping tests."
+    exit 0
+fi
+
+if ! command -v swift >/dev/null 2>&1; then
+    echo "pre-commit: no swift toolchain found, skipping tests." >&2
+    exit 0
+fi
+
+echo "pre-commit: running swift test..."
+swift test

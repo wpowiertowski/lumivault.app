@@ -1,4 +1,8 @@
-.PHONY: xcode test clean prune-branches
+.PHONY: xcode test hooks clean prune-branches
+
+hooks:
+	git config core.hooksPath .githooks
+	@echo "pre-commit hook enabled (runs swift test)."
 
 xcode:
 	xcodegen generate

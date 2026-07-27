@@ -127,6 +127,75 @@ jobs:
       - name: Run tests (SwiftPM)
         run: swift test
 
+  # `swift test` and `xcodebuild test` compile the app target under different
+  # isolation defaults (SwiftPM applies Package.swift's `.defaultIsolation`;
+  # Xcode needs the explicit OTHER_SWIFT_FLAGS in project.yml). Running only the
+  # former is what let #54 reach users. This job exercises the suite through the
+  # same toolchain that builds the shipped app.
+  xcode-test:
+    name: Unit Tests (Xcode)
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
+        run: sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
+
+      - name: Verify Xcode version
+        run: |
+          actual="$(xcodebuild -version | head -1 | awk '{print $2}')"
+          if [ "$actual" != "$XCODE_VERSION" ]; then
+            echo "::error::Expected Xcode $XCODE_VERSION, got $actual"
+            exit 1
+          fi
+
+      - name: Run unit tests
+        run: |
+          xcodebuild test \
+            -project LumiVault.xcodeproj \
+            -scheme LumiVault \
+            -destination 'platform=macOS' \
+            -only-testing:LumiVaultTests \
+            CODE_SIGNING_ALLOWED=NO
+
+      # UI tests need a real app launch and are unreliable headless (see
+      # TEST-PLAN.md), so compile them without running: that still catches the
+      # Sendable/toolchain drift that broke #25 and #43, which only ever showed
+      # up as a compile error.
+      - name: Compile UI test target (no execution)
+        run: |
+          xcodebuild build-for-testing \
+            -project LumiVault.xcodeproj \
+            -scheme LumiVault \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO
+
+  # Debug-only builds let `-O`-specific diagnostics reach Xcode Cloud first.
+  # The Makefile already archives Release locally; mirror it here.
+  release-archive:
+    name: Release Archive
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
+        run: sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
+
+      - name: Archive (Release)
+        run: |
+          xcodebuild archive \
+            -project LumiVault.xcodeproj \
+            -scheme LumiVault \
+            -destination 'generic/platform=macOS' \
+            -archivePath "$RUNNER_TEMP/LumiVault-ci.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO
+
   # CLAUDE.md requires regenerating the committed .xcodeproj after any structural
   # change or project.yml edit, but nothing enforced it — so a corrected
   # project.yml could sit next to a stale project.pbxproj and the fix would never

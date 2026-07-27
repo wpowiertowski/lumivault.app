@@ -66,6 +66,19 @@ swift test --filter LumiVaultTests            # Run specific suite
 xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultTests -destination 'platform=macOS'
 ```
 
+Run `make hooks` once per clone to enable the committed pre-commit hook
+(`.githooks/pre-commit`), which runs `swift test` before every non-markdown commit.
+
+CI runs both `swift test` and `xcodebuild test`. They are not redundant: SwiftPM
+applies `Package.swift`'s `.defaultIsolation(MainActor)` while Xcode needs the
+explicit `OTHER_SWIFT_FLAGS` in `project.yml`, so only the xcodebuild run
+exercises the same isolation the shipped app is built with. CI also asserts that
+`-default-isolation MainActor` actually appears in the compile invocation and
+that the committed `.xcodeproj` matches `project.yml`.
+
+New test files require `xcodegen generate` — the drift job fails otherwise.
+Adding tests to existing files avoids that step.
+
 ## Approach Guidelines
 
 ### Act Directly
