@@ -452,39 +452,6 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             par2Task, copyTask, uploadTask
         ].compactMap { $0 }
 
-        // MARK: - Cancellation sentinel
-        // Monitors the parent Task and tears down the pipeline when cancelled.
-        let sentinelTask = Task { @MainActor in
-            // withTaskCancellationHandler fires immediately when the parent
-            // Task is already cancelled, and also when it becomes cancelled later.
-            await withTaskCancellationHandler {
-                // Keep alive until cancelled — the handler does the real work.
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .milliseconds(200))
-                }
-            } onCancel: {
-                // This runs synchronously on the cancelling thread.
-                // Schedule the async teardown on MainActor.
-                Task { @MainActor in
-                    cancelFlag.withLock { $0 = true }
-
-                    // Cancel all pipeline tasks so their loops exit. Detached
-                    // tasks don't inherit cancellation, so this explicit cancel
-                    // is what flips Task.isCancelled inside each stage body.
-                    for task in pipelineTasks { task.cancel() }
-
-                    // Cancel all channels: unblocks any producers stuck on
-                    // backpressure and terminates all consumer for-await loops
-                    for ch in allChannels {
-                        await ch.cancel()
-                    }
-
-                    // Unblock any stage suspended waiting on the memory budget.
-                    await memoryBudget.cancelAll()
-                }
-            }
-        }
-
         // MARK: - Catalog (final sink) — awaited to completion
         // Stays on MainActor: dense SwiftData mutation per item.
         let catalogSinkTask = Task { @MainActor [ctx, settings] in
@@ -595,9 +562,6 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 }
             }
 
-            // Tear down sentinel
-            sentinelTask.cancel()
-
             if Task.isCancelled {
                 if catalogItemCount == 0 && isNewAlbum {
                     modelContext.delete(albumRecord)
@@ -620,7 +584,36 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             return catalogItemCount
         }
 
-        let catalogItemCount = await catalogSinkTask.value
+        // MARK: - Cancellation teardown
+        //
+        // This handler must live in `runImportPipeline`'s own async context, not in a
+        // `Task {}`. An unstructured task does not inherit cancellation from the task
+        // that created it, so a sentinel spawned with `Task {}` only ever observes its
+        // *own* cancellation — which the import path never triggers. The import sheet
+        // cancels by calling `importTask?.cancel()`, and with the sentinel form nothing
+        // downstream saw it: every stage ran to completion and the Cancel button was
+        // inert. `withTaskCancellationHandler` here is structured, so it fires when the
+        // caller's task is cancelled (and immediately if it already was).
+        let catalogItemCount = await withTaskCancellationHandler {
+            await catalogSinkTask.value
+        } onCancel: {
+            // Runs synchronously on the cancelling thread.
+            cancelFlag.withLock { $0 = true }
+
+            // Detached stages don't inherit cancellation either, so cancelling each
+            // one explicitly is what flips `Task.isCancelled` inside its body. The
+            // catalog sink is unstructured too and needs the same treatment, or it
+            // keeps draining the backlog after everything upstream has stopped.
+            for task in pipelineTasks { task.cancel() }
+            catalogSinkTask.cancel()
+
+            // Unblock anyone parked on backpressure or the memory budget, so the
+            // stage loops reach their cancellation checks instead of deadlocking.
+            Task {
+                for ch in allChannels { await ch.cancel() }
+                await memoryBudget.cancelAll()
+            }
+        }
 
         if Task.isCancelled && catalogItemCount == 0 {
             throw CancellationError()
