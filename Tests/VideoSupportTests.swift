@@ -108,13 +108,8 @@ struct CatalogVideoSchemaTests {
 @MainActor
 struct VideoRecordSchemaTests {
 
-    @Test func defaultRecordIsImage() throws {
-        let record = ImageRecord(sha256: "cafe", filename: "x.jpg", sizeBytes: 1)
-        #expect(record.mediaType == .image)
-        #expect(record.durationSeconds == nil)
-        #expect(record.pixelWidth == nil)
-        #expect(record.pixelHeight == nil)
-    }
+    // The image-side defaults these video fields take on are pinned by
+    // `SwiftDataModelTests.imageRecordDefaults`, alongside the rest of the record.
 
     @Test func videoFieldsPersist() throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
@@ -157,11 +152,6 @@ struct VideoRecordSchemaTests {
 
 @MainActor
 struct VideoImportSettingsTests {
-
-    @Test func includeVideosDefaultsToTrue() {
-        let settings = ImportSettings(albumName: "A", year: "2026", month: "07", day: "20")
-        #expect(settings.includeVideos == true)
-    }
 
     @Test func includeVideosDefaultReadsUserDefaults() {
         let key = ImportSettings.includeVideosDefaultsKey

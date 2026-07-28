@@ -8,23 +8,6 @@ import Foundation
 @MainActor
 struct AsyncSemaphoreTests {
 
-    @Test func waitConsumesAvailableCount() async {
-        let sem = AsyncSemaphore(count: 3)
-        await sem.wait()
-        await sem.wait()
-        await sem.wait()
-        // Three slots consumed; a fourth wait would suspend (not exercised here).
-    }
-
-    @Test func signalWithoutWaitersIncreasesCount() async {
-        let sem = AsyncSemaphore(count: 0)
-        await sem.signal()
-        await sem.signal()
-        // Two signals queued; these two waits return immediately.
-        await sem.wait()
-        await sem.wait()
-    }
-
     @Test func waitSuspendsWhenCountIsZero() async {
         let sem = AsyncSemaphore(count: 0)
         let resumed = AsyncFlag()
@@ -79,13 +62,6 @@ struct AsyncSemaphoreTests {
 @Suite
 @MainActor
 struct MemoryBudgetSemaphoreTests {
-
-    @Test func acquireWithinBudgetDoesNotSuspend() async {
-        let sem = MemoryBudgetSemaphore(capacity: 1000)
-        await sem.acquire(400)
-        await sem.acquire(400)   // 800 <= 1000, still fits
-        // Reaching here without suspending is the assertion.
-    }
 
     @Test func acquireBeyondBudgetSuspendsUntilRelease() async {
         let sem = MemoryBudgetSemaphore(capacity: 1000)

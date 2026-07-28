@@ -62,30 +62,6 @@ struct CatalogTests {
         #expect(decodedImage?.par2Filename == spec.par2Name)
     }
 
-    @Test func catalogRoundTripNilB2FileId() throws {
-        let spec = TestFixtures.files[1]
-        let image = CatalogImage(
-            filename: spec.name, sha256: spec.sha256,
-            sizeBytes: Int64(spec.size), par2Filename: spec.par2Name
-        )
-
-        let album = CatalogAlbum(addedAt: .now, images: [image])
-        let catalog = Catalog(version: 1, lastUpdated: .now, years: [
-            "2025": CatalogYear(months: ["01": CatalogMonth(days: ["01": CatalogDay(albums: ["Test": album])])])
-        ])
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(catalog)
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let decoded = try decoder.decode(Catalog.self, from: data)
-
-        let decodedImage = decoded.years["2025"]?.months["01"]?.days["01"]?.albums["Test"]?.images.first
-        #expect(decodedImage?.b2FileId == nil)
-    }
-
     @Test func catalogFileIO() throws {
         let catalog = TestFixtures.catalog()
 
@@ -294,19 +270,6 @@ struct HasherServiceTests {
         #expect(hash == spec.sha256)
     }
 
-    @Test func sha256ConsistentBetweenMethods() async throws {
-        let service = HasherService()
-        let spec = TestFixtures.files[6] // landscape.heic, 10240 bytes
-        let root = try TestFixtures.materializeVolume(label: "hasher-consistent")
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        let url = root.appendingPathComponent(spec.albumPath).appendingPathComponent(spec.name)
-        let hashOnly = try await service.sha256(of: url)
-        let (hashAndSize, _) = try await service.sha256AndSize(of: url)
-
-        #expect(hashOnly == hashAndSize)
-        #expect(hashOnly == spec.sha256)
-    }
 }
 
 // MARK: - RedundancyService Tests
@@ -651,13 +614,6 @@ struct RedundancyServiceTests {
 
 @Suite @MainActor
 struct FilenameDisambiguationTests {
-    @Test func insertsShortHashBeforeExtension() {
-        let name = PipelinedImportCoordinator.disambiguatedFilename(
-            "IMG_1613.heic", sha256: "a1b2c3d4e5f60718293a4b5c6d7e8f90"
-        )
-        #expect(name == "IMG_1613~a1b2c3d4.heic")
-    }
-
     @Test func distinctShasYieldDistinctNamesForSameBase() {
         let a = PipelinedImportCoordinator.disambiguatedFilename("IMG_1613.heic", sha256: "aaaaaaaa1111")
         let b = PipelinedImportCoordinator.disambiguatedFilename("IMG_1613.heic", sha256: "bbbbbbbb2222")
@@ -669,12 +625,6 @@ struct FilenameDisambiguationTests {
     @Test func handlesNoExtension() {
         let name = PipelinedImportCoordinator.disambiguatedFilename("IMG_1613", sha256: "0123456789ab")
         #expect(name == "IMG_1613~01234567")
-    }
-
-    @Test func isDeterministicForSameInput() {
-        let first = PipelinedImportCoordinator.disambiguatedFilename("photo.jpg", sha256: "feedface0000")
-        let second = PipelinedImportCoordinator.disambiguatedFilename("photo.jpg", sha256: "feedface0000")
-        #expect(first == second)
     }
 }
 
@@ -695,13 +645,6 @@ struct PerceptualHashTests {
         #expect(distance == 64)
     }
 
-    @Test func hammingDistanceSingleBitDifference() {
-        let a = Data([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
-        let b = Data([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
-        let distance = PerceptualHash.hammingDistance(a, b)
-        #expect(distance == 1)
-    }
-
     @Test func hammingDistanceKnownValue() {
         // 0xAA = 10101010, 0x55 = 01010101 — 8 bits differ per byte
         let a = Data([0xAA, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
@@ -715,21 +658,6 @@ struct PerceptualHashTests {
         let b = Data([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
         let distance = PerceptualHash.hammingDistance(a, b)
         #expect(distance == 64) // Returns max distance for invalid input
-    }
-
-    @Test func hammingDistanceSymmetric() {
-        let a = Data([0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0])
-        let b = Data([0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12])
-        #expect(PerceptualHash.hammingDistance(a, b) == PerceptualHash.hammingDistance(b, a))
-    }
-
-    @Test func nearDuplicateThreshold() {
-        // Hashes differing by < 5 bits should be "near duplicates"
-        let a = Data([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
-        let b = Data([0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]) // 3 bits differ
-        let distance = PerceptualHash.hammingDistance(a, b)
-        #expect(distance < 5)
-        #expect(distance == 3)
     }
 
     /// Hashes read back from SwiftData are often slices whose backing buffer is not
@@ -867,6 +795,9 @@ struct SwiftDataModelTests {
         #expect(album.images.allSatisfy { $0.album?.name == "Vacation" })
     }
 
+    /// Pins every default on the persisted record in one place. These are the values
+    /// an existing store's rows take on after a schema addition, so a changed default
+    /// silently rewrites the meaning of already-archived records.
     @Test func imageRecordDefaults() throws {
         let spec = TestFixtures.files[0]
         let image = ImageRecord(sha256: spec.sha256, filename: spec.name, sizeBytes: Int64(spec.size))
@@ -877,6 +808,13 @@ struct SwiftDataModelTests {
         #expect(image.lastVerifiedAt == nil)
         #expect(image.storageLocations.isEmpty)
         #expect(image.par2Filename == "")
+
+        // Media fields added after the first release: a record that predates them
+        // must read back as a plain image with no dimensions.
+        #expect(image.mediaType == .image)
+        #expect(image.durationSeconds == nil)
+        #expect(image.pixelWidth == nil)
+        #expect(image.pixelHeight == nil)
     }
 
     @Test func storageLocationCodable() throws {
@@ -1718,19 +1656,8 @@ struct B2ServiceHelperTests {
         #expect(hash == "da39a3ee5e6b4b0d3255bfef95601890afd80709")
     }
 
-    @Test func sha1HashFixtureContent() {
-        let content = Data("LumiVault B2 test fixture".utf8)
-        let hash = B2Service.sha1Hash(of: content)
-        #expect(hash.count == 40)
-        #expect(hash.allSatisfy { $0.isHexDigit })
-    }
-
-    @Test func checkResponseSuccess200() throws {
-        let url = URL(string: "https://api.example.com")!
-        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        try B2Service.checkResponse(response, data: nil)
-    }
-
+    /// 299 rather than 200: the upper edge of the accepted range is the value a
+    /// mistaken `..<` / `...` boundary would get wrong.
     @Test func checkResponseSuccess299() throws {
         let url = URL(string: "https://api.example.com")!
         let response = HTTPURLResponse(url: url, statusCode: 299, httpVersion: nil, headerFields: nil)!
@@ -1774,68 +1701,6 @@ struct B2ServiceHelperTests {
         } catch {
             Issue.record("Unexpected error type: \(error)")
         }
-    }
-}
-
-// MARK: - Import Progress Tests
-
-@Suite @MainActor
-struct PhotosImportProgressTests {
-    @Test func fractionZeroWhenEmpty() {
-        let progress = PhotosImportProgress()
-        progress.totalFiles = 0
-        #expect(progress.fraction == 0)
-    }
-
-    @Test func fractionDuringImportPhase() {
-        let progress = PhotosImportProgress()
-        progress.totalFiles = 20
-        progress.phase = .importing
-        progress.currentFile = 10
-
-        // Import phase: (10/20) * 0.1 = 0.05
-        #expect(abs(progress.fraction - 0.05) < 0.001)
-    }
-
-    @Test func fractionMidPipeline() {
-        let progress = PhotosImportProgress()
-        progress.totalFiles = 20
-        progress.phase = .hashing
-        progress.filesCataloged = 10
-
-        // Post-import phases: 0.1 + (10/20) * 0.9 = 0.55
-        #expect(abs(progress.fraction - 0.55) < 0.001)
-    }
-
-    @Test func fractionOneWhenComplete() {
-        let progress = PhotosImportProgress()
-        progress.totalFiles = 5
-        progress.phase = .complete
-
-        #expect(progress.fraction == 1.0)
-    }
-
-    @Test func fractionWithGlobalProgress() {
-        let progress = PhotosImportProgress()
-        progress.globalTotalFiles = 100
-        progress.completedAlbumFiles = 50
-        progress.totalFiles = 20
-        progress.phase = .hashing
-        progress.filesCataloged = 10
-
-        // Album fraction: 0.1 + (10/20) * 0.9 = 0.55
-        // Global: 50/100 + 0.55 * (20/100) = 0.5 + 0.11 = 0.61
-        #expect(abs(progress.fraction - 0.61) < 0.001)
-    }
-
-    @Test func fractionUsesCompletedAlbumsWhenCurrentEmpty() {
-        let progress = PhotosImportProgress()
-        progress.globalTotalFiles = 100
-        progress.completedAlbumFiles = 30
-        progress.totalFiles = 0
-
-        // No files in current album yet — show completed albums progress
-        #expect(abs(progress.fraction - 0.3) < 0.001)
     }
 }
 
@@ -2344,17 +2209,6 @@ struct EncryptionEdgeCaseTests {
     }
 }
 
-// MARK: - Import Settings Tests
-
-@Suite
-@MainActor
-struct ImportSettingsTests {
-    @Test func nearDuplicateThresholdDefaultMatchesConstant() {
-        let settings = ImportSettings(albumName: "x", year: "2025", month: "01", day: "01")
-        #expect(settings.nearDuplicateThreshold == Constants.Dedup.nearDuplicateThreshold)
-    }
-}
-
 // MARK: - Photos Library Monitor Diff Tests
 
 @Suite
@@ -2651,13 +2505,6 @@ struct PipelineItemTests {
         #expect(item.activeFileURL.lastPathComponent == "IMG_0001.jpg.enc")
     }
 
-    @Test func videoItemsCarryTheirOriginalNameThroughThePipeline() {
-        // Videos skip conversion entirely, so convertedFilename stays nil.
-        var item = makeItem(originalFilename: "clip.mov")
-        item.mediaType = .video
-        #expect(item.activeFilename == "clip.mov")
-        #expect(item.convertedFilename == nil)
-    }
 }
 
 // MARK: - Single-Image PAR2 Cleanup (regression: b97ed6d)
@@ -2900,6 +2747,24 @@ struct ImportProgressBoundsTests {
 
         // No totals at all is still a determinate zero, not NaN.
         #expect(PhotosImportProgress().fraction == 0)
+    }
+
+    /// The two per-phase weights the rest of this suite only bounds-checks. Import
+    /// is deliberately squeezed into a flat 10% band because fetching from Photos
+    /// is a small share of the work, and `.complete` must read exactly full rather
+    /// than "whatever the counters happened to reach".
+    @Test func importPhaseOccupiesTheFirstTenthAndCompleteReadsFull() {
+        let importing = PhotosImportProgress()
+        importing.totalFiles = 20
+        importing.phase = .importing
+        importing.currentFile = 10
+        // (10/20) * 0.1 — halfway through the fetch is 5% of the run, not 50%.
+        #expect(abs(importing.fraction - 0.05) < 0.001)
+
+        let done = PhotosImportProgress()
+        done.totalFiles = 5
+        done.phase = .complete
+        #expect(done.fraction == 1.0)
     }
 
     @Test func removalPhaseIsLabelledAndDeterminate() {

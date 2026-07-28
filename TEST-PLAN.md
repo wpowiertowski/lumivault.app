@@ -2,7 +2,7 @@
 
 ## Existing Automated Test Assessment
 
-### Summary: 302 tests across 56 suites
+### Summary: 281 tests across 54 suites
 
 | Rating | Suite | Tests | Assessment |
 | -------- | ------- | ------- | ------------ |
@@ -19,18 +19,16 @@
 | High Value | B2ServiceNetworkTests | 13 | End-to-end B2 REST flow via URLProtocol stub: authorize (Basic auth + 401), getUploadURL (auth gating + decode), uploadFile (headers, sha1, single-use URL), list pagination, fileExists hit/miss, delete file. |
 | High Value | SyncServiceTests | 20 | push writes encoded catalog and creates parent dirs; pull returns nil/decodes/unions with local; push-then-pull round-trip; corrupt remote JSON propagates an error. Bypasses NSFileCoordinator via test-only init. |
 | High Value | AsyncChannelTests | 5 | Bounded async channel: send/receive, backpressure blocks producer when full, finish ends consumer loop, cancel unblocks producers + terminates consumer, multi-producer/single-consumer race. |
-| High Value | AsyncSemaphoreTests | 5 | Counting semaphore: wait consumes count, signal-without-waiters increases count, wait suspends at zero, cancelAll resumes every waiter, wait-after-cancel does not suspend. |
-| Medium Value | B2ServiceHelperTests | 7 | SHA-1 known test vectors, HTTP response validation for success (200, 299) and error (401, 500) status codes |
-| Medium Value | PhotosImportProgressTests | 6 | Fraction calculation for the pipelined import: empty state, import-phase progress, mid-pipeline progress, complete, multi-album, and `filesDropped` counter tracking items silently lost in the pipeline. |
+| High Value | AsyncSemaphoreTests | 3 | Counting semaphore: wait suspends at zero, cancelAll resumes every waiter, wait-after-cancel does not suspend. The non-suspending fast paths are reached by these same tests, so the two assertion-free tests that only walked them were dropped. |
+| Medium Value | B2ServiceHelperTests | 5 | SHA-1 known test vectors, HTTP response validation for success (299 — the range's upper edge) and error (401, 500) status codes |
 | Medium Value | CatalogBackupServiceTests | 5 | Volume backup write + decode, error on bad path, file restore round-trip, missing catalog error, orphan vol-file eviction |
 | Medium Value | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture hash verification |
 | Medium Value | ImageConversionTests | 6 | JPEG conversion with extension change, valid output, dimension scaling, original format pass-through, below-max preservation. Tests exercise the shared `ImageConversionService.convertImage`. |
-| Medium Value | HasherServiceTests | 4 | Fixture hash verification is the trust anchor for the entire test suite. Empty file + consistency checks are useful but simple. |
-| Medium Value | CatalogTests | 5 | Codable round-trip, optional fields, snake_case keys, file I/O. Necessary for CLI compatibility guarantee, but scenarios are basic. |
+| Medium Value | HasherServiceTests | 3 | Fixture hash verification is the trust anchor for the entire test suite, for both `sha256` and `sha256AndSize`. Plus the empty-file known vector. |
+| Medium Value | CatalogTests | 4 | Codable round-trip, optional fields, snake_case keys, file I/O. Necessary for CLI compatibility guarantee, but scenarios are basic. |
 | Medium Value | PerceptualHashComputeTests | 3 | dHash `compute()` returns 8 bytes, deterministic output for same image, rejects non-image files |
-| Low Value | PerceptualHashTests | 8 | All 7 tests exercise `hammingDistance` with synthetic byte arrays. Useful but does not test image hashing. |
-| Low Value | SwiftDataModelTests | 5 | Checks defaults and Codable on trivial types. `albumRecordDateLabel` tests string interpolation. Rarely catches real bugs. |
-| Low Value | ImportSettingsTests | 1 | Default-value smoke test for `ImportSettings.nearDuplicateThreshold` (matches `Constants.Dedup`). |
+| Medium Value | PerceptualHashTests | 5 | `hammingDistance` at both extremes (0 and 64 bits), a known mid-range value, the invalid-length guard, and the misaligned-slice regression that used to trap on SwiftData reads. Three further same-shape known-answer tests were dropped as duplicates. |
+| Medium Value | SwiftDataModelTests | 5 | Album/image relationship through a real container, plus `imageRecordDefaults` pinning every default on the persisted record — including the media fields added after first release, since a changed default silently rewrites already-archived rows. |
 | Low Value | PhotosSyncSchemaTests | 4 | Lightweight-migration smoke tests for the new optional `phAssetLocalIdentifier` / `photosAlbumLocalIdentifier` fields on legacy SwiftData stores. |
 | Low Value | SnakeGameTests | 7 | Easter-egg Snake game state machine: initial segments, hold-before-start, tick movement, no-direct-reverse, wall collision, food growth/score, reset. |
 | Low Value | FlappyGameTests | 5 | Easter-egg Flappy game state machine: hover-before-flap, flap impulse, gravity, floor collision, reset. |
@@ -40,8 +38,8 @@
 | High Value | PipelinePhaseRoutingTests | 6 | Stage-to-stage routing over all 16 combinations of enabled phases: never forwards into a disabled stage, always terminates at the catalog sink. |
 | High Value | CatalogMigrationTests | 6 | Legacy catalog + sidecar migration out of the sandbox container, never clobbering an existing catalog, plus library-as-storage-target resolution. |
 | High Value | StallPolicyTests | 6 | iCloud-download watchdog arithmetic: doubling thresholds 1→512s over 10 attempts, slow-message suppression below 5s, retry countdown never negative. |
-| Medium Value | PipelineItemTests | 5 | Converted filename reaches downstream stages; encrypted/converted/original URL precedence, including the conversion+encryption combination. |
-| High Value | ImportProgressBoundsTests | 7 | Progress fraction stays within 0…1 across every phase and on the between-albums exit, and the removal phase is labelled and determinate. Two tests pin the *expected* fraction through the real `beginRun`/`beginAlbum`/`finishAlbum` sequence, so a dropped counter reset fails rather than being swallowed by the clamp. |
+| Medium Value | PipelineItemTests | 4 | Converted filename reaches downstream stages; encrypted/converted/original URL precedence, including the conversion+encryption combination. |
+| High Value | ImportProgressBoundsTests | 8 | Progress fraction stays within 0…1 across every phase and on the between-albums exit, and the removal phase is labelled and determinate. Two tests pin the *expected* fraction through the real `beginRun`/`beginAlbum`/`finishAlbum` sequence, so a dropped counter reset fails rather than being swallowed by the clamp. |
 | Medium Value | ThumbnailCacheTests | 4 | Cache root is Application Support and not the purgeable `Caches`; sha-sharded layout for both sizes, miss reads nil, removal clears disk. |
 | Medium Value | EnsureFileMirroredTests | 4 | Copy-stage mirroring skips a same-size destination and replaces truncated or empty leftovers. |
 | Medium Value | CatalogPathResolutionTests | 5 | Catalog path override and tilde expansion via `resolveCatalogURL(override:)` — no writes to the process-wide `catalogPath` default — plus the wiring that accessor depends on, and the symlink-resolved library path that keeps container paths out of the UI. |
@@ -53,30 +51,60 @@
 | High Value | CatalogMergeSanitizationTests | 3 | Merge drops entries whose filename or album key would traverse out of the album directory, and keeps clean ones — the sanitization that stops a tampered remote catalog from steering filesystem writes. |
 | High Value | NearDuplicateClusteringTests | 4 | Near-duplicate grouping: transitive chains cluster, distinct groups stay separate, no matches yields no groups, a singleton never groups with itself. |
 | High Value | PathComponentValidationTests | 3 | The shared path-component guard: ordinary names accepted, traversal and separators rejected, image validation requires every component. |
-| Medium Value | MemoryBudgetSemaphoreTests | 5 | Weighted memory budget for the encryption/PAR2 stages: within-budget acquires don't suspend, over-budget waits for a release, an oversized request runs solo rather than deadlocking, admission is FIFO, cancelAll resumes every waiter. |
+| Medium Value | MemoryBudgetSemaphoreTests | 4 | Weighted memory budget for the encryption/PAR2 stages: over-budget waits for a release, an oversized request runs solo rather than deadlocking, admission is FIFO, cancelAll resumes every waiter. |
 | Medium Value | CatalogVideoSchemaTests | 4 | Video fields round-trip through JSON, image entries omit the video keys, legacy catalogs without them still decode, and merge combines them commutatively. Guards catalog.json backwards compatibility. |
-| Medium Value | VideoRecordSchemaTests | 3 | `ImageRecord` media type: defaults to image, video fields persist through SwiftData, an unknown raw value reads back as image rather than trapping. |
-| Medium Value | VideoImportSettingsTests | 4 | `includeVideos` default and its UserDefaults key, the drop filter accepting movies and images only, duration label formatting. |
+| Medium Value | VideoRecordSchemaTests | 2 | `ImageRecord` media type: video fields persist through SwiftData, an unknown raw value reads back as image rather than trapping. The image-side defaults are pinned by `SwiftDataModelTests.imageRecordDefaults`. |
+| Medium Value | VideoImportSettingsTests | 3 | The `includeVideos` UserDefaults key and its unset/true/false resolution, the drop filter accepting movies and images only, duration label formatting. |
 | Medium Value | VideoThumbnailTests | 2 | Poster frame and duration probe from a generated video; non-video input throws. |
-| Medium Value | FilenameDisambiguationTests | 4 | Content-derived filename suffixes: hash inserted before the extension, distinct shas never collide on one storage slot, extension-less names handled, deterministic across runs. |
+| Medium Value | FilenameDisambiguationTests | 2 | Content-derived filename suffixes: distinct shas never collide on one storage slot (pinning the exact `name~hash.ext` form), and extension-less names handled. |
 | Medium Value | EXIFDataFormattingTests | 4 | Exposure string formatting: sub-second, long exposure, absent value, and zero (which used to trap). |
 | Low Value | DeletedRecordGuardTests | 1 | A deleted `ImageRecord` detaches and its relationship stays readable, rather than faulting on a dangling reference. |
 | Low Value | URLDescendantTests | 1 | Truth table for the descendant check that keeps writes inside their target volume. |
 
 ### Redundancy & Overlap
 
-No truly redundant tests. Each test has a distinct scenario. Some suites have tests that are very close (e.g., `deleteRemovesFilesFromVolume` vs `deleteAllFixtureFilesFromVolume` differ only in batch size), but they serve as single-file vs bulk regression guards.
+The suite was pruned from 302 to 281 tests against measured line coverage. The 21
+removed tests were verified to contribute **zero** uniquely covered lines: running
+the full suite and the pruned suite under `swift test --enable-code-coverage` both
+report 3963/25067 lines, with no line covered by the old suite absent from the new
+one. They fell into four groups:
+
+- **Tautologies** — asserting a default against the literal that defines it
+  (`ImportSettings.nearDuplicateThreshold == Constants.Dedup.nearDuplicateThreshold`,
+  `includeVideos == true`), or that a pure function returns the same value twice.
+- **Strictly weaker duplicates** — a shape/length check sitting next to a
+  known-answer test for the same function (`sha1HashFixtureContent`), a 200 next to
+  the 299 that actually probes the range boundary, a nil-`b2FileId` round-trip when
+  the shared fixtures already carry nil.
+- **Assertion-free tests** — three semaphore tests whose only claim was "this did
+  not hang", walking fast paths the suspend/cancel tests already walk.
+- **A shallow suite subsumed by a deeper one** — `PhotosImportProgressTests` set
+  `fraction`'s inputs directly and checked the arithmetic, while
+  `ImportProgressBoundsTests` drives the same property through the real
+  `beginRun`/`beginAlbum`/`finishAlbum` sequence and so also catches the dropped
+  counter reset (5233888) that the direct-assignment version could not. Its two
+  genuinely unique assertions — the `.importing` 10% band and `.complete` reading
+  exactly 1.0 — were folded into the deeper suite rather than dropped.
+
+Zero coverage delta was the filter for *considering* a test, not the reason for
+removing it: line coverage cannot see assertion strength. `deriveKeyDifferentSalts`
+adds no lines over `deriveKeyDifferentPassphrases` but was **kept**, because it is
+the only test that fails if the salt stops feeding the KDF. Same reasoning kept
+`imageRecordDefaults`, which was extended with the media fields rather than deleted.
+
+Among what remains, `deleteRemovesFilesFromVolume` vs `deleteAllFixtureFilesFromVolume`
+differ only in batch size, but serve as single-file vs bulk regression guards.
 
 ### Coverage Status
 
 | Area | Risk | Status |
 | ------ | ------ | -------- |
 | EncryptionService | High | **Covered** — 23 tests across 3 suites: key derivation, round-trips, wrong key/AD, nonce uniqueness, file ops, edge cases, encrypt-PAR2-decrypt integration |
-| B2Service (network layer) | High | **Covered** — 27 tests total: 7 pure helpers (SHA-1, HTTP response validation), 13 network methods via URLProtocol stub (authorize, getUploadURL, uploadFile, list pagination, fileExists, delete, retry/backoff), and 7 large-file tests (start/part/finish, cancel, size-based routing, filename encoding per route). |
+| B2Service (network layer) | High | **Covered** — 25 tests total: 5 pure helpers (SHA-1, HTTP response validation), 13 network methods via URLProtocol stub (authorize, getUploadURL, uploadFile, list pagination, fileExists, delete, retry/backoff), and 7 large-file tests (start/part/finish, cancel, size-based routing, filename encoding per route). |
 | PipelinedImportCoordinator | High | **Partially covered** — phase-skipping wiring is now exhaustively covered (PipelinePhaseRoutingTests, all 16 combinations), plus PipelineItem filename propagation, copy-stage mirroring, conversion, and the channel/semaphore primitives. Per-stage cancellation is now fenced against a real stage body (ChannelCancellationDrainTests). Full orchestration — sentinel task, `copyError` vs `error` isolation — still needs protocol-based service injection and relies on manual QA (TC-2, TC-4). |
 | CatalogBackupService | Medium | **Covered** — 6 tests: volume backup/restore round-trip, error reporting, missing catalog, happy path restore |
 | Volume sync (VolumeSyncSheet inline copy loop) | Medium | **Not unit-tested** — loop lives in a SwiftUI view. Hash-dedup + PAR2 companion behavior validated by manual QA (TC-8, TC-9). |
-| PerceptualHash | Medium | **Covered** — 11 tests across 2 suites: hammingDistance (8 pure math) + compute (3 with real images) |
+| PerceptualHash | Medium | **Covered** — 8 tests across 2 suites: hammingDistance (5 pure math, including the misaligned-slice regression) + compute (3 with real images) |
 | SyncService / SyncCoordinator | Medium | **SyncService covered** — 20 tests on push/pull/merge, echo suppression, convergent merge and tombstone propagation. **SyncCoordinator hydration covered** — 11 tests drive `hydrate`/`isHydrationStale` against an in-memory ModelContainer, and 6 more cover legacy catalog migration. The remaining orchestration (iCloud monitoring, settings debounce) still requires provisioning. |
 | ThumbnailService | Low | **Partially covered** — 4 tests on the on-disk contract (Application Support root, sha-sharded layout, miss-reads-nil, removal) plus video poster frames. The NSCache layer and regeneration from a mounted source volume remain manual QA; visual correctness always was. |
 | PhotosImportService | Low | **Mostly not testable** — requires the Photos entitlement. The download watchdog's arithmetic is extracted into `StallPolicy` and covered by 6 tests; the surrounding `PHAssetResourceManager` loop remains manual QA. |
@@ -115,7 +143,7 @@ hardware before release.
 | VideoThumbnailTests | PR 3 (pipeline) | Poster frame from a fixture `.mov` writes 256/64px HEICs into the standard SHA-keyed cache; duration/dimension probe returns expected values; non-video input throws. (AVAssetImageGenerator decodes without a display, so this is headless-safe — unlike the CIContext-based image cases.) |
 | Pipeline media-type routing | PR 3 (pipeline) | Video `PipelineItem` skips conversion (output URL == input, no re-encode); pHash skipped (stays nil); encryption size cap: over-cap video imports unencrypted and surfaces a warning, under-cap encrypts normally; catalog sink persists `media_type`/`duration_seconds` |
 | PhotosLibraryMonitor scope | PR 4 (Photos) | `computeDeltaParts` parity when the tracked set includes video asset ids — badges must match the import scope in both includeVideos states |
-| ImportSettingsTests (extend) | PR 4 (Photos) | `includeVideos` default matches Import Defaults |
+| VideoImportSettingsTests | PR 4 (Photos) | `includeVideos` resolves from the Import Defaults key — unset reads true, and an explicit true/false is honoured |
 | DeletionServiceTests / VolumeScanTests (extend) | PR 3/5 | Existing suites gain a video fixture: deletion removes video + PAR2 companion; reconciliation dangling/orphan/hash-verify paths treat videos identically |
 
 **Fixture**: one committed sub-second ~100 KB H.264 `.mov` under `Tests/Fixtures` with
