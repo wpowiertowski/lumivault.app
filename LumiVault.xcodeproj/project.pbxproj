@@ -24,6 +24,7 @@
 		29603BDE743EC9A5EF23D668 /* CatalogBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36CC2F93A79D33C625E126E4 /* CatalogBackupService.swift */; };
 		2AB3DBBB033427F0060FC5E2 /* LumiVaultTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F69A5682C9063F979E533C /* LumiVaultTests.swift */; };
 		2F0B68DAB1D1FCF1046D6908 /* EncryptionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4CACCF602F3A573BC7627EE /* EncryptionSettingsView.swift */; };
+		336DA19C5C7CCEBEF6665C06 /* EXIFAndCredentialTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 431BA8BEB12E82C615B968FE /* EXIFAndCredentialTests.swift */; };
 		377E661A689793390F13D75A /* B2SyncSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0559D966DBB4F64CE222568C /* B2SyncSheet.swift */; };
 		3822A367C5727C93EDA2CF9C /* B2Service.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1068629E8FF6AF2C6063CC06 /* B2Service.swift */; };
 		3CF3C07E9C178EB6E6961593 /* Catalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90BF32093AC2357CD61747D /* Catalog.swift */; };
@@ -151,6 +152,7 @@
 		42278B7E563F76C6F7FC1EE7 /* DeletionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionService.swift; sourceTree = "<group>"; };
 		427BE50C00890CB41F4BAEDE /* PathTraversalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathTraversalTests.swift; sourceTree = "<group>"; };
 		42A76C88D6D14F8411611A4C /* FlappyGame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlappyGame.swift; sourceTree = "<group>"; };
+		431BA8BEB12E82C615B968FE /* EXIFAndCredentialTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EXIFAndCredentialTests.swift; sourceTree = "<group>"; };
 		47A770A92996FA81A51FB1A1 /* MetadataInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataInspector.swift; sourceTree = "<group>"; };
 		4D306B41680CB9765C3B46CC /* ReconciliationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconciliationView.swift; sourceTree = "<group>"; };
 		52BF3E9C2E27A222A01E3E43 /* VolumesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumesSettingsView.swift; sourceTree = "<group>"; };
@@ -320,6 +322,7 @@
 				F4DA177B337BD6A1C2268C14 /* AsyncPrimitivesTests.swift */,
 				9B11AF157144E4837D8EE913 /* B2ServiceNetworkTests.swift */,
 				88F192C80B75182D952DC07E /* DeletedRecordGuardTests.swift */,
+				431BA8BEB12E82C615B968FE /* EXIFAndCredentialTests.swift */,
 				93793FFEB071EF35882DC3F8 /* GamesTests.swift */,
 				D4F69A5682C9063F979E533C /* LumiVaultTests.swift */,
 				427BE50C00890CB41F4BAEDE /* PathTraversalTests.swift */,
@@ -669,6 +672,7 @@
 				6AC34B6A81FDAB65294F85C9 /* AsyncPrimitivesTests.swift in Sources */,
 				62A3225E923219B9A991A8AF /* B2ServiceNetworkTests.swift in Sources */,
 				D337CDBA60254332964C062B /* DeletedRecordGuardTests.swift in Sources */,
+				336DA19C5C7CCEBEF6665C06 /* EXIFAndCredentialTests.swift in Sources */,
 				7C25361151B59326946F5367 /* GamesTests.swift in Sources */,
 				2AB3DBBB033427F0060FC5E2 /* LumiVaultTests.swift in Sources */,
 				7EEB4CB04BDC34F2AC287724 /* PathTraversalTests.swift in Sources */,
