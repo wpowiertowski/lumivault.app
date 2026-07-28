@@ -27,7 +27,24 @@ final class ImageRecord {
     var par2Filename: String
     var b2FileId: String?
     var addedAt: Date
-    var album: AlbumRecord?
+    /// Every album this image is filed under. Many-to-many: `sha256` is unique, so
+    /// one record represents the image everywhere it appears, and re-importing it
+    /// into a second album adds a membership rather than a second record.
+    var albums: [AlbumRecord]
+
+    /// The album whose path the stored bytes live under.
+    ///
+    /// Membership is a set, but the file is written once — under whichever album
+    /// it was first filed in. Sites that *derive a storage path* from the album
+    /// need one deterministic answer, and SwiftData does not promise a stable
+    /// relationship order, so pick the earliest by date-then-name rather than
+    /// `albums.first`. Sites that ask "is this filed anywhere?" should test
+    /// `albums.isEmpty` instead.
+    var primaryAlbum: AlbumRecord? {
+        albums.min { lhs, rhs in
+            (lhs.year, lhs.month, lhs.day, lhs.name) < (rhs.year, rhs.month, rhs.day, rhs.name)
+        }
+    }
     var storageLocations: [StorageLocation]
     var thumbnailState: ThumbnailState
     var perceptualHash: Data?
@@ -79,7 +96,7 @@ final class ImageRecord {
         par2Filename: String = "",
         b2FileId: String? = nil,
         addedAt: Date = .now,
-        album: AlbumRecord? = nil,
+        albums: [AlbumRecord] = [],
         storageLocations: [StorageLocation] = [],
         thumbnailState: ThumbnailState = .pending,
         perceptualHash: Data? = nil,
@@ -99,7 +116,7 @@ final class ImageRecord {
         self.par2Filename = par2Filename
         self.b2FileId = b2FileId
         self.addedAt = addedAt
-        self.album = album
+        self.albums = albums
         self.storageLocations = storageLocations
         self.thumbnailState = thumbnailState
         self.perceptualHash = perceptualHash

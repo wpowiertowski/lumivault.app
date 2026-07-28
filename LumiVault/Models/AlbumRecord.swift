@@ -10,7 +10,7 @@ final class AlbumRecord {
     var addedAt: Date
     var photosAlbumLocalIdentifier: String?
 
-    @Relationship(deleteRule: .cascade, inverse: \ImageRecord.album)
+    @Relationship(deleteRule: .nullify, inverse: \ImageRecord.albums)
     var images: [ImageRecord]
 
     init(

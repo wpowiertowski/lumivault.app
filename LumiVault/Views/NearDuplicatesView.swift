@@ -136,7 +136,7 @@ struct NearDuplicatesView: View {
     private func deleteImage() {
         guard let pending = pendingDelete,
               let image = allImages.first(where: { $0.sha256 == pending.sha256 }),
-              let album = image.album else {
+              let album = image.primaryAlbum else {
             pendingDelete = nil
             return
         }
@@ -217,7 +217,7 @@ struct NearDuplicatesView: View {
                 sha256: image.sha256,
                 filename: image.filename,
                 sizeBytes: image.sizeBytes,
-                albumName: image.album?.name ?? "Unknown",
+                albumName: image.primaryAlbum?.name ?? "Unknown",
                 hash: hash
             )
         }

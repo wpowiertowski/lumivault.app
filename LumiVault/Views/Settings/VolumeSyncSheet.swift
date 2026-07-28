@@ -166,7 +166,7 @@ struct VolumeSyncSheet: View {
         // Build a lookup from sha256 -> live ImageRecord so we can update SwiftData on MainActor
         var imagesBySHA: [String: ImageRecord] = [:]
         let snapshots: [SyncImageSnapshot] = images.compactMap { image in
-            guard let album = image.album else { return nil }
+            guard let album = image.primaryAlbum else { return nil }
             imagesBySHA[image.sha256] = image
             return SyncImageSnapshot(
                 sha256: image.sha256,

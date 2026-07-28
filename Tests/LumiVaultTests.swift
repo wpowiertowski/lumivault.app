@@ -785,14 +785,14 @@ struct SwiftDataModelTests {
 
         for spec in specs {
             let image = ImageRecord(sha256: spec.sha256, filename: spec.name, sizeBytes: Int64(spec.size))
-            image.album = album
+            image.albums = [album]
             context.insert(image)
         }
 
         try context.save()
 
         #expect(album.images.count == specs.count) // 3 Vacation images
-        #expect(album.images.allSatisfy { $0.album?.name == "Vacation" })
+        #expect(album.images.allSatisfy { $0.albums.contains { a in a.name == "Vacation" } })
     }
 
     /// Pins every default on the persisted record in one place. These are the values
@@ -2366,7 +2366,7 @@ struct PhotosSyncSchemaTests {
         context.insert(album)
 
         let image = ImageRecord(sha256: "deadbeef", filename: "x.jpg", sizeBytes: 1)
-        image.album = album
+        image.albums = [album]
         context.insert(image)
         try context.save()
 
@@ -2396,7 +2396,7 @@ struct PhotosSyncSchemaTests {
             sizeBytes: 1,
             phAssetLocalIdentifier: "PH-asset-1"
         )
-        image.album = album
+        image.albums = [album]
         context.insert(image)
         try context.save()
 
@@ -2949,7 +2949,7 @@ struct HydrationTests {
         // Catalog-owned fields refresh...
         #expect(existing.filename == "one.heic")
         #expect(existing.sizeBytes == 1234)
-        #expect(existing.album?.name == "Trip")
+        #expect(existing.albums.map(\.name) == ["Trip"])
         // ...local-only fields survive. 8cef649 states this invariant; nothing
         // enforced it until now.
         #expect(existing.storageLocations.count == 1)
@@ -3007,32 +3007,58 @@ struct HydrationTests {
         #expect(!SyncCoordinator.isHydrationStale(catalog: catalog, context: context))
     }
 
-    @Test func multiAlbumImageLandsInTheSameAlbumOnEveryHydration() throws {
-        // `ImageRecord.album` is to-one and the catalog's containers are
-        // Dictionaries, so an unsorted walk files a two-album image by whichever
-        // album it happened to visit last — and the photo jumps between albums
-        // between hydrations with no user action. Sorting by album key makes the
-        // winner arbitrary but stable.
+    @Test func aMultiAlbumImageIsFiledUnderEveryAlbumTheCatalogListsIt() throws {
+        // The catalog files one sha under three albums. While `ImageRecord.album`
+        // was to-one, hydration could only keep one of them — the walk assigned
+        // and reassigned, so whichever album was visited last won and the other
+        // two rendered the photo missing. #55 sorted the traversal, which made
+        // the winner *stable* but no less wrong.
         let catalog = makeCatalog(albums: [
             "Alpha": [image("aa", "one.heic")],
             "Beach": [image("aa", "one.heic")],
             "Zulu": [image("aa", "one.heic")]
         ])
 
-        var landedIn: [String] = []
         for _ in 0..<5 {
             // Bind the container: `makeContainer().mainContext` alone lets the
             // container deallocate out from under the context.
             let container = try makeContainer()
             SyncCoordinator.hydrate(catalog: catalog, into: container.mainContext)
+
+            // One record, because sha256 is unique...
+            let records = try container.mainContext.fetch(FetchDescriptor<ImageRecord>())
+            #expect(records.count == 1)
+            // ...filed under all three albums, not one.
+            let record = try #require(records.first)
+            #expect(Set(record.albums.map(\.name)) == ["Alpha", "Beach", "Zulu"])
+
+            // And each album shows it, which is what the sidebar and grid read.
+            for album in try container.mainContext.fetch(FetchDescriptor<AlbumRecord>()) {
+                #expect(album.images.count == 1, "\(album.name) rendered empty")
+            }
+        }
+    }
+
+    @Test func primaryAlbumIsStableAcrossHydrationsForPathDerivation() throws {
+        // Membership is a set, but the bytes live at one path. `primaryAlbum` is
+        // what the path-deriving call sites read, so it must not depend on
+        // SwiftData's unspecified relationship ordering.
+        let catalog = makeCatalog(albums: [
+            "Zulu": [image("aa", "one.heic")],
+            "Alpha": [image("aa", "one.heic")]
+        ])
+
+        var primaries: [String] = []
+        for _ in 0..<5 {
+            let container = try makeContainer()
+            SyncCoordinator.hydrate(catalog: catalog, into: container.mainContext)
             let record = try #require(
                 try container.mainContext.fetch(FetchDescriptor<ImageRecord>()).first
             )
-            landedIn.append(try #require(record.album?.name))
+            primaries.append(try #require(record.primaryAlbum?.name))
         }
-        #expect(Set(landedIn).count == 1)
-        // Last key in sort order wins.
-        #expect(landedIn.first == "Zulu")
+        #expect(Set(primaries).count == 1, "primaryAlbum drifted between hydrations")
+        #expect(primaries.first == "Alpha", "earliest by date-then-name should win")
     }
 
     @Test func hydrationSkipsEntriesWithTraversingPathComponents() throws {

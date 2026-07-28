@@ -316,12 +316,77 @@ struct PipelineOrchestrationTests {
             modelContext: h.context, progress: h.progress
         )
 
-        #expect(try h.records().count == 1)
+        let records = try h.records()
+        #expect(records.count == 1)
+
         let catalog = await h.catalogService.currentCatalog()
         let day = catalog.years["2026"]?.months["07"]?.days["28"]
         // The catalog files one sha under both albums even though there is one record.
         #expect(day?.albums["Trip"]?.images.count == 1)
         #expect(day?.albums["Beach"]?.images.count == 1)
+
+        // And SwiftData agrees: the second import adds a membership rather than
+        // moving the record out of the first album. While `album` was to-one the
+        // record silently left "Trip", which then rendered empty in the sidebar.
+        let record = try #require(records.first)
+        #expect(Set(record.albums.map(\.name)) == ["Trip", "Beach"])
+        for album in try h.context.fetch(FetchDescriptor<AlbumRecord>()) {
+            #expect(album.images.count == 1, "\(album.name) lost its image")
+        }
+    }
+
+    @Test func deletingOneAlbumKeepsAnImageThatStillBelongsToAnother() async throws {
+        let h = try PipelineHarness()
+        defer { h.cleanup() }
+        let urls = try h.makeImages(count: 1)
+        let coordinator = h.makeCoordinator()
+
+        try await coordinator.importFiles(
+            urls: urls, settings: h.settings(albumName: "Trip"),
+            modelContext: h.context, progress: h.progress
+        )
+        try await coordinator.importFiles(
+            urls: urls, settings: h.settings(albumName: "Beach"),
+            modelContext: h.context, progress: h.progress
+        )
+
+        let albums = try h.context.fetch(FetchDescriptor<AlbumRecord>())
+        let trip = try #require(albums.first { $0.name == "Trip" })
+
+        // This mirrors what the sidebar's delete flow does: drop images the album
+        // was the last home for, then the album itself. Under the old `.cascade`
+        // rule deleting either album would have taken the shared image with it.
+        for image in trip.images where image.albums.count <= 1 {
+            h.context.delete(image)
+        }
+        h.context.delete(trip)
+        try h.context.save()
+
+        let survivors = try h.records()
+        #expect(survivors.count == 1, "the image was destroyed with the album it also lived outside of")
+        #expect(survivors.first?.albums.map(\.name) == ["Beach"])
+    }
+
+    @Test func deletingTheOnlyAlbumAnImageBelongsToRemovesTheImage() async throws {
+        let h = try PipelineHarness()
+        defer { h.cleanup() }
+
+        try await h.makeCoordinator().importFiles(
+            urls: try h.makeImages(count: 2), settings: h.settings(albumName: "Trip"),
+            modelContext: h.context, progress: h.progress
+        )
+
+        let trip = try #require(try h.context.fetch(FetchDescriptor<AlbumRecord>()).first)
+        // The other half of the nullify rule: without explicit cleanup these
+        // records would survive as orphans with no album and no route back into
+        // the UI, since every view reaches images through an album.
+        for image in trip.images where image.albums.count <= 1 {
+            h.context.delete(image)
+        }
+        h.context.delete(trip)
+        try h.context.save()
+
+        #expect(try h.records().isEmpty)
     }
 
     // MARK: - Failure isolation

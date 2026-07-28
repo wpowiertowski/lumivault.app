@@ -516,15 +516,12 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 }
 
                 if let record = recordsBySHA[snap.sha256] {
-                    let isNewToAlbum: Bool
-                    if record.album != albumRecord {
-                        record.album = albumRecord
-                        isNewToAlbum = true
-                    } else {
-                        isNewToAlbum = !albumRecord.images.contains(record)
-                    }
-                    if isNewToAlbum && !albumRecord.images.contains(record) {
-                        albumRecord.images.append(record)
+                    // Membership is additive: importing an image that already
+                    // exists into a second album adds the album rather than
+                    // moving the record out of the first one.
+                    let isNewToAlbum = !record.albums.contains { $0 === albumRecord }
+                    if isNewToAlbum {
+                        record.albums.append(albumRecord)
                     }
 
                     let catalogImage = CatalogImage(

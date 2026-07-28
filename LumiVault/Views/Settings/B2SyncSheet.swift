@@ -62,7 +62,7 @@ struct B2SyncSheet: View {
     private var pendingImages: [ImageRecord] {
         images.filter { image in
             image.b2FileId == nil
-                && image.album != nil
+                && !image.albums.isEmpty
                 && !image.storageLocations.isEmpty
         }
     }
@@ -164,7 +164,7 @@ struct B2SyncSheet: View {
             }
 
             for image in pending {
-                guard let album = image.album else {
+                guard let album = image.primaryAlbum else {
                     skippedCount += 1
                     processedImages += 1
                     continue

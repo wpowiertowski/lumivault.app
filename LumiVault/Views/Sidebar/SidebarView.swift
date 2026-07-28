@@ -236,9 +236,16 @@ struct SidebarView: View {
                 await thumbSvc.removeThumbnails(for: input.sha256)
             }
 
-            // Remove from SwiftData (cascade deletes images)
+            // Remove from SwiftData. The album/image relationship is many-to-many
+            // with a nullify rule, so deleting the album only drops memberships —
+            // it no longer cascades. An image filed in another album must survive
+            // that album's deletion; one this was the last album for is now an
+            // orphan with no way back into the UI, so delete it explicitly.
             if selectedAlbum?.persistentModelID == album.persistentModelID {
                 selectedAlbum = nil
+            }
+            for image in album.images where image.albums.count <= 1 {
+                modelContext.delete(image)
             }
             modelContext.delete(album)
             try? modelContext.save()

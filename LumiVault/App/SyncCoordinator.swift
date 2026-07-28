@@ -314,12 +314,13 @@ final class SyncCoordinator: @unchecked Sendable {
     /// Flatten the catalog into the albums/images hydration will actually write.
     ///
     /// The nested containers are Dictionaries, so a raw walk visits albums in an
-    /// unspecified order. That matters because `ImageRecord.album` is to-one: an
-    /// image listed under two albums lands in whichever album the walk visits
-    /// last, so an unsorted walk can file it differently on each hydration and
-    /// the photo visibly jumps between albums with no user action. Sorting by
-    /// album key makes the winner stable — the last key in sort order — which is
-    /// arbitrary but at least the same on every run and every machine.
+    /// unspecified order. That used to decide which album an image ended up in:
+    /// while `ImageRecord.album` was to-one, an image listed under two albums
+    /// landed in whichever the walk visited last, and sorting only made that
+    /// arbitrary winner stable. The relationship is many-to-many now, so the
+    /// image is filed under all of them and visit order no longer changes the
+    /// result. Sorting is kept because deterministic insertion order still makes
+    /// `AlbumRecord` creation and `primaryAlbum` reproducible across machines.
     ///
     /// Shared with `isHydrationStale` so the staleness check and the work it
     /// gates agree on exactly which entries are hydratable.
@@ -439,14 +440,14 @@ final class SyncCoordinator: @unchecked Sendable {
                     if let duration = catalogImage.durationSeconds {
                         existing.durationSeconds = duration
                     }
-                    // Always point the record at the album it lives in per the
-                    // catalog being hydrated. Guarding on `album == nil` would
-                    // strand the record on a stale album when a restored catalog
-                    // re-dates/renames the album (new path → new AlbumRecord),
-                    // leaving the new album rendered empty. When the catalog files
-                    // one sha under several albums the last one wins; `plan` is
-                    // sorted by album key so "last" is at least deterministic.
-                    existing.album = album
+                    // Add the membership for the album currently being hydrated.
+                    // Under the old to-one relationship this was an assignment, so
+                    // an image filed under several albums ended up in whichever one
+                    // was hydrated last — every other album rendered it missing.
+                    // Membership is additive now, so all of them are correct.
+                    if !existing.albums.contains(where: { $0 === album }) {
+                        existing.albums.append(album)
+                    }
                 } else {
                     let record = ImageRecord(
                         sha256: catalogImage.sha256,
@@ -455,7 +456,7 @@ final class SyncCoordinator: @unchecked Sendable {
                         par2Filename: catalogImage.par2Filename,
                         b2FileId: catalogImage.b2FileId,
                         addedAt: catalogAlbum.addedAt,
-                        album: album,
+                        albums: [album],
                         isEncrypted: isEncrypted,
                         encryptionKeyId: catalogImage.encryptionKeyId,
                         encryptionNonce: nonce,

@@ -170,7 +170,7 @@ struct PhotoGridItem: View {
     private func regenerateFromDerivedPath(
         sha256: String, isEncrypted: Bool, nonce: Data?, known: [StorageLocation]
     ) async -> Bool {
-        guard recordIsLive, let album = image.album else { return false }
+        guard recordIsLive, let album = image.primaryAlbum else { return false }
         let relativePath = "\(album.year)/\(album.month)/\(album.day)/\(album.name)/\(image.filename)"
 
         var candidates = [StorageLocation(volumeID: Constants.Storage.libraryVolumeID, relativePath: relativePath)]
