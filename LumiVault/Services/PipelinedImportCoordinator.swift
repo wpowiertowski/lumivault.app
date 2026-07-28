@@ -776,7 +776,13 @@ class PipelinedImportCoordinator: @unchecked Sendable {
     }
 
     /// Decodes/re-encodes/resizes images. CPU-heavy work runs off-main.
-    private nonisolated func runConversionStage(
+    ///
+    /// Internal (not private) so the cancellation contract every stage shares can
+    /// be unit-tested against a real stage body. All eight stages use the same
+    /// `for await … if Task.isCancelled { break }` shape; this is the cheapest one
+    /// to drive from a test (channels, settings, a staging directory — no Photos,
+    /// SwiftData, or network), and `break` vs `continue` is what abe7b51 fixed.
+    nonisolated func runConversionStage(
         inputCh: AsyncChannel<PipelineItem>,
         outputCh: AsyncChannel<PipelineItem>,
         settings: ImportSettings,
@@ -1232,8 +1238,6 @@ class PipelinedImportCoordinator: @unchecked Sendable {
     /// copy of *this* file to replace, never a different asset to clobber. Throws
     /// if the copy ultimately fails so the caller records a real per-volume error
     /// instead of a phantom success.
-    /// Copy `source` to `dest` unless an identically-sized file is already there.
-    /// A partial or empty leftover is replaced rather than trusted.
     ///
     /// Internal (not private) so the copy stage's idempotency can be unit-tested —
     /// it is what makes a re-run of an interrupted import cheap instead of

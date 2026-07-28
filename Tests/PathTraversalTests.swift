@@ -134,49 +134,43 @@ struct CatalogMergeSanitizationTests {
 // user-visible location — under the sandbox, `.picturesDirectory` returns a
 // container-scoped alias to `~/Pictures`.
 
-@Suite(.serialized)
+// These drive `resolveCatalogURL(override:)` rather than setting
+// `UserDefaults.standard["catalogPath"]` around each assertion. That key is
+// process-wide, and `.serialized` only orders tests *within* a suite — every
+// other suite still runs concurrently, so a temporarily overridden catalog path
+// would be visible to anything that reaches `resolvedCatalogURL` (catalogService
+// .save(to:), migrateLegacyCatalogIfNeeded) at that moment. Passing the override
+// in tests the same resolution with no shared mutable state.
+
+@Suite
 @MainActor
 struct CatalogPathResolutionTests {
 
-    /// The override key read by `Constants.Paths.resolvedCatalogURL`.
-    private static let overrideKey = "catalogPath"
-
-    private func withCatalogPathOverride(_ value: String?, _ body: () -> Void) {
-        let defaults = UserDefaults.standard
-        let original = defaults.string(forKey: Self.overrideKey)
-        defer {
-            if let original {
-                defaults.set(original, forKey: Self.overrideKey)
-            } else {
-                defaults.removeObject(forKey: Self.overrideKey)
-            }
-        }
-        if let value {
-            defaults.set(value, forKey: Self.overrideKey)
-        } else {
-            defaults.removeObject(forKey: Self.overrideKey)
-        }
-        body()
-    }
-
     @Test func defaultsToCatalogJSONInsideTheLibrary() {
-        withCatalogPathOverride(nil) {
-            let url = Constants.Paths.resolvedCatalogURL
-            #expect(url.lastPathComponent == "catalog.json")
-            #expect(url.deletingLastPathComponent().path == Constants.Paths.libraryURL.path)
-        }
+        let url = Constants.Paths.resolveCatalogURL(override: nil)
+        #expect(url.lastPathComponent == "catalog.json")
+        #expect(url.deletingLastPathComponent().path == Constants.Paths.libraryURL.path)
     }
 
     @Test func honoursAnExplicitOverrideAndExpandsTilde() {
-        withCatalogPathOverride("/Volumes/Archive/catalog.json") {
-            #expect(Constants.Paths.resolvedCatalogURL.path == "/Volumes/Archive/catalog.json")
-        }
+        #expect(Constants.Paths.resolveCatalogURL(override: "/Volumes/Archive/catalog.json").path
+                == "/Volumes/Archive/catalog.json")
 
-        withCatalogPathOverride("~/Documents/catalog.json") {
-            let expected = ("~/Documents/catalog.json" as NSString).expandingTildeInPath
-            #expect(Constants.Paths.resolvedCatalogURL.path == expected)
-            #expect(!Constants.Paths.resolvedCatalogURL.path.hasPrefix("~"))
-        }
+        let tilde = Constants.Paths.resolveCatalogURL(override: "~/Documents/catalog.json")
+        #expect(tilde.path == ("~/Documents/catalog.json" as NSString).expandingTildeInPath)
+        #expect(!tilde.path.hasPrefix("~"))
+    }
+
+    @Test func theLiveAccessorReadsTheOverrideKeyItDocuments() {
+        // The split above is only safe while `resolvedCatalogURL` still feeds the
+        // same key into the same function, so pin that wiring — without leaving a
+        // mutated global behind for a concurrently running suite to trip over.
+        let key = Constants.Paths.catalogPathDefaultsKey
+        #expect(key == "catalogPath")
+        let expected = Constants.Paths.resolveCatalogURL(
+            override: UserDefaults.standard.string(forKey: key)
+        )
+        #expect(Constants.Paths.resolvedCatalogURL == expected)
     }
 
     @Test func libraryPathIsSymlinkResolvedAndUserVisible() {

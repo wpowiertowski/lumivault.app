@@ -18,7 +18,12 @@
 set -e
 
 # Mirror ci.yml's paths-ignore: a docs-only commit does not need the suite.
-staged=$(git diff --cached --name-only --diff-filter=ACMR)
+#
+# No --diff-filter: a deletion changes the build just as much as an edit does.
+# Filtering to ACMR made `git rm Foo.swift && git commit` look like an empty (or
+# markdown-only) staging area, so the one commit shape most likely to break the
+# build was the one that skipped the tests.
+staged=$(git diff --cached --name-only)
 if [ -z "$staged" ]; then
     exit 0
 fi

@@ -157,6 +157,13 @@ jobs:
             exit 1
           fi
 
+      # UI tests need a real app launch and are unreliable headless (see
+      # TEST-PLAN.md), so `-only-testing` runs just the unit bundle. It does not
+      # narrow the *build*: the LumiVault scheme's test action includes
+      # LumiVaultUITests (project.yml), so this step still compiles that target
+      # and catches the Sendable/toolchain drift that broke #25 and #43 — which
+      # only ever showed up as a compile error. A separate `build-for-testing`
+      # step for the same scheme would rebuild everything for no extra coverage.
       - name: Run unit tests
         run: |
           xcodebuild test \
@@ -164,18 +171,6 @@ jobs:
             -scheme LumiVault \
             -destination 'platform=macOS' \
             -only-testing:LumiVaultTests \
-            CODE_SIGNING_ALLOWED=NO
-
-      # UI tests need a real app launch and are unreliable headless (see
-      # TEST-PLAN.md), so compile them without running: that still catches the
-      # Sendable/toolchain drift that broke #25 and #43, which only ever showed
-      # up as a compile error.
-      - name: Compile UI test target (no execution)
-        run: |
-          xcodebuild build-for-testing \
-            -project LumiVault.xcodeproj \
-            -scheme LumiVault \
-            -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO
 
   # Debug-only builds let `-O`-specific diagnostics reach Xcode Cloud first.
@@ -268,11 +263,19 @@ jobs:
       - name: Regenerate project from project.yml
         run: xcodegen generate
 
+      # `git status --porcelain`, not `git diff`: regenerating can *add* files
+      # (a new shared scheme under xcshareddata/xcschemes/ when a target or
+      # scheme is added to project.yml), and `git diff` is blind to untracked
+      # paths — so the drift this job exists to catch would pass unnoticed and
+      # Xcode Cloud would build from a project missing that scheme.
       - name: Fail if the committed project drifted
         run: |
-          if ! git diff --exit-code -- LumiVault.xcodeproj; then
+          drift="$(git status --porcelain -- LumiVault.xcodeproj)"
+          if [ -n "$drift" ]; then
             echo "::error::LumiVault.xcodeproj is out of date with project.yml."
             echo "Run 'xcodegen generate' (XcodeGen ${XCODEGEN_VERSION}) and commit the result."
+            echo "$drift"
+            git diff -- LumiVault.xcodeproj
             exit 1
           fi
           echo "OK: committed project matches project.yml."

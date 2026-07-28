@@ -102,21 +102,6 @@ nonisolated struct CatalogImage: Codable, Sendable, Equatable {
 // MARK: - Semantic comparison & merge helpers
 
 nonisolated extension Catalog {
-    /// Total number of images across the whole tree.
-    var totalImageCount: Int {
-        var count = 0
-        for year in years.values {
-            for month in year.months.values {
-                for day in month.days.values {
-                    for album in day.albums.values {
-                        count += album.images.count
-                    }
-                }
-            }
-        }
-        return count
-    }
-
     /// Semantic equality that ignores `lastUpdated` and the ordering of each
     /// album's images. Two catalogs that hold the same albums and images are
     /// equal even when their JSON bytes differ (formatting, key order, array

@@ -108,6 +108,40 @@ final class PhotosImportProgress: @unchecked Sendable {
     /// Multi-album tracking: files fully processed in previously completed albums.
     var completedAlbumFiles: Int = 0
 
+    // MARK: - Run/album lifecycle
+    //
+    // `fraction` is driven by counters that are reset and accumulated by hand
+    // across albums, and this object outlives a single import — the sheet holds
+    // one `@State` instance for its whole lifetime. Those resets live here rather
+    // than inline in the sheet so the sequence is unit-testable; when it lived in
+    // the view, a missed reset (5233888) could only be caught by eye.
+
+    /// Begin an import run covering `globalTotalFiles` assets in total.
+    /// Pass 0 for a single-album run: that clears the multi-album weighting so a
+    /// run earlier in the same sheet cannot leave `fraction` measuring this
+    /// import against the previous run's grand total.
+    func beginRun(globalTotalFiles: Int) {
+        self.globalTotalFiles = globalTotalFiles
+        self.completedAlbumFiles = 0
+    }
+
+    /// Reset the counters `fraction` reads per album, before importing one.
+    /// `filesCataloged` in particular must be cleared: leaking it from a larger
+    /// previous album drove the bar past 100% on the next, smaller one (5233888).
+    func beginAlbum() {
+        phase = .importing
+        currentFile = 0
+        totalFiles = 0
+        currentFilename = ""
+        filesCataloged = 0
+    }
+
+    /// Bank the album that just finished into the global position, so the next
+    /// album's progress picks up where this one left off.
+    func finishAlbum() {
+        completedAlbumFiles += totalFiles
+    }
+
     /// Text for the main import pipeline label.
     /// Multiple parallel stages running → "Processing items";
     /// exactly one → that stage's description; none → the current phase rawValue.

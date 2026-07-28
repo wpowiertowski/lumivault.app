@@ -2794,6 +2794,61 @@ struct ImportProgressBoundsTests {
         #expect(progress.fraction >= 0.0)
     }
 
+    // The clamp above is a backstop, not the fix: it turns "the bar reads 370%"
+    // into "the bar pins at 100% for the rest of the run", which is equally wrong.
+    // The actual fix is `beginAlbum()` clearing the per-album counters. These two
+    // tests pin the *expected* fraction through the real run/album sequence, so
+    // dropping a reset fails them instead of being swallowed by the clamp.
+
+    @Test func aSmallerSecondAlbumReportsItsOwnProgressRatherThanTheFirstAlbumsCount() {
+        let progress = PhotosImportProgress()
+        progress.beginRun(globalTotalFiles: 25)
+
+        // Album A: 20 files, imported to completion. The pipeline *increments*
+        // `filesCataloged` per file, so these tests do too — assigning it would
+        // paper over exactly the leak under test.
+        progress.beginAlbum()
+        progress.totalFiles = 20
+        progress.phase = .hashing
+        for _ in 0..<20 { progress.filesCataloged += 1 }
+        progress.finishAlbum()
+
+        // Album B: only 5 files, 3 of them cataloged so far.
+        progress.beginAlbum()
+        progress.totalFiles = 5
+        progress.phase = .hashing
+        for _ in 0..<3 { progress.filesCataloged += 1 }
+
+        // 20/25 banked, plus album B's own 0.1 + (3/5)*0.9 = 0.64 over its 5/25
+        // share. Without the reset `filesCataloged` is still 20 and album B reads
+        // a full 1.0, pushing this to exactly 1.0.
+        #expect(abs(progress.fraction - 0.928) < 0.001)
+    }
+
+    @Test func aSingleAlbumRunIsNotWeightedByAnEarlierMultiAlbumRun() {
+        let progress = PhotosImportProgress()
+
+        // A three-album run in this sheet, carried to completion.
+        progress.beginRun(globalTotalFiles: 100)
+        progress.beginAlbum()
+        progress.totalFiles = 100
+        progress.phase = .hashing
+        for _ in 0..<100 { progress.filesCataloged += 1 }
+        progress.finishAlbum()
+        #expect(progress.fraction == 1.0)
+
+        // The user goes back and imports a single album without dismissing the
+        // sheet. `progress` is the same object, so the old globals have to go.
+        progress.beginRun(globalTotalFiles: 0)
+        progress.beginAlbum()
+        progress.totalFiles = 10
+        progress.phase = .hashing
+        for _ in 0..<5 { progress.filesCataloged += 1 }
+
+        // 0.1 + (5/10)*0.9. Leaving the globals set pins this at 1.0 instead.
+        #expect(abs(progress.fraction - 0.55) < 0.001)
+    }
+
     @Test func fractionStaysInRangeAcrossPhasesAndCounts() {
         let phases: [ImportPhase] = [.importing, .removing, .hashing, .encrypting,
                                      .par2, .copying, .uploading, .cataloging, .complete]
@@ -2868,10 +2923,15 @@ struct ImportProgressBoundsTests {
 // inaccessible after a reboot. `resolveAccessAndRefresh` is the API that fix
 // introduced.
 //
-// Security-scoped bookmarks require the app-sandbox entitlement. The SwiftPM test
-// process has none, so bookmark creation can fail there; these tests skip in that
-// case rather than fail, and run for real under `xcodebuild test`, where the
-// bundle is hosted by the entitled app.
+// These assert unconditionally. An earlier version skipped on a failed
+// `createBookmark` — on the theory that security-scoped bookmarks need the
+// app-sandbox entitlement and only `xcodebuild test` supplies it — but that was
+// wrong in both directions: `.withSecurityScope` bookmarks are created and
+// resolved fine in an *unsandboxed* process (so the skip never fired), and CI's
+// xcodebuild run passes CODE_SIGNING_ALLOWED=NO, so no entitlement is applied
+// there either. The net effect of the skip would have been to turn these into
+// silent no-ops the moment bookmarking did start failing — exactly when the
+// 25a3a7c regression would need guarding. Let a failure be a failure.
 
 @Suite
 @MainActor
@@ -2888,7 +2948,7 @@ struct BookmarkResolverTests {
         let dir = try makeScratchDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        guard let data = try? BookmarkResolver.createBookmark(for: dir) else { return }
+        let data = try BookmarkResolver.createBookmark(for: dir)
 
         let (url, isStale) = try BookmarkResolver.resolve(data)
         #expect(url.resolvingSymlinksInPath().path == dir.resolvingSymlinksInPath().path)
@@ -2899,8 +2959,8 @@ struct BookmarkResolverTests {
         let dir = try makeScratchDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        guard let data = try? BookmarkResolver.createBookmark(for: dir) else { return }
-        guard let (url, refreshed) = try? BookmarkResolver.resolveAccessAndRefresh(data) else { return }
+        let data = try BookmarkResolver.createBookmark(for: dir)
+        let (url, refreshed) = try BookmarkResolver.resolveAccessAndRefresh(data)
         defer { url.stopAccessingSecurityScopedResource() }
 
         // A fresh bookmark is not stale, so there is nothing to write back.
@@ -3046,6 +3106,70 @@ struct HydrationTests {
         #expect(!SyncCoordinator.isHydrationStale(catalog: catalog, context: context))
     }
 
+    // Staleness has to be measured against the records `hydrate` produces, not
+    // against the catalog's raw entry count. Where the two disagree the check can
+    // never be satisfied, so every sync tick re-runs a full main-thread hydration
+    // — the hang 6dd8ad4 removed, reintroduced through the back door. Both
+    // catalogs below are perfectly ordinary, not corrupt.
+
+    @Test func hydrationSettlesForAnImageFiledUnderTwoAlbums() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        // The same photo imported into two albums: 3 catalog entries, but
+        // `ImageRecord.sha256` is unique so only 2 records can ever exist.
+        let catalog = makeCatalog(albums: [
+            "Trip": [image("aa", "one.heic"), image("bb", "two.heic")],
+            "Beach": [image("aa", "one.heic")]
+        ])
+
+        #expect(SyncCoordinator.isHydrationStale(catalog: catalog, context: context))
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        #expect(try context.fetchCount(FetchDescriptor<ImageRecord>()) == 2)
+        #expect(!SyncCoordinator.isHydrationStale(catalog: catalog, context: context))
+    }
+
+    @Test func hydrationSettlesWhenTheCatalogHoldsUnsafeEntries() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        // The skipped entry is never a record, so counting it leaves the store
+        // permanently "stale" no matter how many times hydration runs.
+        let catalog = makeCatalog(albums: [
+            "Trip": [image("aa", "ok.heic")],
+            "../../escape": [image("bb", "bad.heic")]
+        ])
+
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        #expect(!SyncCoordinator.isHydrationStale(catalog: catalog, context: context))
+    }
+
+    @Test func multiAlbumImageLandsInTheSameAlbumOnEveryHydration() throws {
+        // `ImageRecord.album` is to-one and the catalog's containers are
+        // Dictionaries, so an unsorted walk files a two-album image by whichever
+        // album it happened to visit last — and the photo jumps between albums
+        // between hydrations with no user action. Sorting by album key makes the
+        // winner arbitrary but stable.
+        let catalog = makeCatalog(albums: [
+            "Alpha": [image("aa", "one.heic")],
+            "Beach": [image("aa", "one.heic")],
+            "Zulu": [image("aa", "one.heic")]
+        ])
+
+        var landedIn: [String] = []
+        for _ in 0..<5 {
+            // Bind the container: `makeContainer().mainContext` alone lets the
+            // container deallocate out from under the context.
+            let container = try makeContainer()
+            SyncCoordinator.hydrate(catalog: catalog, into: container.mainContext)
+            let record = try #require(
+                try container.mainContext.fetch(FetchDescriptor<ImageRecord>()).first
+            )
+            landedIn.append(try #require(record.album?.name))
+        }
+        #expect(Set(landedIn).count == 1)
+        // Last key in sort order wins.
+        #expect(landedIn.first == "Zulu")
+    }
+
     @Test func hydrationSkipsEntriesWithTraversingPathComponents() throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -3136,7 +3260,8 @@ struct HydrationTests {
         // What is left is a deterministic correctness check at a size where the old
         // per-image `FetchDescriptor` shape would be pathological — a genuine
         // reintroduction shows up as a job timeout rather than a clean assertion.
-        // See REGRESSION-TEST-PLAN.md §7.1: bug #30's complexity is not fenced.
+        // See TEST-PLAN.md "Remaining Automated Test TODOs": bug #30's
+        // complexity is not fenced.
         let container = try makeContainer()
         let context = container.mainContext
         let images = (0..<2000).map { image(String(format: "%08x", $0), "img\($0).heic") }
@@ -3352,33 +3477,74 @@ struct ChannelCancellationDrainTests {
         #expect(drained == 5)
     }
 
-    @Test func breakingConsumerStopsWellBeforeDrainingTheBacklog() async {
-        let channel = AsyncChannel<Int>(bufferSize: 16)
-        for i in 0..<6 { await channel.send(i) }
-        channel.finish()
+    /// Drives a real pipeline stage, not a copy of one: `runConversionStage` has
+    /// the same `for await … if Task.isCancelled { break }` body as the other
+    /// seven, so reverting that `break` to `continue` fails this test.
+    ///
+    /// `continue` and `break` differ in exactly one observable: how much of the
+    /// input channel the stage dequeues before returning. Nothing else in the
+    /// body runs — the cancellation check sits above the work — so the assertion
+    /// is on what is *left* in the channel afterwards. The whole backlog is
+    /// buffered up front so `next()` never suspends: a suspended `next()` returns
+    /// nil on a cancelled task, which would end the loop on its own and mask the
+    /// difference. No sleeps, no wall-clock assumptions.
+    @Test func cancelledStageStopsConsumingInsteadOfDrainingTheBacklog() async throws {
+        let staging = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumivault-cancel-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: staging) }
 
-        let processed = Locked(0)
-        let firstItemDone = AsyncSemaphore(count: 0)
+        let backlog = 6
+        // Buffer everything up front, so no send blocks and no dequeue suspends.
+        let inputCh = AsyncChannel<PipelineItem>(bufferSize: backlog + 2)
+        let outputCh = AsyncChannel<PipelineItem>(bufferSize: backlog + 2)
 
-        let task = Task {
-            for await _ in channel.stream {
-                if Task.isCancelled { break }
-                processed.mutate { $0 += 1 }
-                await channel.consumed()
-                await firstItemDone.signal()
-                // Hold the loop open long enough for the test to cancel. A
-                // cancelled sleep throws immediately, so teardown stays fast.
-                try? await Task.sleep(nanoseconds: 50_000_000)
-            }
+        // Videos take the stage's pass-through path, so no image codec runs and
+        // the shape of the loop is all that is under test.
+        for index in 0..<backlog {
+            await inputCh.send(PipelineItem(
+                albumName: "Cancel",
+                importDate: Date(timeIntervalSince1970: 1_700_000_000),
+                fileURL: staging.appendingPathComponent("clip-\(index).mov"),
+                originalFilename: "clip-\(index).mov",
+                phAssetLocalIdentifier: nil,
+                mediaType: .video
+            ))
         }
+        inputCh.finish()
 
-        await firstItemDone.wait()
-        task.cancel()
-        _ = await task.value
+        let coordinator = await PipelinedImportCoordinator(
+            catalogService: CatalogService(),
+            encryptionService: EncryptionService()
+        )
+        let progress = await PhotosImportProgress()
 
-        // With `continue` this would be 6 — the whole buffer drained after cancel.
-        #expect(processed.value >= 1)
-        #expect(processed.value < 6)
+        // Cancel before the stage starts, so the very first iteration is the one
+        // that has to exit: `Task.isCancelled` is already true at the check.
+        let stage = Task {
+            await coordinator.runConversionStage(
+                inputCh: inputCh,
+                outputCh: outputCh,
+                settings: ImportSettings(albumName: "Cancel", year: "2026", month: "07", day: "20"),
+                staging: staging,
+                progress: progress
+            )
+        }
+        stage.cancel()
+        await stage.value
+
+        // The stage dequeued one item and left the rest. With `continue` it walks
+        // the whole backlog before the stream ends and this is 0 — which is the
+        // "cancelling an import keeps processing everything queued" bug itself.
+        var remaining = 0
+        for await _ in inputCh.stream { remaining += 1 }
+        #expect(remaining == backlog - 1)
+
+        // A cancelled stage must not forward work downstream either. The stage's
+        // own `defer` finished `outputCh`, so this iteration terminates.
+        var forwarded = 0
+        for await _ in outputCh.stream { forwarded += 1 }
+        #expect(forwarded == 0)
     }
 }
 
@@ -3761,8 +3927,11 @@ struct HealReplicasTests {
         )
 
         #expect(results.count == 1)
-        guard case .restoredToVolume(let volumeID, let source) = results[0].outcome else {
-            Issue.record("Expected a volume restore, got \(results[0].outcome)")
+        // `try #require`, not `results[0]`: an empty array must fail this one test,
+        // not trap and take the whole in-process test run down with it.
+        let result = try #require(results.first)
+        guard case .restoredToVolume(let volumeID, let source) = result.outcome else {
+            Issue.record("Expected a volume restore, got \(result.outcome)")
             return
         }
         #expect(volumeID == "vol-a")
@@ -3795,8 +3964,9 @@ struct HealReplicasTests {
             progress: ReconciliationProgress()
         )
 
-        guard case .failed(let reason) = results[0].outcome else {
-            Issue.record("Expected a failure, got \(results[0].outcome)")
+        let result = try #require(results.first)
+        guard case .failed(let reason) = result.outcome else {
+            Issue.record("Expected a failure, got \(result.outcome)")
             return
         }
         // A discrepancy that cannot be healed must be reported, not silently dropped.
@@ -3826,7 +3996,7 @@ struct HealReplicasTests {
             progress: ReconciliationProgress()
         )
 
-        guard case .failed = results[0].outcome else {
+        guard case .failed = try #require(results.first).outcome else {
             Issue.record("A traversing relativePath must not be written")
             return
         }

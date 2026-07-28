@@ -238,12 +238,110 @@ final class SyncCoordinator: @unchecked Sendable {
     /// (counts match → no full hydration) while still repairing an empty/reset
     /// store even when catalog.json already agrees with iCloud.
     ///
+    /// Compared against the number of records `hydrate` would actually produce —
+    /// distinct *safe* SHAs — not the catalog's raw entry count. Those two differ
+    /// for entirely ordinary catalogs: `ImageRecord.sha256` is
+    /// `@Attribute(.unique)` and `hydrate` keys by sha, so one photo filed under
+    /// two albums is 2 entries but 1 record. Entries `hydrate` rejects for unsafe
+    /// path components are likewise never records. Comparing entries made this
+    /// unsatisfiable in both cases, and a staleness check that can never be
+    /// satisfied re-runs a full main-thread hydration on every sync tick — the
+    /// hang 6dd8ad4 removed.
+    ///
     /// Static and context-injected so it can be exercised against an in-memory
     /// ModelContainer; the instance wrappers above supply `mainContext`.
     @MainActor
     static func isHydrationStale(catalog: Catalog, context: ModelContext) -> Bool {
         let recordCount = (try? context.fetchCount(FetchDescriptor<ImageRecord>())) ?? 0
-        return recordCount != catalog.totalImageCount
+        return recordCount != hydratableAlbums(in: catalog).distinctSHACount
+    }
+
+    /// One album the catalog contributes to SwiftData, with its path components
+    /// already validated and its images filtered to the safe ones.
+    struct HydratableAlbum {
+        let key: String
+        let year: String
+        let month: String
+        let day: String
+        let name: String
+        let addedAt: Date
+        let images: [CatalogImage]
+    }
+
+    /// The albums and images `hydrate` would upsert, in a deterministic order.
+    struct HydrationPlan {
+        let albums: [HydratableAlbum]
+        /// Entries dropped because a path component would escape the album directory.
+        let skippedCount: Int
+        /// One SwiftData record exists per distinct sha, not per catalog entry.
+        let distinctSHACount: Int
+    }
+
+    /// Flatten the catalog into the albums/images hydration will actually write.
+    ///
+    /// The nested containers are Dictionaries, so a raw walk visits albums in an
+    /// unspecified order. That matters because `ImageRecord.album` is to-one: an
+    /// image listed under two albums lands in whichever album the walk visits
+    /// last, so an unsorted walk can file it differently on each hydration and
+    /// the photo visibly jumps between albums with no user action. Sorting by
+    /// album key makes the winner stable — the last key in sort order — which is
+    /// arbitrary but at least the same on every run and every machine.
+    ///
+    /// Shared with `isHydrationStale` so the staleness check and the work it
+    /// gates agree on exactly which entries are hydratable.
+    nonisolated static func hydratableAlbums(in catalog: Catalog) -> HydrationPlan {
+        var albums: [HydratableAlbum] = []
+        var skippedCount = 0
+        var distinctSHAs = Set<String>()
+
+        for (year, yearData) in catalog.years {
+            for (month, monthData) in yearData.months {
+                for (day, dayData) in monthData.days {
+                    for (albumName, catalogAlbum) in dayData.albums {
+                        // Reject tampered catalog entries whose path keys would escape the
+                        // album directory (path traversal). These keys are joined into
+                        // filesystem paths by export/sync/delete/reconcile flows.
+                        guard PathComponentValidation.isSafeAlbum(
+                            year: year, month: month, day: day, albumName: albumName
+                        ) else {
+                            skippedCount += catalogAlbum.images.count
+                            continue
+                        }
+
+                        // Skip images whose filename/par2 name would traverse out of
+                        // the album directory.
+                        var safeImages: [CatalogImage] = []
+                        for catalogImage in catalogAlbum.images {
+                            guard PathComponentValidation.isSafe(catalogImage.filename),
+                                  catalogImage.par2Filename.isEmpty
+                                    || PathComponentValidation.isSafe(catalogImage.par2Filename) else {
+                                skippedCount += 1
+                                continue
+                            }
+                            safeImages.append(catalogImage)
+                            distinctSHAs.insert(catalogImage.sha256)
+                        }
+
+                        albums.append(HydratableAlbum(
+                            key: "\(year)/\(month)/\(day)/\(albumName)",
+                            year: year,
+                            month: month,
+                            day: day,
+                            name: albumName,
+                            addedAt: catalogAlbum.addedAt,
+                            images: safeImages
+                        ))
+                    }
+                }
+            }
+        }
+
+        albums.sort { $0.key < $1.key }
+        return HydrationPlan(
+            albums: albums,
+            skippedCount: skippedCount,
+            distinctSHACount: distinctSHAs.count
+        )
     }
 
     /// Upsert the catalog into SwiftData. Never deletes except via tombstones, so
@@ -264,95 +362,74 @@ final class SyncCoordinator: @unchecked Sendable {
             imagesBySHA[image.sha256] = image
         }
 
-        var skippedCount = 0
         // Track what the (post-merge) catalog contains so tombstone-driven
         // deletions below never touch a path/sha the catalog still holds.
         var catalogAlbumKeys = Set<String>()
         var catalogSHAs = Set<String>()
 
-        for (year, yearData) in catalog.years {
-            for (month, monthData) in yearData.months {
-                for (day, dayData) in monthData.days {
-                    for (albumName, catalogAlbum) in dayData.albums {
-                        // Reject tampered catalog entries whose path keys would escape the
-                        // album directory (path traversal). These keys are joined into
-                        // filesystem paths by export/sync/delete/reconcile flows.
-                        guard PathComponentValidation.isSafeAlbum(
-                            year: year, month: month, day: day, albumName: albumName
-                        ) else {
-                            skippedCount += catalogAlbum.images.count
-                            continue
-                        }
+        let plan = hydratableAlbums(in: catalog)
+        let skippedCount = plan.skippedCount
 
-                        let albumKey = "\(year)/\(month)/\(day)/\(albumName)"
-                        catalogAlbumKeys.insert(albumKey)
-                        let album: AlbumRecord
-                        if let existing = albumsByKey[albumKey] {
-                            album = existing
-                        } else {
-                            album = AlbumRecord(
-                                name: albumName,
-                                year: year,
-                                month: month,
-                                day: day,
-                                addedAt: catalogAlbum.addedAt
-                            )
-                            context.insert(album)
-                            albumsByKey[albumKey] = album
-                        }
+        for catalogAlbum in plan.albums {
+            catalogAlbumKeys.insert(catalogAlbum.key)
+            let album: AlbumRecord
+            if let existing = albumsByKey[catalogAlbum.key] {
+                album = existing
+            } else {
+                album = AlbumRecord(
+                    name: catalogAlbum.name,
+                    year: catalogAlbum.year,
+                    month: catalogAlbum.month,
+                    day: catalogAlbum.day,
+                    addedAt: catalogAlbum.addedAt
+                )
+                context.insert(album)
+                albumsByKey[catalogAlbum.key] = album
+            }
 
-                        for catalogImage in catalogAlbum.images {
-                            // Skip images whose filename/par2 name would traverse out of
-                            // the album directory.
-                            guard PathComponentValidation.isSafe(catalogImage.filename),
-                                  catalogImage.par2Filename.isEmpty
-                                    || PathComponentValidation.isSafe(catalogImage.par2Filename) else {
-                                skippedCount += 1
-                                continue
-                            }
-                            catalogSHAs.insert(catalogImage.sha256)
-                            let nonce = catalogImage.encryptionNonce.flatMap { Data(base64Encoded: $0) }
-                            let isEncrypted = catalogImage.encryptionAlgorithm != nil
-                            if let existing = imagesBySHA[catalogImage.sha256] {
-                                existing.filename = catalogImage.filename
-                                existing.sizeBytes = catalogImage.sizeBytes
-                                existing.par2Filename = catalogImage.par2Filename
-                                existing.b2FileId = catalogImage.b2FileId
-                                existing.isEncrypted = isEncrypted
-                                existing.encryptionKeyId = catalogImage.encryptionKeyId
-                                existing.encryptionNonce = nonce
-                                if let mediaTypeRaw = catalogImage.mediaType {
-                                    existing.mediaTypeRaw = mediaTypeRaw
-                                }
-                                if let duration = catalogImage.durationSeconds {
-                                    existing.durationSeconds = duration
-                                }
-                                // Always point the record at the album it lives in per the
-                                // catalog being hydrated. Guarding on `album == nil` would
-                                // strand the record on a stale album when a restored catalog
-                                // re-dates/renames the album (new path → new AlbumRecord),
-                                // leaving the new album rendered empty.
-                                existing.album = album
-                            } else {
-                                let record = ImageRecord(
-                                    sha256: catalogImage.sha256,
-                                    filename: catalogImage.filename,
-                                    sizeBytes: catalogImage.sizeBytes,
-                                    par2Filename: catalogImage.par2Filename,
-                                    b2FileId: catalogImage.b2FileId,
-                                    addedAt: catalogAlbum.addedAt,
-                                    album: album,
-                                    isEncrypted: isEncrypted,
-                                    encryptionKeyId: catalogImage.encryptionKeyId,
-                                    encryptionNonce: nonce,
-                                    mediaType: catalogImage.mediaType.flatMap(MediaType.init(rawValue:)) ?? .image,
-                                    durationSeconds: catalogImage.durationSeconds
-                                )
-                                context.insert(record)
-                                imagesBySHA[catalogImage.sha256] = record
-                            }
-                        }
+            for catalogImage in catalogAlbum.images {
+                catalogSHAs.insert(catalogImage.sha256)
+                let nonce = catalogImage.encryptionNonce.flatMap { Data(base64Encoded: $0) }
+                let isEncrypted = catalogImage.encryptionAlgorithm != nil
+                if let existing = imagesBySHA[catalogImage.sha256] {
+                    existing.filename = catalogImage.filename
+                    existing.sizeBytes = catalogImage.sizeBytes
+                    existing.par2Filename = catalogImage.par2Filename
+                    existing.b2FileId = catalogImage.b2FileId
+                    existing.isEncrypted = isEncrypted
+                    existing.encryptionKeyId = catalogImage.encryptionKeyId
+                    existing.encryptionNonce = nonce
+                    if let mediaTypeRaw = catalogImage.mediaType {
+                        existing.mediaTypeRaw = mediaTypeRaw
                     }
+                    if let duration = catalogImage.durationSeconds {
+                        existing.durationSeconds = duration
+                    }
+                    // Always point the record at the album it lives in per the
+                    // catalog being hydrated. Guarding on `album == nil` would
+                    // strand the record on a stale album when a restored catalog
+                    // re-dates/renames the album (new path → new AlbumRecord),
+                    // leaving the new album rendered empty. When the catalog files
+                    // one sha under several albums the last one wins; `plan` is
+                    // sorted by album key so "last" is at least deterministic.
+                    existing.album = album
+                } else {
+                    let record = ImageRecord(
+                        sha256: catalogImage.sha256,
+                        filename: catalogImage.filename,
+                        sizeBytes: catalogImage.sizeBytes,
+                        par2Filename: catalogImage.par2Filename,
+                        b2FileId: catalogImage.b2FileId,
+                        addedAt: catalogAlbum.addedAt,
+                        album: album,
+                        isEncrypted: isEncrypted,
+                        encryptionKeyId: catalogImage.encryptionKeyId,
+                        encryptionNonce: nonce,
+                        mediaType: catalogImage.mediaType.flatMap(MediaType.init(rawValue:)) ?? .image,
+                        durationSeconds: catalogImage.durationSeconds
+                    )
+                    context.insert(record)
+                    imagesBySHA[catalogImage.sha256] = record
                 }
             }
         }
@@ -486,7 +563,9 @@ final class SyncCoordinator: @unchecked Sendable {
 
         // An explicit override means the user chose where the catalog lives; never
         // move it out from under them.
-        guard UserDefaults.standard.string(forKey: "catalogPath") == nil else { return }
+        guard UserDefaults.standard.string(
+            forKey: Constants.Paths.catalogPathDefaultsKey
+        ) == nil else { return }
 
         Self.migrateCatalog(
             from: Constants.Paths.legacyContainerCatalogURL.deletingLastPathComponent(),

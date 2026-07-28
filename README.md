@@ -124,7 +124,7 @@ LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool
 
 ## Testing
 
-296 unit tests across 56 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
+302 unit tests across 56 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
 
 ```bash
 swift test                                    # Run all unit tests
@@ -167,15 +167,15 @@ xcodebuild test -project LumiVault.xcodeproj -scheme LumiVault -destination 'pla
 | B2LargeFileTests | 7 | Large-file API: start/part/finish, cancel, threshold routing, and raw-vs-encoded remote path on both upload routes |
 | SyncServiceTests | 20 | push/pull/merge, echo suppression, convergent merge, tombstone propagation and backwards compatibility |
 | SettingsSyncServiceTests | 8 | settings.json push/pull, volume-slot merge per host, encryption identity adoption |
-| HydrationTests | 8 | Rebuild SwiftData from a catalog: empty store, idempotent upsert, local-only field preservation, staleness, tombstones, large catalog |
+| HydrationTests | 11 | Rebuild SwiftData from a catalog: empty store, idempotent upsert, local-only field preservation, staleness (incl. multi-album and skipped entries), deterministic album assignment, tombstones, large catalog |
 | CatalogMigrationTests | 6 | Legacy catalog + sidecar migration, never clobbers, and library-as-storage-target resolution |
-| CatalogPathResolutionTests | 4 | Catalog path override, tilde expansion, symlink-resolved library path |
+| CatalogPathResolutionTests | 5 | Catalog path override and tilde expansion without touching process-wide defaults, symlink-resolved library path |
 | PathComponentValidationTests | 3 | Rejects traversal and separators in catalog-derived path components |
 | URLDescendantTests | 1 | `isDescendant(of:)` truth table |
 | AsyncChannelTests | 5 | Bounded async channel: send/receive, backpressure, finish, cancel unblocks producers, multi-producer race |
 | AsyncSemaphoreTests | 5 | Counting semaphore: wait/signal, suspension at zero, cancelAll resumes every waiter |
 | MemoryBudgetSemaphoreTests | 5 | Byte-budget admission: within budget, oversized solo, queue fairness, cancelAll |
-| ChannelCancellationDrainTests | 2 | cancel() does not discard buffered items, so a consumer must break rather than drain |
+| ChannelCancellationDrainTests | 2 | cancel() does not discard buffered items; a cancelled pipeline stage stops consuming instead of draining the backlog |
 | PipelineItemTests | 5 | Converted filename propagates downstream; encrypted/converted/original URL precedence |
 | PipelinePhaseRoutingTests | 6 | Stage routing across all 16 phase combinations: never targets a disabled stage, always terminates |
 | EnsureFileMirroredTests | 4 | Copy-stage mirroring: skips a matching destination, replaces truncated/empty leftovers |
@@ -185,7 +185,7 @@ xcodebuild test -project LumiVault.xcodeproj -scheme LumiVault -destination 'pla
 | VideoThumbnailTests | 2 | Poster frame + duration/dimension probe from a generated fixture; non-video input throws |
 | StallPolicyTests | 6 | iCloud download watchdog: doubling thresholds 1→512s, slow-message suppression, retry countdown |
 | PhotosImportProgressTests | 6 | Pipelined import progress: empty, mid-phase, complete, multi-album, dropped-files counter |
-| ImportProgressBoundsTests | 5 | Progress fraction stays in 0…1 across phases and between albums, incl. counts leaking across them; removal phase labelling |
+| ImportProgressBoundsTests | 7 | Progress fraction stays in 0…1 across phases and between albums; expected fractions pinned through the real per-album reset sequence; removal phase labelling |
 | PhotosLibraryMonitorDiffTests | 9 | Album diff: additions, removals, mixed delta, collapsed duplicates, legacy scalar ids |
 | ImportSettingsTests | 1 | Default near-duplicate threshold value matches `Constants.Dedup` |
 | VideoImportSettingsTests | 4 | `includeVideos` defaults, drop-filter accepts movies/images only, duration labels |
