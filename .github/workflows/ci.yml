@@ -280,3 +280,66 @@ jobs:
           fi
           echo "OK: committed project matches project.yml."
 
+
+  # The headline coverage number is dominated by ~16,000 lines of SwiftUI view
+  # code that unit tests do not reach, so it moves for reasons unrelated to test
+  # quality — adding a settings screen lowers it. This job gates the part unit
+  # tests are responsible for instead. Floor is set a couple of points below the
+  # current figure so ordinary churn does not redden unrelated PRs, while a real
+  # regression (a deleted suite, a stubbed-out test) still fails the build.
+  coverage:
+    name: Coverage (non-view floor)
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
+        run: sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
+
+      - name: Verify Xcode version
+        run: |
+          actual="$(xcodebuild -version | head -1 | awk '{print $2}')"
+          echo "xcodebuild reports: $actual (pinned: $XCODE_VERSION)"
+          if [ "$actual" != "$XCODE_VERSION" ]; then
+            echo "::error::Expected Xcode $XCODE_VERSION, got $actual"
+            exit 1
+          fi
+
+      # SwiftPM rather than xcodebuild on purpose: xcodebuild launches the app as
+      # a test host, so view code registers as partly covered by the launch alone
+      # and the figure drifts between runs. SwiftPM links the library with no
+      # host and reports only what the tests actually drive.
+      - name: Run tests with coverage
+        run: swift test --enable-code-coverage
+
+      - name: Enforce non-view coverage floor
+        run: ./Scripts/coverage-gate.sh 58
+
+  # UI tests are NOT gating. XCUIAutomation needs automation/accessibility
+  # permission for the test runner; where that is unavailable the run dies with
+  # "Timed out while enabling automation mode" before executing a single
+  # assertion — a failure about the environment, not about the app. This job is
+  # informational until it has proven itself stable here; see TEST-PLAN.md.
+  ui-test:
+    name: UI Tests (non-blocking)
+    runs-on: macos-26
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
+        run: sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
+
+      - name: Run UI tests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project LumiVault.xcodeproj \
+            -scheme LumiVault \
+            -destination 'platform=macOS' \
+            -only-testing:LumiVaultUITests \
+            CODE_SIGNING_ALLOWED=NO

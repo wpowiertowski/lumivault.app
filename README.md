@@ -124,7 +124,7 @@ LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool
 
 ## Testing
 
-281 unit tests across 54 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
+328 unit tests across 60 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
 
 ```bash
 swift test                                    # Run all unit tests
@@ -159,11 +159,20 @@ view code registers as partly covered by the launch itself (and varies between r
 SwiftPM links the library without a host and reports only what tests actually drive.
 Use the SwiftPM number when attributing coverage to tests.
 
-Headline figures: **21.4%** of the app target under Xcode, **15.8%** under SwiftPM.
-Both are dominated by ~13,000 lines of SwiftUI view code that unit tests do not reach.
-The service and model layer — where the archiving logic lives — sits at 80–100%
-(`HasherService`, `PathComponentValidation`, `AsyncChannel`, `PipelineItem`,
-`AlbumRecord` at 100%; `B2Service` 84%, `Catalog` 88%, `PerceptualHash` 97%).
+Headline figures: **22.8%** of the app target under SwiftPM. That number is capped at
+~36% while views are untested, because SwiftUI view code is 64% of the target and unit
+tests do not reach it. The number worth steering by is **non-view coverage: 60.5%**,
+which CI gates with a 58% floor via `Scripts/coverage-gate.sh`:
+
+```bash
+swift test --enable-code-coverage && ./Scripts/coverage-gate.sh 58
+```
+
+Within the non-view code: `EXIFData`, `HasherService`, `PathComponentValidation`,
+`AsyncChannel`, `PipelineItem` and `AlbumRecord` at 100%; `MetalPAR2Service` 97%,
+`PerceptualHash` 97%, `SettingsSyncService` 86%, `B2Service` 84%,
+`ReconciliationService` 79%, `PipelinedImportCoordinator` 73%. The largest remaining
+gap is `PhotosImportService` (1.7% of 1,328 lines), which needs the Photos entitlement.
 
 | Suite | Tests | Coverage |
 | --- | --- | --- |
@@ -198,7 +207,7 @@ The service and model layer — where the archiving logic lives — sits at 80�
 | B2LargeFileTests | 7 | Large-file API: start/part/finish, cancel, threshold routing, and raw-vs-encoded remote path on both upload routes |
 | SyncServiceTests | 20 | push/pull/merge, echo suppression, convergent merge, tombstone propagation and backwards compatibility |
 | SettingsSyncServiceTests | 8 | settings.json push/pull, volume-slot merge per host, encryption identity adoption |
-| HydrationTests | 11 | Rebuild SwiftData from a catalog: empty store, idempotent upsert, local-only field preservation, staleness (incl. multi-album and skipped entries), deterministic album assignment, tombstones, large catalog |
+| HydrationTests | 12 | Rebuild SwiftData from a catalog: empty store, idempotent upsert, local-only field preservation, staleness (incl. multi-album and skipped entries), deterministic album assignment, tombstones, large catalog |
 | CatalogMigrationTests | 6 | Legacy catalog + sidecar migration, never clobbers, and library-as-storage-target resolution |
 | CatalogPathResolutionTests | 5 | Catalog path override and tilde expansion without touching process-wide defaults, symlink-resolved library path |
 | PathComponentValidationTests | 3 | Rejects traversal and separators in catalog-derived path components |
@@ -221,6 +230,12 @@ The service and model layer — where the archiving logic lives — sits at 80�
 | BookmarkResolverTests | 3 | Bookmark round-trip, no rewrite when not stale, corrupt data still throws |
 | SnakeGameTests | 7 | Easter-egg Snake state machine: initial state, tick movement, no-direct-reverse, wall collision, food growth, reset |
 | FlappyGameTests | 5 | Easter-egg Flappy state machine: hover-before-flap, flap impulse, gravity, floor collision, reset |
+| PipelineOrchestrationTests | 12 | The eight-stage import pipeline end to end: persistence, PAR2, encryption, conversion, dedup, copy-failure isolation, cancellation, counter reconciliation, album-deletion rules |
+| ReconciliationRepairTests | 9 | Corruption detection via hash verification; repair from a healthy replica and via PAR2; refusal of a mis-hashing source and a traversing path |
+| SyncCoordinatorTests | 10 | Catalog distribution to volumes, reload-vs-in-memory push, restore from file, failed restore leaving the catalog intact, disconnected volume skipped |
+| EXIFExtractionTests | 7 | Real EXIF/TIFF/GPS parsing incl. hemisphere sign reconstruction, ISO-from-array, DateTimeOriginal fallback, in-memory extraction |
+| EXIFFormattingTests | 4 | Aperture/ISO/focal length, megapixels, altitude and coordinate formatting |
+| KeychainStoreTests | 4 | Secret round-trip, update-in-place, absent-account delete, account isolation (local only; skipped in CI) |
 | **LumiVaultUITests** | **12** | **XCUIAutomation (local only): welcome screen, navigation, settings tabs, import flow, deletion context menu** |
 
 ## Requirements

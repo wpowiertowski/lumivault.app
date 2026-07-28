@@ -31,7 +31,26 @@ enum Constants {
         /// `~/Pictures`. Resolve it so the app stores, displays, and reveals the real
         /// user-visible location — surfacing a container path in the UI is precisely
         /// what App Review rejected under guideline 2.4.5(i).
+        /// Launch-environment key that redirects the whole library — photos, catalog,
+        /// sidecars — into a throwaway directory.
+        ///
+        /// UI tests drive the real app binary, which otherwise reads and *writes*
+        /// the user's `~/Pictures/LumiVault`: importing during a UI test would file
+        /// junk albums into a real archive and rewrite its catalog.json. Reading it
+        /// from the process environment (rather than a settable global) means only a
+        /// process launched with it is affected, and nothing in the shipping app can
+        /// set it on itself.
+        nonisolated static let uiTestLibraryEnvKey = "LUMIVAULT_UITEST_LIBRARY"
+
+        /// Non-nil only when the process was launched for UI testing.
+        nonisolated static var uiTestLibraryOverride: URL? {
+            guard let raw = ProcessInfo.processInfo.environment[uiTestLibraryEnvKey],
+                  !raw.isEmpty else { return nil }
+            return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
+        }
+
         nonisolated static var libraryURL: URL {
+            if let override = uiTestLibraryOverride { return override }
             let base = (try? FileManager.default.url(
                 for: .picturesDirectory, in: .userDomainMask, appropriateFor: nil, create: false
             )) ?? URL(fileURLWithPath: ("~/Pictures" as NSString).expandingTildeInPath)

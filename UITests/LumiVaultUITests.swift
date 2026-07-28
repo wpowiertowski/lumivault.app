@@ -14,13 +14,28 @@ import XCTest
 final class LumiVaultUITests: XCTestCase {
     let app = XCUIApplication()
 
+    /// Throwaway library for this test's app launch.
+    private var libraryURL: URL!
+
     override func setUp() async throws {
         continueAfterFailure = false
+
+        // Launch into an isolated library. Without this the app opens the real
+        // ~/Pictures/LumiVault and the real Application Support store, which makes
+        // every assertion depend on whatever the developer happens to have
+        // archived — the actual reason these tests were considered flaky — and
+        // lets a UI-driven import write junk into a real photo archive.
+        libraryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumivault-uitest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: libraryURL, withIntermediateDirectories: true)
+        app.launchEnvironment["LUMIVAULT_UITEST_LIBRARY"] = libraryURL.path
+
         app.launch()
     }
 
     override func tearDown() async throws {
         app.terminate()
+        if let libraryURL { try? FileManager.default.removeItem(at: libraryURL) }
     }
 }
 
@@ -29,18 +44,21 @@ final class LumiVaultUITests: XCTestCase {
 extension LumiVaultUITests {
 
     /// TC-1.1: Fresh launch shows welcome view with restore options.
-    /// Note: This test is meaningful only when the app has no prior data.
-    /// If albums already exist, the welcome view is hidden — the test will skip gracefully.
+    ///
+    /// Asserts unconditionally. This used to `XCTSkipUnless` the welcome view was
+    /// present, on the grounds that the app might already have albums — which was
+    /// true when every run shared the developer's real store, and meant the test
+    /// silently did nothing on any machine that had ever imported a photo. Each
+    /// launch now gets a fresh in-memory store, so "no albums" is guaranteed and a
+    /// missing welcome view is a real failure.
     func testWelcomeScreenRestoreButtons() throws {
         let restoreFile = app.buttons["welcome.restoreFile"]
-        let restoreVolume = app.buttons["welcome.restoreVolume"]
-
-        // If welcome view is not shown (albums exist), skip
-        try XCTSkipUnless(restoreFile.waitForExistence(timeout: 3),
-                          "Welcome view not shown — app already has albums")
-
-        XCTAssertTrue(restoreFile.exists, "From File button should be visible")
-        XCTAssertTrue(restoreVolume.exists, "From Volume button should be visible")
+        XCTAssertTrue(restoreFile.waitForExistence(timeout: 10),
+                      "Welcome view should be shown on a store with no albums")
+        XCTAssertTrue(app.buttons["welcome.restoreVolume"].exists,
+                      "From Volume button should be visible")
+        XCTAssertTrue(app.buttons["welcome.restoreB2"].exists,
+                      "From B2 button should be visible")
     }
 }
 
@@ -212,32 +230,49 @@ extension LumiVaultUITests {
 }
 
 // MARK: - TC-16, TC-17: Deletion
+//
+// The album context-menu test that used to live here was removed rather than
+// carried forward. It skipped unless the sidebar already had an album, which was
+// only ever true because runs shared the developer's real store; with a fresh
+// store per launch it could *only* ever skip. Covering it properly needs a way
+// to seed an album into the UI-test store, which does not exist yet — a real
+// gap, recorded in TEST-PLAN rather than papered over with a test that runs zero
+// assertions. The model-level deletion semantics are covered by
+// `PipelineOrchestrationTests.deletingOneAlbumKeepsAnImageThatStillBelongsToAnother`.
+
+// MARK: - TC-37: Open Settings from inside a modal sheet (regression: cbf5f3a)
 
 extension LumiVaultUITests {
 
-    /// TC-16.1: Album context menu has Delete option.
-    /// Note: Requires at least one album to exist. Skips if sidebar is empty.
-    func testAlbumContextMenuDeleteExists() throws {
-        let sidebar = app.otherElements["nav.sidebar"]
-        guard sidebar.waitForExistence(timeout: 5) else {
-            throw XCTSkip("Sidebar not found")
-        }
+    /// `NSApp.sendAction(Selector(("showSettingsWindow:")), …)` silently did
+    /// nothing when invoked from inside a modal sheet — no responder handled it,
+    /// so the button looked functional and simply never opened Settings. The fix
+    /// switched to `@Environment(\.openSettings)` and dismisses the sheet first.
+    ///
+    /// This is a view-body bug: it cannot be reached from a unit test, and the
+    /// failure mode is "nothing happens", which no compile or runtime check sees.
+    func testOpenSettingsFromImportSheetActuallyOpensSettings() throws {
+        let importButton = app.buttons["toolbar.importPhotos"]
+        XCTAssertTrue(importButton.waitForExistence(timeout: 10), "Import button should exist")
+        importButton.click()
 
-        // Look for any album row in the sidebar
-        let albumRows = app.outlines.descendants(matching: .outlineRow)
-        try XCTSkipUnless(albumRows.count > 0, "No albums in sidebar — cannot test context menu")
+        let openSettings = app.buttons["import.openSettings"]
+        try XCTSkipUnless(
+            openSettings.waitForExistence(timeout: 5),
+            "Storage warning not shown — no volumes configured is a precondition for this button"
+        )
 
-        // Right-click first album row to open context menu
-        let firstAlbum = albumRows.element(boundBy: 0)
-        firstAlbum.rightClick()
+        let windowsBefore = app.windows.count
+        openSettings.click()
 
-        // Look for Delete Album menu item
-        let deleteItem = app.menuItems["Delete Album"]
-        XCTAssertTrue(deleteItem.waitForExistence(timeout: 3),
-                      "Delete Album should appear in context menu")
+        // The sheet must dismiss *and* a Settings window must appear. Before the
+        // fix the sheet stayed put and no window opened.
+        let settingsAppeared = NSPredicate(format: "count > %d", windowsBefore)
+        expectation(for: settingsAppeared, evaluatedWith: app.windows, handler: nil)
+        waitForExpectations(timeout: 10)
 
-        // Dismiss context menu without deleting
-        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertFalse(app.buttons["import.cancel"].exists,
+                       "the import sheet should have been dismissed before Settings opened")
     }
 }
 
