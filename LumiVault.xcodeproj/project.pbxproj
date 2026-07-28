@@ -46,6 +46,7 @@
 		5AFEECA135EC7F208DE876B0 /* StorageResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 579921A9E6D20D2E19D3E198 /* StorageResolver.swift */; };
 		62A3225E923219B9A991A8AF /* B2ServiceNetworkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B11AF157144E4837D8EE913 /* B2ServiceNetworkTests.swift */; };
 		669DDC7D1389AB0C47C80F66 /* ImportFromPhotosCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61D15F535FF979828BFF185F /* ImportFromPhotosCommands.swift */; };
+		67782D980E92E33DFF4CBC4A /* SyncCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 163F29117A6BBA65B7A83946 /* SyncCoordinatorTests.swift */; };
 		6780E2492025225BB83B874D /* ReconciliationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93F0123F93F18FC16E95D05C /* ReconciliationService.swift */; };
 		6AC34B6A81FDAB65294F85C9 /* AsyncPrimitivesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4DA177B337BD6A1C2268C14 /* AsyncPrimitivesTests.swift */; };
 		6BE9B8EC4FBAFD4CC89C300A /* PhotosImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 284BC984EF9D9F34D67DD279 /* PhotosImportSheet.swift */; };
@@ -130,6 +131,7 @@
 		12F4EAD4EE81E22BA1863819 /* GeneralSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsView.swift; sourceTree = "<group>"; };
 		12F99517836AFD89561B41EE /* PerceptualHash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerceptualHash.swift; sourceTree = "<group>"; };
 		15ADD1B31F649B6D4AE4E55D /* NearDuplicatesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearDuplicatesView.swift; sourceTree = "<group>"; };
+		163F29117A6BBA65B7A83946 /* SyncCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCoordinatorTests.swift; sourceTree = "<group>"; };
 		170A85D45BB0A8CB5F310DEC /* AlbumResyncSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumResyncSheet.swift; sourceTree = "<group>"; };
 		1DAAFF78DFC668D556C45BE3 /* PipelinedImportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelinedImportCoordinator.swift; sourceTree = "<group>"; };
 		1E605ECCBCE62C39786BEF19 /* ImageRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageRecord.swift; sourceTree = "<group>"; };
@@ -324,6 +326,7 @@
 				EC25BE641C268A8A415D27EE /* PipelineOrchestrationTests.swift */,
 				AE6B28BC22F079B2CFDE0C12 /* ReconciliationRepairTests.swift */,
 				F66D8D26FF9F0CA911982598 /* SettingsSyncServiceTests.swift */,
+				163F29117A6BBA65B7A83946 /* SyncCoordinatorTests.swift */,
 				93EA5474D335D73AA5521633 /* SyncServiceTests.swift */,
 				2CFB81A5F9B3F78322F61142 /* TestFixtures.swift */,
 				F25946248E6013048DA42C01 /* VideoSupportTests.swift */,
@@ -672,6 +675,7 @@
 				4F9447F9E4078E0CB200D777 /* PipelineOrchestrationTests.swift in Sources */,
 				50E6AA9C9F6C6AC98073B4BA /* ReconciliationRepairTests.swift in Sources */,
 				B2B2DBC78DFDEE14E2BD95E7 /* SettingsSyncServiceTests.swift in Sources */,
+				67782D980E92E33DFF4CBC4A /* SyncCoordinatorTests.swift in Sources */,
 				8CD050FBD82D0F256781112F /* SyncServiceTests.swift in Sources */,
 				27E6FC12E9C96DA903E62582 /* TestFixtures.swift in Sources */,
 				4B78225EED961C81207D931E /* VideoSupportTests.swift in Sources */,

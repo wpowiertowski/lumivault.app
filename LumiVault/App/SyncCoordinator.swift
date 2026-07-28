@@ -13,17 +13,53 @@ final class SyncCoordinator: @unchecked Sendable {
     private(set) var isICloudAvailable: Bool = false
     private(set) var catalogIntegrity: Catalog.IntegrityStatus?
 
-    private let catalogService = CatalogService()
-    private let backupService = CatalogBackupService()
+    private let catalogService: CatalogService
+    private let backupService: CatalogBackupService
     private var syncService: SyncService?
-    private let settingsSyncService = SettingsSyncService()
+    private let settingsSyncService: SettingsSyncService
     private var isSyncing = false
     private var settingsPushDebounce: Task<Void, Never>?
     private var defaultsObserver: NSObjectProtocol?
     var modelContainer: ModelContainer?
 
+    /// Where this coordinator reads and writes `catalog.json`, and which defaults
+    /// domain it consults. Injected rather than read from `Constants.Paths` /
+    /// `UserDefaults.standard` at each use site so a test can drive the real
+    /// distribution logic without touching the user's `~/Pictures/LumiVault` —
+    /// several of these paths *write* the catalog, so a global default here is a
+    /// live hazard, not just an isolation nuisance.
+    private let catalogURL: URL
+    private let defaults: UserDefaults
+
     enum SyncStatus: Sendable {
         case idle, syncing, synced, error, disabled
+    }
+
+    /// Production initializer: the real library catalog and the standard defaults.
+    init() {
+        self.catalogService = CatalogService()
+        self.backupService = CatalogBackupService()
+        self.settingsSyncService = SettingsSyncService()
+        self.catalogURL = Constants.Paths.resolvedCatalogURL
+        self.defaults = .standard
+    }
+
+    /// Test initializer. Mirrors `SettingsSyncService.init(syncURL:defaultsSuiteName:)`
+    /// and `SyncService`'s test-only init: same code path, no shared global state.
+    init(
+        catalogService: CatalogService,
+        backupService: CatalogBackupService,
+        settingsSyncService: SettingsSyncService,
+        catalogURL: URL,
+        defaults: UserDefaults,
+        syncService: SyncService? = nil
+    ) {
+        self.catalogService = catalogService
+        self.backupService = backupService
+        self.settingsSyncService = settingsSyncService
+        self.catalogURL = catalogURL
+        self.defaults = defaults
+        self.syncService = syncService
     }
 
     // MARK: - Setup
@@ -34,7 +70,6 @@ final class SyncCoordinator: @unchecked Sendable {
         migrateLegacyCatalogIfNeeded()
 
         // Load local catalog
-        let catalogURL = Constants.Paths.resolvedCatalogURL
 
         // Verify catalog integrity before loading
         if FileManager.default.fileExists(atPath: catalogURL.path) {
@@ -61,7 +96,7 @@ final class SyncCoordinator: @unchecked Sendable {
 
         // If iCloud sync is enabled, pull on launch and start monitoring
         let enabled = await MainActor.run {
-            UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
+            defaults.bool(forKey: "iCloudSyncEnabled")
         }
 
         if enabled && available {
@@ -75,7 +110,7 @@ final class SyncCoordinator: @unchecked Sendable {
         await MainActor.run {
             defaultsObserver = NotificationCenter.default.addObserver(
                 forName: UserDefaults.didChangeNotification,
-                object: UserDefaults.standard,
+                object: defaults,
                 queue: .main
             ) { [weak self] _ in
                 Task { @MainActor in
@@ -145,14 +180,14 @@ final class SyncCoordinator: @unchecked Sendable {
     func pushAfterLocalChange(reloadFromDisk: Bool = true) async {
         if reloadFromDisk {
             // Reload local catalog to pick up changes made by external CatalogService instances
-            try? await catalogService.load(from: Constants.Paths.resolvedCatalogURL)
+            try? await catalogService.load(from: catalogURL)
         }
 
         let catalog = await catalogService.currentCatalog()
 
         // Push to iCloud if enabled
         let iCloudEnabled = await MainActor.run {
-            UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
+            defaults.bool(forKey: "iCloudSyncEnabled")
         }
         if iCloudEnabled, let service = syncService {
             try? await service.pushToICloud()
@@ -169,7 +204,7 @@ final class SyncCoordinator: @unchecked Sendable {
 
         // Backup to B2 if enabled
         let b2Enabled = await MainActor.run {
-            UserDefaults.standard.bool(forKey: "b2Enabled")
+            defaults.bool(forKey: "b2Enabled")
         }
         if b2Enabled, let credentials = loadB2Credentials() {
             if let error = await backupService.backupToB2(catalog: catalog, credentials: credentials) {
@@ -191,7 +226,6 @@ final class SyncCoordinator: @unchecked Sendable {
         }
 
         // Save restored catalog locally
-        let catalogURL = Constants.Paths.resolvedCatalogURL
         try await MainActor.run {
             try catalog.save(to: catalogURL)
         }
@@ -488,20 +522,20 @@ final class SyncCoordinator: @unchecked Sendable {
     /// Remove an album from the catalog and save.
     func removeAlbumFromCatalog(name: String, year: String, month: String, day: String) async {
         await catalogService.removeAlbum(name: name, year: year, month: month, day: day)
-        try? await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
+        try? await catalogService.save(to: catalogURL)
     }
 
     /// Remove a single image from a catalog album and save.
     func removeImageFromCatalog(sha256: String, albumName: String, year: String, month: String, day: String) async {
         await catalogService.removeImage(sha256: sha256, fromAlbum: albumName, year: year, month: month, day: day)
-        try? await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
+        try? await catalogService.save(to: catalogURL)
     }
 
     /// Update an image's B2 fileId in the catalog and save. Used after the integrity
     /// heal pass re-uploads a file that had gone missing from B2.
     func updateImageB2FileId(sha256: String, b2FileId: String) async {
         await catalogService.updateImageB2FileId(sha256: sha256, b2FileId: b2FileId)
-        try? await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
+        try? await catalogService.save(to: catalogURL)
     }
 
     /// Sync the settings document (import defaults, B2/encryption config, volume
@@ -509,7 +543,7 @@ final class SyncCoordinator: @unchecked Sendable {
     /// Views call this after mutating state that lives outside UserDefaults (volumes).
     func syncSettings() async {
         let enabled = await MainActor.run {
-            UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
+            defaults.bool(forKey: "iCloudSyncEnabled")
         }
         guard enabled, isICloudAvailable else { return }
 
@@ -563,7 +597,7 @@ final class SyncCoordinator: @unchecked Sendable {
 
         // An explicit override means the user chose where the catalog lives; never
         // move it out from under them.
-        guard UserDefaults.standard.string(
+        guard defaults.string(
             forKey: Constants.Paths.catalogPathDefaultsKey
         ) == nil else { return }
 
