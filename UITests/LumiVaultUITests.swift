@@ -57,8 +57,8 @@ extension LumiVaultUITests {
                       "Welcome view should be shown on a store with no albums")
         XCTAssertTrue(app.buttons["welcome.restoreVolume"].exists,
                       "From Volume button should be visible")
-        XCTAssertTrue(app.buttons["welcome.restoreB2"].exists,
-                      "From B2 button should be visible")
+        // Not `welcome.restoreB2`: that button is inside `if b2Enabled`, so it is
+        // absent until B2 is configured, which a fresh profile never is.
     }
 }
 

@@ -143,11 +143,28 @@ developer's real archive and rewrites its catalog.json — and what makes the te
 deterministic: they previously asserted against whatever the developer happened
 to have imported, which is the real reason they were considered flaky.
 
-The CI job is **non-blocking** (`continue-on-error: true`). XCUIAutomation needs
-automation/accessibility permission for the test runner; without it the run dies
-with `Timed out while enabling automation mode` before executing a single
-assertion — a failure about the environment, not the app. This has been observed
-locally, so the job stays informational until it proves stable on the runners.
+The CI job is **non-blocking** (`continue-on-error: true`), but not for the reason
+originally assumed. XCUIAutomation was thought to be unusable headless; it is not —
+on the macOS runners the suite launches and executes normally. (It does fail on a
+local machine that has not granted automation/accessibility permission to the test
+runner, which dies with `Timed out while enabling automation mode` before executing
+a single assertion. That is a local TCC issue, not a CI one.)
+
+The job stays non-blocking because 5 of 12 tests currently fail on CI for reasons
+that predate this branch and need diagnosis:
+
+| Test | Status | Note |
+| --- | --- | --- |
+| `testOpenSettingsFromImportSheetActuallyOpensSettings` | passes | the cbf5f3a regression |
+| `testPhotosImportOpensSheet`, `testImportCancelButtonExists` | pass | |
+| `testSettingsTabsExist`, `testWindowExists` | pass | |
+| `testToolbarImportButton`, `testToolbarNearDuplicatesButton` | pass | |
+| `testSidebarExists` | **fails** | `nav.sidebar` is an identifier on a NavigationSplitView column; container identifiers are not reliably queryable |
+| `testWelcomeScreenRestoreButtons` | **fails** | detail-column content not resolving; previously masked by `XCTSkipUnless` |
+| `testB2CredentialFields`, `testEncryptionTabFields`, `testImportDefaultsToggles` | **fail** | all reach into the Settings window via `app.windows.element(boundBy:)`, which is fragile |
+
+None of these had ever run in CI before, so they are newly *visible* rather than
+newly broken. Making the job blocking requires fixing or retiring all five.
 
 Known gap: the album context-menu test was removed rather than carried forward.
 It skipped unless the sidebar already had an album, which was only ever true
