@@ -25,6 +25,12 @@ import AppKit
 final class PipelineHarness {
     let root: URL
     let volumeURL: URL
+    /// This harness's own catalog.json. The pipeline saves the catalog on every
+    /// import; with the production default that save lands on the real
+    /// ~/Pictures/LumiVault/catalog.json and replaces a whole archive with two
+    /// test files. Pointing target volumes at a temp directory does NOT prevent
+    /// this — the catalog save is a separate path.
+    let catalogURL: URL
     let volumeID = "test-volume-\(UUID().uuidString)"
     let container: ModelContainer
     let context: ModelContext
@@ -36,6 +42,7 @@ final class PipelineHarness {
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("lumivault-pipeline-\(UUID().uuidString)", isDirectory: true)
         volumeURL = root.appendingPathComponent("volume", isDirectory: true)
+        catalogURL = root.appendingPathComponent("catalog.json")
         try FileManager.default.createDirectory(at: volumeURL, withIntermediateDirectories: true)
 
         container = try ModelContainer(
@@ -139,7 +146,9 @@ final class PipelineHarness {
 
     func makeCoordinator() -> PipelinedImportCoordinator {
         PipelinedImportCoordinator(
-            catalogService: catalogService, encryptionService: encryptionService
+            catalogService: catalogService,
+            encryptionService: encryptionService,
+            catalogURL: catalogURL
         )
     }
 

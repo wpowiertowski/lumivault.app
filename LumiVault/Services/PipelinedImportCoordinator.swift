@@ -121,9 +121,25 @@ class PipelinedImportCoordinator: @unchecked Sendable {
     private let catalogService: CatalogService
     private let encryptionService: EncryptionService
 
-    init(catalogService: CatalogService, encryptionService: EncryptionService) {
+    /// Where the pipeline persists `catalog.json` when an import completes.
+    ///
+    /// Injected rather than read from `Constants.Paths.resolvedCatalogURL` at the
+    /// save site. An import writes the catalog unconditionally — it does not matter
+    /// which volumes were targeted, or that the caller supplied its own
+    /// `CatalogService` — so with the global path baked in, *any* test that runs an
+    /// import overwrites the real `~/Pictures/LumiVault/catalog.json` with its own
+    /// two-file test catalog. Routing the destination copies of the files to a temp
+    /// volume is not enough; the catalog save has to be redirected too.
+    private let catalogURL: URL
+
+    init(
+        catalogService: CatalogService,
+        encryptionService: EncryptionService,
+        catalogURL: URL = Constants.Paths.resolvedCatalogURL
+    ) {
         self.catalogService = catalogService
         self.encryptionService = encryptionService
+        self.catalogURL = catalogURL
     }
 
     func importAlbum(
@@ -571,7 +587,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             // Save
             do {
                 try modelContext.save()
-                try await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
+                try await catalogService.save(to: catalogURL)
             } catch {
                 progress.errors.append("Catalog save failed: \(error.localizedDescription)")
             }
@@ -720,7 +736,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             )
         } else {
             // No additions — make sure the catalog reflects any deletions we made.
-            try? await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
+            try? await catalogService.save(to: catalogURL)
             await MainActor.run { progress.phase = .complete }
         }
     }

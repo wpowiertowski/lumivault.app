@@ -81,6 +81,7 @@
 		C3E2B48BC52875B0CC34CFBD /* HasherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3198F0E915EFA392E07CBB6B /* HasherService.swift */; };
 		CDFE6E5E0536944B2630D0C1 /* AsyncSemaphore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FD4E291C18518482ADDCA6A /* AsyncSemaphore.swift */; };
 		D337CDBA60254332964C062B /* DeletedRecordGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88F192C80B75182D952DC07E /* DeletedRecordGuardTests.swift */; };
+		D5C6683E3ED43E5260A93E3D /* RealLibraryGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25CF68316B60EC4DA833B194 /* RealLibraryGuardTests.swift */; };
 		D614E72A43BEE42BDCD6896F /* GaloisField16.swift in Sources */ = {isa = PBXBuildFile; fileRef = A705C358860AAE79B6C774A6 /* GaloisField16.swift */; };
 		D667D68E0E1F064E5955284C /* RedundancyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0933DB339B93FFE9258AEA7 /* RedundancyService.swift */; };
 		DCA7881A48055EE6FC8BC7A6 /* ImportTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEDAF6545E18E7FAB1A8EC7A /* ImportTypes.swift */; };
@@ -140,6 +141,7 @@
 		2227CE0EBFDA45BA03F75D10 /* EncryptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EncryptionService.swift; sourceTree = "<group>"; };
 		22F376C53109DC45304A767E /* CloudSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSettingsView.swift; sourceTree = "<group>"; };
 		259FAF0AE3CB8F5152CD2AC6 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		25CF68316B60EC4DA833B194 /* RealLibraryGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealLibraryGuardTests.swift; sourceTree = "<group>"; };
 		26C10DEDAFFC8F77C0575005 /* SnakeGame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnakeGame.swift; sourceTree = "<group>"; };
 		27AB8F0B2941311B2F905CE1 /* SyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncService.swift; sourceTree = "<group>"; };
 		284BC984EF9D9F34D67DD279 /* PhotosImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosImportSheet.swift; sourceTree = "<group>"; };
@@ -327,6 +329,7 @@
 				D4F69A5682C9063F979E533C /* LumiVaultTests.swift */,
 				427BE50C00890CB41F4BAEDE /* PathTraversalTests.swift */,
 				EC25BE641C268A8A415D27EE /* PipelineOrchestrationTests.swift */,
+				25CF68316B60EC4DA833B194 /* RealLibraryGuardTests.swift */,
 				AE6B28BC22F079B2CFDE0C12 /* ReconciliationRepairTests.swift */,
 				F66D8D26FF9F0CA911982598 /* SettingsSyncServiceTests.swift */,
 				163F29117A6BBA65B7A83946 /* SyncCoordinatorTests.swift */,
@@ -677,6 +680,7 @@
 				2AB3DBBB033427F0060FC5E2 /* LumiVaultTests.swift in Sources */,
 				7EEB4CB04BDC34F2AC287724 /* PathTraversalTests.swift in Sources */,
 				4F9447F9E4078E0CB200D777 /* PipelineOrchestrationTests.swift in Sources */,
+				D5C6683E3ED43E5260A93E3D /* RealLibraryGuardTests.swift in Sources */,
 				50E6AA9C9F6C6AC98073B4BA /* ReconciliationRepairTests.swift in Sources */,
 				B2B2DBC78DFDEE14E2BD95E7 /* SettingsSyncServiceTests.swift in Sources */,
 				67782D980E92E33DFF4CBC4A /* SyncCoordinatorTests.swift in Sources */,
