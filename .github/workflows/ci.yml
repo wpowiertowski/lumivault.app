@@ -317,15 +317,18 @@ jobs:
       - name: Enforce non-view coverage floor
         run: ./Scripts/coverage-gate.sh 58
 
-  # UI tests are NOT gating. XCUIAutomation needs automation/accessibility
-  # permission for the test runner; where that is unavailable the run dies with
-  # "Timed out while enabling automation mode" before executing a single
-  # assertion — a failure about the environment, not about the app. This job is
-  # informational until it has proven itself stable here; see TEST-PLAN.md.
+  # UI tests gate. They were informational while five of them were red for reasons
+  # that had nothing to do with the app — assertions that depended on the
+  # developer's own UserDefaults, and window lookups by a title macOS does not use.
+  # A job nobody has to fix is a job nobody fixes, so it blocks now.
+  #
+  # `-retry-tests-on-failure -test-iterations 2` keeps a genuine regression failing
+  # while absorbing a single XCUIAutomation flake. Note the runner needs
+  # automation/accessibility permission; without it the run dies with "Timed out
+  # while enabling automation mode" before a single assertion — see TEST-PLAN.md.
   ui-test:
-    name: UI Tests (non-blocking)
+    name: UI Tests
     runs-on: macos-26
-    continue-on-error: true
 
     steps:
       - name: Checkout
@@ -342,4 +345,18 @@ jobs:
             -scheme LumiVault \
             -destination 'platform=macOS' \
             -only-testing:LumiVaultUITests \
+            -resultBundlePath UITests.xcresult \
+            -retry-tests-on-failure \
+            -test-iterations 2 \
             CODE_SIGNING_ALLOWED=NO
+
+      # The accessibility hierarchy that explains a UI failure lives in the result
+      # bundle, and discarding it is what turned a one-run diagnosis into a week of
+      # guessing from timing lines.
+      - name: Upload result bundle
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-test-results
+          path: UITests.xcresult
+          retention-days: 7

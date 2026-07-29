@@ -115,7 +115,7 @@ LumiVault/
 ├── Utilities/            Perceptual hashing, file coordination, bookmarks
 └── Resources/            Asset catalog, StoreKit configuration
 Tests/                    Unit tests (Swift Testing) + shared TestFixtures
-UITests/                  XCUIAutomation UI tests (local development only)
+UITests/                  XCUIAutomation UI tests (run on CI and locally)
 ```
 
 ## Migration from CLI
@@ -124,15 +124,19 @@ LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool
 
 ## Testing
 
-333 unit tests across 62 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
+333 unit tests across 62 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 13 UI tests via XCUIAutomation (Xcode 26), which gate CI.
 
 ```bash
 swift test                                    # Run all unit tests
 swift test --filter CatalogTests              # Run specific suite
 
-# UI tests (local only — launches the app)
+# UI tests — launches the app against a throwaway library, never the real archive
 xcodebuild test -project LumiVault.xcodeproj -scheme LumiVault -destination 'platform=macOS' -only-testing:LumiVaultUITests
 ```
+
+Running UI tests locally needs Automation and Accessibility permission for Xcode in
+System Settings > Privacy & Security; without it every launch fails with `Timed out
+while enabling automation mode` before a single assertion runs.
 
 ### Code coverage
 
@@ -238,7 +242,7 @@ gap is `PhotosImportService` (1.7% of 1,328 lines), which needs the Photos entit
 | KeychainStoreTests | 4 | Secret round-trip, update-in-place, absent-account delete, account isolation (local only; skipped in CI) |
 | StoreRecoveryTests | 3 | Unopenable store is quarantined and replaced instead of crashing the app; healthy store untouched; catalog left alone |
 | RealLibraryGuardTests | 2 | Fails if a test wrote to the real catalog; pins the seams that keep tests out of the real archive |
-| **LumiVaultUITests** | **12** | **XCUIAutomation (local only): welcome screen, navigation, settings tabs, import flow, deletion context menu** |
+| **LumiVaultUITests** | **13** | **XCUIAutomation, gating on CI: both welcome screens, sidebar empty state, navigation, settings tabs and their contents, import sheet** |
 
 ## Requirements
 

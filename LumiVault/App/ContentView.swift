@@ -20,9 +20,14 @@ struct ContentView: View {
             let contentIdeal = max(200, proxy.size.width * 0.6)
 
             NavigationSplitView(columnVisibility: $columnVisibility) {
+                // No accessibility identifier here: with an empty store `SidebarView`
+                // is a bare `VStack`, SwiftUI builds no accessibility element for it,
+                // and an identifier applied to nothing reads as a query seam that does
+                // not exist. UI tests assert on the sidebar's own content instead; if a
+                // queryable container is ever wanted, `.accessibilityElement(children:
+                // .contain)` is what makes one.
                 SidebarView(selectedAlbum: $selectedAlbum, selectedImage: $selectedImage)
                     .navigationSplitViewColumnWidth(min: 200, ideal: sidebarIdeal, max: 320)
-                    .accessibilityIdentifier("nav.sidebar")
             } content: {
                 Group {
                     if let album = selectedAlbum {
@@ -228,6 +233,7 @@ private struct FirstLaunchView: View {
                 .controlSize(.large)
                 .buttonStyle(.borderedProminent)
                 .tint(Constants.Design.accentColor)
+                .accessibilityIdentifier("welcome.getStarted")
                 .padding(.top, 32)
                 .padding(.bottom, 40)
             }

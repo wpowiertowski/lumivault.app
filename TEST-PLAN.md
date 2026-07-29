@@ -145,34 +145,47 @@ developer's real archive and rewrites its catalog.json — and what makes the te
 deterministic: they previously asserted against whatever the developer happened
 to have imported, which is the real reason they were considered flaky.
 
-The CI job is **non-blocking** (`continue-on-error: true`), but not for the reason
-originally assumed. XCUIAutomation was thought to be unusable headless; it is not —
-on the macOS runners the suite launches and executes normally. (It does fail on a
-local machine that has not granted automation/accessibility permission to the test
-runner, which dies with `Timed out while enabling automation mode` before executing
-a single assertion. That is a local TCC issue, not a CI one.)
+`UserDefaults` is isolated the same way, via launch arguments
+(`-hasSeenWelcome YES -b2Enabled NO …`). `NSArgumentDomain` outranks the app domain,
+so the pinned values apply to that process only and nothing is written to the
+developer's real defaults. This is not cosmetic: `hasSeenWelcome` selects between two
+entirely different welcome screens, and leaving it unpinned is what made
+`testWelcomeScreenRestoreButtons` pass locally and fail on CI for a week.
 
-The job stays non-blocking because 5 of 12 tests currently fail on CI for reasons
-that predate this branch and need diagnosis:
+The CI job **gates** (13 tests, `-retry-tests-on-failure -test-iterations 2`).
+XCUIAutomation was once thought unusable headless; it is not — on the macOS runners
+the suite launches and executes normally. It does fail on a local machine that has
+not granted automation/accessibility permission to the test runner, which dies with
+`Timed out while enabling automation mode` before executing a single assertion. That
+is a local TCC issue, not a CI one.
 
-| Test | Status | Note |
+Five tests were red and one was passing while asserting nothing. All six were test
+defects — the app was fine — of the same family this suite exists to eliminate:
+**assertions that depend on the developer's own machine.**
+
+| Test | Was | Cause and fix |
 | --- | --- | --- |
-| `testOpenSettingsFromImportSheetActuallyOpensSettings` | passes | the cbf5f3a regression |
-| `testPhotosImportOpensSheet`, `testImportCancelButtonExists` | pass | |
-| `testSettingsTabsExist`, `testWindowExists` | pass | |
-| `testToolbarImportButton`, `testToolbarNearDuplicatesButton` | pass | |
-| `testSidebarExists` | **fails** | `nav.sidebar` is an identifier on a NavigationSplitView column; container identifiers are not reliably queryable |
-| `testWelcomeScreenRestoreButtons` | **fails** | detail-column content not resolving; previously masked by `XCTSkipUnless` |
-| `testB2CredentialFields`, `testEncryptionTabFields`, `testImportDefaultsToggles` | **fail** | all reach into the Settings window via `app.windows.element(boundBy:)`, which is fragile |
+| `testWelcomeScreenRestoreButtons` | red | `WelcomeView` branches on `@AppStorage("hasSeenWelcome")`, false on a fresh runner, so CI got `FirstLaunchView` — which has no restore buttons. Pinned via launch argument; the first-launch branch now has its own test. |
+| `testSidebarExists` | red | `nav.sidebar` was an identifier on `SidebarView`, which renders a bare `VStack` on an empty store — SwiftUI builds no accessibility element, so it attached to nothing. Replaced by `testSidebarShowsEmptyState`, asserting the sidebar's own content; the dead identifier was removed. |
+| `testB2CredentialFields`, `testEncryptionTabFields`, `testImportDefaultsToggles` | red | Reached the Settings window via `app.windows.element(boundBy:)`. The log proves Settings opened, but the new window sorts *ahead* of the main one, so index 1 was the main window. Now found by exclusion — the window without the main toolbar. |
+| `testSettingsTabsExist` | **falsely green** | Waited 5 s for `app.windows["Settings"]` (SwiftUI's Settings scene is not titled that on macOS 26), fell into a `guard … else { return }`, and skipped all 8 assertions on every run. Escape hatch deleted; asserts the tab controls by title. |
 
-None of these had ever run in CI before, so they are newly *visible* rather than
-newly broken. Making the job blocking requires fixing or retiring all five.
+A related defect stayed latent behind the window bug: the `settings.tab.*`
+identifiers are attached to each tab's *content* view, not its control, so clicking
+one clicks the content area and cannot change the selection. Tabs are selected by
+visible title instead.
+
+Failures now attach the accessibility hierarchy (`assertExists`), and CI uploads the
+`.xcresult` on failure. Discarding that bundle is what turned a one-run diagnosis
+into a week of reading timing lines.
 
 Known gap: the album context-menu test was removed rather than carried forward.
 It skipped unless the sidebar already had an album, which was only ever true
-because runs shared a real store; with a fresh store per launch it could only
-ever skip. Restoring it needs a way to seed an album into the UI-test store,
-which does not exist yet.
+because runs shared a real store; with a fresh store per launch it could only ever
+skip. Seeding is now within reach — `SyncCoordinator.setup` hydrates SwiftData from
+`catalog.json` under the overridden library, so a test can write a catalog into its
+temp directory and launch into a populated app with no app changes — but that work
+is not done, and the album, photo-grid and deletion flows stay uncovered until it is.
 
 ### Remaining Automated Test TODOs
 
