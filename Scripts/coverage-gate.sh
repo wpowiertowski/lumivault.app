@@ -12,24 +12,35 @@
 set -euo pipefail
 
 MINIMUM="${1:-0}"
-BIN=".build/arm64-apple-macosx/debug/LumiVaultPackageTests.xctest/Contents/MacOS/LumiVaultPackageTests"
-PROF=".build/arm64-apple-macosx/debug/codecov/default.profdata"
+
+# Ask SwiftPM where it built rather than hardcoding `arm64-apple-macosx`: on an
+# Intel Mac, or after any toolchain change to the triple directory name, the
+# hardcoded path made this report "no profdata — run swift test first" when
+# coverage had just been generated.
+BIN_DIR="$(swift build --show-bin-path)"
+BIN="$BIN_DIR/LumiVaultPackageTests.xctest/Contents/MacOS/LumiVaultPackageTests"
+PROF="$BIN_DIR/codecov/default.profdata"
 
 if [ ! -f "$PROF" ]; then
   echo "::error::No profdata at $PROF — run 'swift test --enable-code-coverage' first"
   exit 1
 fi
 
+# Per-invocation, so a local run and the pre-commit hook cannot overwrite each
+# other's export mid-read.
+EXPORT_JSON="$(mktemp -t lumivault-coverage)"
+trap 'rm -f "$EXPORT_JSON"' EXIT
+
 xcrun llvm-cov export "$BIN" \
   -instr-profile "$PROF" \
   -ignore-filename-regex='(Tests|\.build|checkouts)/' \
-  --format=text > /tmp/lumivault-coverage.json
+  --format=text > "$EXPORT_JSON"
 
-python3 - "$MINIMUM" <<'PY'
+python3 - "$MINIMUM" "$EXPORT_JSON" <<'PY'
 import json, sys
 
 minimum = float(sys.argv[1])
-data = json.load(open("/tmp/lumivault-coverage.json"))["data"][0]
+data = json.load(open(sys.argv[2]))["data"][0]
 
 def is_view(path):
     return "/Views/" in path or path.endswith("ContentView.swift")

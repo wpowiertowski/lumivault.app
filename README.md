@@ -124,7 +124,7 @@ LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool
 
 ## Testing
 
-333 unit tests across 62 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 13 UI tests via XCUIAutomation (Xcode 26), which gate CI.
+342 unit tests across 62 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 13 UI tests via XCUIAutomation (Xcode 26), which gate CI.
 
 ```bash
 swift test                                    # Run all unit tests
@@ -165,7 +165,7 @@ Use the SwiftPM number when attributing coverage to tests.
 
 Headline figures: **22.8%** of the app target under SwiftPM. That number is capped at
 ~36% while views are untested, because SwiftUI view code is 64% of the target and unit
-tests do not reach it. The number worth steering by is **non-view coverage: 60.5%**,
+tests do not reach it. The number worth steering by is **non-view coverage: 61.6%**,
 which CI gates with a 58% floor via `Scripts/coverage-gate.sh`:
 
 ```bash
@@ -239,7 +239,7 @@ gap is `PhotosImportService` (1.7% of 1,328 lines), which needs the Photos entit
 | SyncCoordinatorTests | 10 | Catalog distribution to volumes, reload-vs-in-memory push, restore from file, failed restore leaving the catalog intact, disconnected volume skipped |
 | EXIFExtractionTests | 7 | Real EXIF/TIFF/GPS parsing incl. hemisphere sign reconstruction, ISO-from-array, DateTimeOriginal fallback, in-memory extraction |
 | EXIFFormattingTests | 4 | Aperture/ISO/focal length, megapixels, altitude and coordinate formatting |
-| KeychainStoreTests | 4 | Secret round-trip, update-in-place, absent-account delete, account isolation (local only; skipped in CI) |
+| KeychainStoreTests | 4 | Secret round-trip, update-in-place, absent-account delete, account isolation |
 | StoreRecoveryTests | 3 | Unopenable store is quarantined and replaced instead of crashing the app; healthy store untouched; catalog left alone |
 | RealLibraryGuardTests | 2 | Fails if a test wrote to the real catalog; pins the seams that keep tests out of the real archive |
 | **LumiVaultUITests** | **13** | **XCUIAutomation, gating on CI: both welcome screens, sidebar empty state, navigation, settings tabs and their contents, import sheet** |

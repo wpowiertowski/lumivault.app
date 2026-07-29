@@ -61,22 +61,6 @@ final class PipelineHarness {
         try context.save()
     }
 
-    /// Wait for detached pipeline stages to actually exit.
-    ///
-    /// `importFiles` returns as soon as the catalog sink finishes, but the stages are
-    /// `Task.detached` and are not awaited. On the normal path that is harmless — the
-    /// channels are finished, so every stage has already drained and exited. After a
-    /// *cancellation* it is not: the stages exit at their next `Task.isCancelled`
-    /// check, which can land after the test body returns and releases this harness's
-    /// `ModelContainer`. A stage touching the freed context then traps inside SwiftData
-    /// (EXC_BREAKPOINT in `runHashStage`), taking the whole test host down.
-    ///
-    /// The app never sees this because its `ModelContext` outlives any import. Only a
-    /// test creates and destroys a container around one run, so only a test has to wait.
-    func settle() async {
-        try? await Task.sleep(for: .milliseconds(500))
-    }
-
     /// Explicit teardown, called from a `defer` in each test.
     ///
     /// Deliberately NOT `deinit`. With cleanup in `deinit`, ARC is free to release the
@@ -466,9 +450,67 @@ struct PipelineOrchestrationTests {
         // a 40-file import should not still catalog all 40.
         #expect(h.progress.filesCataloged < 40, "cancellation drained the whole backlog")
 
-        // Let the cancelled stages finish exiting before this harness's container goes
-        // away underneath them — see `settle()`.
-        await h.settle()
+        // No `settle()` here any more. This test used to sleep 500 ms before
+        // returning, because `runImportPipeline` awaited only the catalog sink: the
+        // detached stages could still be running when the harness released its
+        // `ModelContainer`, and one touching the freed context trapped inside
+        // SwiftData and took the test host down. That was a production defect wearing
+        // a test workaround — the same unawaited stages keep writing into a staging
+        // directory the caller's `defer` has already deleted. `runImportPipeline`
+        // now awaits every stage, so if that regresses this test crashes rather than
+        // sleeping through it.
+    }
+
+    /// Cancelling is not a reason to lose files that are already archived.
+    ///
+    /// The bytes for everything the sink cataloged have already been copied to the
+    /// volume, so skipping the save left them on disk with nothing in catalog.json
+    /// pointing at them — invisible to the app and to a restore — while the caller
+    /// was told the import succeeded.
+    @Test func cancellingStillPersistsWhatWasAlreadyArchived() async throws {
+        let h = try PipelineHarness()
+        defer { h.cleanup() }
+        let urls = try h.makeImages(count: 40)
+        var settings = h.settings()
+        settings.generatePAR2 = true
+
+        let coordinator = h.makeCoordinator()
+        let task = Task { @MainActor in
+            try await coordinator.importFiles(
+                urls: urls, settings: settings, modelContext: h.context, progress: h.progress
+            )
+        }
+        // Cancel once the sink has actually filed something — a fixed sleep either
+        // lands before the first catalog write (nothing to assert) or after the last
+        // (nothing was cancelled), and which one depends on the machine.
+        let deadline = Date().addingTimeInterval(10)
+        while h.progress.filesCataloged == 0 && h.progress.filesCataloged < 40 && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        task.cancel()
+        _ = try? await task.value
+
+        let cataloged = h.progress.filesCataloged
+        try #require(cataloged > 0, "test did not cancel mid-flight; nothing to assert about")
+        try #require(cataloged < 40, "cancellation drained the whole backlog")
+
+        // catalog.json must exist and hold exactly what the sink counted.
+        let data = try Data(contentsOf: h.catalogURL)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let catalog = try decoder.decode(Catalog.self, from: data)
+        let entries = catalog.years.values
+            .flatMap(\.months.values).flatMap(\.days.values).flatMap(\.albums.values)
+            .reduce(0) { $0 + $1.images.count }
+        #expect(entries == cataloged,
+                "catalog.json holds \(entries) of \(cataloged) archived files")
+
+        // And no record may be left without an album: nothing can display it, and
+        // `isHydrationStale` counts it against the catalog forever, re-running a full
+        // main-thread hydration on every launch.
+        let orphans = try h.context.fetch(FetchDescriptor<ImageRecord>())
+            .filter { $0.albums.isEmpty }
+        #expect(orphans.isEmpty, "\(orphans.count) records left with no album")
     }
 
     // MARK: - Progress accounting

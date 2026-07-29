@@ -575,16 +575,30 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 }
             }
 
-            if Task.isCancelled {
+            // Cancelling means "import nothing further", not "discard what is
+            // already done". Everything this loop cataloged has had its bytes copied
+            // to the volume and uploaded to B2 already, so the same save has to run
+            // on both paths — a cancelled import that skipped it left those files on
+            // disk with no catalog entry pointing at them, invisible to the app and
+            // to a restore, while still reporting success to the caller.
+            let wasCancelled = Task.isCancelled
+            if wasCancelled {
                 if catalogItemCount == 0 && isNewAlbum {
                     modelContext.delete(albumRecord)
                 }
-                progress.phase = .failed
-                progress.activeStages.removeAll()
-                return catalogItemCount
+
+                // Orphaned records are swept in `runImportPipeline` once every stage
+                // has exited — the hash stage is still inserting while this runs.
+
+                // Only a fully-empty cancellation throws `CancellationError`, so this
+                // is the only place a partially-imported run gets to say what happened.
+                if catalogItemCount > 0 {
+                    progress.errors.append(
+                        "Import cancelled — \(catalogItemCount) file(s) already archived were kept"
+                    )
+                }
             }
 
-            // Save
             do {
                 try modelContext.save()
                 try await catalogService.save(to: catalogURL)
@@ -592,7 +606,7 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 progress.errors.append("Catalog save failed: \(error.localizedDescription)")
             }
 
-            progress.phase = .complete
+            progress.phase = wasCancelled ? .failed : .complete
             progress.activeStages.removeAll()
             return catalogItemCount
         }
@@ -625,6 +639,40 @@ class PipelinedImportCoordinator: @unchecked Sendable {
             Task {
                 for ch in allChannels { await ch.cancel() }
                 await memoryBudget.cancelAll()
+            }
+        }
+
+        // Wait for the stages themselves, not just the sink.
+        //
+        // They are detached, so nothing above waits for them, and returning here
+        // hands control straight back to `importFiles`/`importAlbum`, whose `defer`
+        // deletes the staging directory. On cancellation a PAR2 or copy stage can
+        // still be mid-item — they only check `Task.isCancelled` between iterations
+        // — so it would carry on reading and writing files that are being deleted
+        // underneath it, producing spurious "Copy failed"/"PAR2 failed" errors and
+        // half-written companions. The channels and memory budget are cancelled
+        // above, so a stage parked on backpressure is already unblocked and this
+        // returns promptly; on the ordinary path the sink only finishes once every
+        // upstream channel has, so each of these is already done.
+        for task in pipelineTasks { await task.value }
+
+        if Task.isCancelled {
+            // Records the hash stage inserted that never reached the catalog sink
+            // have no album. Nothing can show them (every view reaches images through
+            // an album) and `hydrate` never deletes them, but
+            // `SyncCoordinator.isHydrationStale` counts them against the catalog's
+            // distinct SHAs forever — so the store looks permanently stale and every
+            // launch re-runs a full main-thread hydration, the hang 6dd8ad4 removed.
+            //
+            // Swept here rather than in the sink: the sink stops first, and the hash
+            // stage keeps inserting until it reaches its own cancellation check, so
+            // anything cleaned up before this point leaves a second crop behind.
+            await MainActor.run {
+                let context = ctx.value
+                for record in recordsBySHA.records.values where record.albums.isEmpty {
+                    context.delete(record)
+                }
+                try? context.save()
             }
         }
 

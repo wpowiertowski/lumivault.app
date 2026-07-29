@@ -13,6 +13,11 @@ struct ContentView: View {
     @State private var showingIntegrityAlert = false
     @State private var showingRepairNotice = false
     @State private var showingVolumes = false
+    /// Recovery from an unopenable store is automatic but not invisible: the
+    /// rebuild restores albums and photos from catalog.json and nothing else, so the
+    /// user has to be told why their volumes need re-adding. Read once at init —
+    /// the flag is set during container creation, before any view exists.
+    @State private var showingStoreRecoveryNotice = SwiftDataContainer.didRecoverFromUnopenableStore
 
     var body: some View {
         GeometryReader { proxy in
@@ -116,6 +121,19 @@ struct ContentView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text("Corruption was detected in catalog.json and automatically repaired using PAR2 error correction data.")
+            }
+            .alert("Local Index Rebuilt", isPresented: $showingStoreRecoveryNotice) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("""
+                    LumiVault could not open its local index, so it was set aside and \
+                    rebuilt from catalog.json. Your albums and photos are intact.
+
+                    Some local-only settings do not come back: external volumes must be \
+                    added again in Settings, and thumbnails regenerate as you browse. \
+                    The old index was kept at \
+                    \(SwiftDataContainer.quarantinedStoreURL?.path ?? "Application Support").
+                    """)
             }
         }
         .frame(minWidth: 820, minHeight: 500)

@@ -168,9 +168,23 @@ struct CatalogPathResolutionTests {
         let key = Constants.Paths.catalogPathDefaultsKey
         #expect(key == "catalogPath")
         let expected = Constants.Paths.resolveCatalogURL(
-            override: UserDefaults.standard.string(forKey: key)
+            override: UserDefaults.standard.string(forKey: key),
+            uiTestLibrary: Constants.Paths.uiTestLibraryOverride
         )
         #expect(Constants.Paths.resolvedCatalogURL == expected)
+    }
+
+    @Test func theUITestLibraryBeatsTheUserConfiguredCatalogPath() {
+        // Redirecting `libraryURL` was not enough on its own: `resolvedCatalogURL`
+        // read the `catalogPath` default first, so a developer who had pointed it at
+        // their real archive got that archive's catalog.json rewritten by a UI-driven
+        // import — precisely what the UI-test override was added to prevent.
+        let sandbox = URL(fileURLWithPath: "/tmp/lumivault-uitest-library")
+        let url = Constants.Paths.resolveCatalogURL(
+            override: "~/Pictures/LumiVault/catalog.json",
+            uiTestLibrary: sandbox
+        )
+        #expect(url.path == "/tmp/lumivault-uitest-library/catalog.json")
     }
 
     @Test func libraryPathIsSymlinkResolvedAndUserVisible() {

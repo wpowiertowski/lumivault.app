@@ -260,10 +260,15 @@ struct EXIFFormattingTests {
 
 // MARK: - Keychain
 //
-// These touch the real login Keychain. They are gated off in CI, where the
-// keychain is typically locked and `SecItemAdd` fails for reasons that have
-// nothing to do with this code. Verified locally: set/get/delete round-trip
-// cleanly and headlessly, with no authorization prompt.
+// These touch the real login Keychain. They used to be gated off whenever `CI`
+// was set, on the assumption that the runner's keychain is locked and
+// `SecItemAdd` fails for reasons unrelated to this code — an assumption nobody
+// had tested, and the same shape as "XCUIAutomation cannot run headless", which
+// CI disproved. It also meant the `KeychainStore` coverage quoted in the docs was
+// unreproducible in the very job that gates on coverage, so the floor was tuned
+// against a number CI can never produce. They run everywhere now; if the runner
+// really does refuse, the failure will say so and the gate can come back with a
+// reason attached.
 //
 // Every test uses a UUID-scoped account. `B2Credentials` deliberately has no
 // tests here: it persists under a *fixed* account, so exercising its save/load
@@ -273,13 +278,7 @@ struct EXIFFormattingTests {
 @MainActor
 struct KeychainStoreTests {
 
-    /// `nonisolated` so the `.enabled(if:)` trait — evaluated in a Sendable
-    /// closure — can read it.
-    nonisolated static var runsHere: Bool {
-        ProcessInfo.processInfo.environment["CI"] == nil
-    }
-
-    @Test(.enabled(if: KeychainStoreTests.runsHere))
+    @Test
     func storedSecretsRoundTripAndDeleteCleanly() throws {
         let account = "lumivault.test.\(UUID().uuidString)"
         defer { KeychainStore.delete(account: account) }
@@ -294,7 +293,7 @@ struct KeychainStoreTests {
         #expect(KeychainStore.get(account: account) == nil)
     }
 
-    @Test(.enabled(if: KeychainStoreTests.runsHere))
+    @Test
     func writingTwiceUpdatesInPlaceRatherThanFailingOrDuplicating() throws {
         let account = "lumivault.test.\(UUID().uuidString)"
         defer { KeychainStore.delete(account: account) }
@@ -306,14 +305,14 @@ struct KeychainStoreTests {
         #expect(KeychainStore.get(account: account) == Data("second".utf8))
     }
 
-    @Test(.enabled(if: KeychainStoreTests.runsHere))
+    @Test
     func deletingAnAbsentAccountIsANoOp() {
         // Called on the "switch sync mode" path before re-adding, where the item
         // may legitimately not exist yet.
         KeychainStore.delete(account: "lumivault.test.absent.\(UUID().uuidString)")
     }
 
-    @Test(.enabled(if: KeychainStoreTests.runsHere))
+    @Test
     func accountsAreIsolatedFromOneAnother() throws {
         let a = "lumivault.test.\(UUID().uuidString)"
         let b = "lumivault.test.\(UUID().uuidString)"

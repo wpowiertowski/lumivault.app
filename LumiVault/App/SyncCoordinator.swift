@@ -287,7 +287,19 @@ final class SyncCoordinator: @unchecked Sendable {
     @MainActor
     static func isHydrationStale(catalog: Catalog, context: ModelContext) -> Bool {
         let recordCount = (try? context.fetchCount(FetchDescriptor<ImageRecord>())) ?? 0
-        return recordCount != hydratableAlbums(in: catalog).distinctSHACount
+        if recordCount != hydratableAlbums(in: catalog).distinctSHACount { return true }
+
+        // Counts matching is not proof the store is intact — the records can all be
+        // there with their album memberships gone. That is the exact failure mode of
+        // a lightweight migration that does not infer the `album` → `albums`
+        // relationship: every record survives, every album empties, the counts still
+        // agree, and hydration never runs to repair it. An image belonging to no
+        // album is unreachable in the UI, so treating any orphan as staleness costs
+        // one indexed count and turns a silent empty library into a self-repair.
+        let orphanCount = (try? context.fetchCount(
+            FetchDescriptor<ImageRecord>(predicate: #Predicate { $0.albums.isEmpty })
+        )) ?? 0
+        return orphanCount > 0
     }
 
     /// One album the catalog contributes to SwiftData, with its path components
@@ -401,6 +413,9 @@ final class SyncCoordinator: @unchecked Sendable {
         // deletions below never touch a path/sha the catalog still holds.
         var catalogAlbumKeys = Set<String>()
         var catalogSHAs = Set<String>()
+        // Which albums the catalog files each sha under, so memberships it no longer
+        // declares can be pruned below.
+        var catalogAlbumKeysBySHA: [String: Set<String>] = [:]
 
         let plan = hydratableAlbums(in: catalog)
         let skippedCount = plan.skippedCount
@@ -424,6 +439,7 @@ final class SyncCoordinator: @unchecked Sendable {
 
             for catalogImage in catalogAlbum.images {
                 catalogSHAs.insert(catalogImage.sha256)
+                catalogAlbumKeysBySHA[catalogImage.sha256, default: []].insert(catalogAlbum.key)
                 let nonce = catalogImage.encryptionNonce.flatMap { Data(base64Encoded: $0) }
                 let isEncrypted = catalogImage.encryptionAlgorithm != nil
                 if let existing = imagesBySHA[catalogImage.sha256] {
@@ -466,6 +482,26 @@ final class SyncCoordinator: @unchecked Sendable {
                     context.insert(record)
                     imagesBySHA[catalogImage.sha256] = record
                 }
+            }
+        }
+
+        // Prune memberships the merged catalog no longer declares.
+        //
+        // Adding memberships is not enough on its own: removing an image from one
+        // album on another Mac produces a catalog that simply stops listing that
+        // sha under that album — there is no tombstone for it, because the image
+        // itself still exists elsewhere. Append-only hydration therefore left the
+        // photo visible in the album it was removed from, forever, on every other
+        // Mac. The old to-one `existing.album = album` assignment re-parented the
+        // record and got this right by accident.
+        //
+        // Scoped to shas the catalog knows about: a record whose sha appears
+        // nowhere in the catalog is a local import that has not been cataloged yet,
+        // and pruning its membership would delete the album it was just filed into.
+        for record in imagesBySHA.values {
+            guard let declared = catalogAlbumKeysBySHA[record.sha256] else { continue }
+            record.albums.removeAll { album in
+                !declared.contains("\(album.year)/\(album.month)/\(album.day)/\(album.name)")
             }
         }
 

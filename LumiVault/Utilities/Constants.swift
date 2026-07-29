@@ -21,16 +21,6 @@ enum Constants {
     enum Paths {
         nonisolated static let iCloudContainer = "iCloud.app.lumivault"
 
-        /// The user-accessible archive folder, `~/Pictures/LumiVault`. Reachable directly
-        /// (no security-scoped bookmark) thanks to the `assets.pictures.read-write` entitlement.
-        /// This is the default home for both imported photos and `catalog.json` — see
-        /// `resolvedCatalogURL`.
-        ///
-        /// Under the sandbox, `.picturesDirectory` returns the container-scoped path
-        /// (`~/Library/Containers/…/Data/Pictures`), which is a symlink to the real
-        /// `~/Pictures`. Resolve it so the app stores, displays, and reveals the real
-        /// user-visible location — surfacing a container path in the UI is precisely
-        /// what App Review rejected under guideline 2.4.5(i).
         /// Launch-environment key that redirects the whole library — photos, catalog,
         /// sidecars — into a throwaway directory.
         ///
@@ -49,6 +39,16 @@ enum Constants {
             return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
         }
 
+        /// The user-accessible archive folder, `~/Pictures/LumiVault`. Reachable directly
+        /// (no security-scoped bookmark) thanks to the `assets.pictures.read-write` entitlement.
+        /// This is the default home for both imported photos and `catalog.json` — see
+        /// `resolvedCatalogURL`.
+        ///
+        /// Under the sandbox, `.picturesDirectory` returns the container-scoped path
+        /// (`~/Library/Containers/…/Data/Pictures`), which is a symlink to the real
+        /// `~/Pictures`. Resolve it so the app stores, displays, and reveals the real
+        /// user-visible location — surfacing a container path in the UI is precisely
+        /// what App Review rejected under guideline 2.4.5(i).
         nonisolated static var libraryURL: URL {
             if let override = uiTestLibraryOverride { return override }
             let base = (try? FileManager.default.url(
@@ -69,14 +69,31 @@ enum Constants {
 
         /// Resolves the catalog file URL — the user-configured override if set, otherwise
         /// `~/Pictures/LumiVault/catalog.json`. Safe to call from any isolation context.
+        ///
+        /// The UI-test library override wins over the user's `catalogPath` default, and
+        /// has to: a developer who has pointed `catalogPath` at their real archive would
+        /// otherwise have it rewritten by a UI-driven import even with the library
+        /// redirected, which is the exact hazard the override exists to prevent.
+        /// `UserDefaults` is process-wide and is not isolated for UI tests.
         nonisolated static var resolvedCatalogURL: URL {
-            resolveCatalogURL(override: UserDefaults.standard.string(forKey: catalogPathDefaultsKey))
+            resolveCatalogURL(
+                override: UserDefaults.standard.string(forKey: catalogPathDefaultsKey),
+                uiTestLibrary: uiTestLibraryOverride
+            )
         }
 
-        /// The resolution itself, with the override passed in. Split out so tests
-        /// can exercise it without writing to `UserDefaults.standard` — a
-        /// process-wide global that every concurrently running test shares.
-        nonisolated static func resolveCatalogURL(override raw: String?) -> URL {
+        /// The resolution itself, with both inputs passed in. Split out so tests
+        /// can exercise it without writing to `UserDefaults.standard` or the process
+        /// environment — both process-wide globals that every concurrently running
+        /// test shares.
+        nonisolated static func resolveCatalogURL(override raw: String?, uiTestLibrary: URL? = nil) -> URL {
+            // The UI-test library wins over the user's `catalogPath`, and has to: a
+            // developer who has pointed that default at their real archive would
+            // otherwise have it rewritten by a UI-driven import even with the library
+            // redirected — the exact hazard the override exists to prevent.
+            if let uiTestLibrary {
+                return uiTestLibrary.appendingPathComponent("catalog.json")
+            }
             if let raw {
                 return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
             }

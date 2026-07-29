@@ -2,7 +2,7 @@
 
 ## Existing Automated Test Assessment
 
-### Summary: 333 tests across 62 suites
+### Summary: 342 tests across 62 suites
 
 | Rating | Suite | Tests | Assessment |
 | -------- | ------- | ------- | ------------ |
@@ -21,13 +21,13 @@
 | High Value | AsyncChannelTests | 5 | Bounded async channel: send/receive, backpressure blocks producer when full, finish ends consumer loop, cancel unblocks producers + terminates consumer, multi-producer/single-consumer race. |
 | High Value | AsyncSemaphoreTests | 3 | Counting semaphore: wait suspends at zero, cancelAll resumes every waiter, wait-after-cancel does not suspend. The non-suspending fast paths are reached by these same tests, so the two assertion-free tests that only walked them were dropped. |
 | Medium Value | B2ServiceHelperTests | 5 | SHA-1 known test vectors, HTTP response validation for success (299 — the range's upper edge) and error (401, 500) status codes |
-| High Value | PipelineOrchestrationTests | 12 | The real eight-stage import pipeline end to end via `importFiles`: persistence + album + catalog + bytes on the volume, PAR2 recovery volumes mirrored beside the index, ciphertext really written (not just the record flags), converted extension agreed on by record/catalog/disk, exact dedup, second-album membership, a failing volume copy reported without dropping the import, an unreadable source skipped without stopping siblings, cancellation stopping short of the backlog, counters reconciling with what was persisted, and both halves of the album-deletion rule. |
+| High Value | PipelineOrchestrationTests | 13 | The real eight-stage import pipeline end to end via `importFiles`: persistence + album + catalog + bytes on the volume, PAR2 recovery volumes mirrored beside the index, ciphertext really written (not just the record flags), converted extension agreed on by record/catalog/disk, exact dedup, second-album membership, a failing volume copy reported without dropping the import, an unreadable source skipped without stopping siblings, cancellation stopping short of the backlog *and* still persisting what was already archived (with no album-less records left behind), counters reconciling with what was persisted, and both halves of the album-deletion rule. |
 | High Value | ReconciliationRepairTests | 9 | Corruption detection and auto-repair: a rotted file passes an existence scan and is caught by `verifyHashes`; repair from a healthy replica (asserted on the bytes, not the outcome enum); real PAR2 Reed-Solomon recovery; a mis-hashing replica refused; a traversing `relativePath` refused with the outside file proven untouched; unrepairable corruption reported rather than passed. |
 | High Value | SyncCoordinatorTests | 10 | Catalog distribution to every registered volume, `reloadFromDisk` true vs false picking the on-disk vs in-memory catalog, iCloud/B2 skipped when disabled, a read-only volume survived (and proven to have failed), restore-from-file landing on disk and in the live service, a failed restore leaving the existing catalog intact, a disconnected volume skipped without stopping the healthy one. |
 | High Value | EXIFExtractionTests | 7 | Real JPEGs carrying real EXIF/TIFF/GPS. The GPS hemisphere reconstruction is the point: a dropped negation files a photo on the wrong side of the equator without crashing or failing to decode. Plus capture settings (ISO from an array, vendor-padded Make/Model trimmed), the DateTimeOriginal fallback, in-memory extraction, and a non-image returning nil. |
 | Medium Value | EXIFFormattingTests | 4 | The six formatted strings: aperture/ISO/focal length incl. the 35mm equivalent, megapixels needing both axes, altitude and coordinate precision, and a latitude without a longitude not being a fix. |
-| Medium Value | KeychainStoreTests | 4 | Round-trip, update-in-place rather than duplicate, delete of an absent account, and account isolation. Gated with `.enabled(if:)` on the `CI` env var — a CI runner's keychain is typically locked. `B2Credentials` is deliberately uncovered: it persists under a fixed account, so testing it would overwrite real credentials. |
-| High Value | StoreRecoveryTests | 3 | An unopenable SwiftData store is quarantined (bytes preserved verbatim, `-wal`/`-shm` moved with it) and replaced rather than crashing the app on launch; a healthy store is left alone; recovery never touches `catalog.json`, which is what it rebuilds from. Guards the interrupted-migration case that made the app permanently unlaunchable. |
+| Medium Value | KeychainStoreTests | 4 | Round-trip, update-in-place rather than duplicate, delete of an absent account, and account isolation. These used to be gated off whenever `CI` was set, on the untested assumption that a runner's keychain is locked — which made the coverage figure quoted for `KeychainStore` unreproducible in the job that gates on coverage. `B2Credentials` is deliberately uncovered: it persists under a fixed account, so testing it would overwrite real credentials. |
+| High Value | StoreRecoveryTests | 5 | An unopenable SwiftData store is quarantined (bytes preserved verbatim, `-wal`/`-shm` moved with it) and replaced rather than crashing the app on launch; a healthy store is left alone; recovery never touches `catalog.json`, which is what it rebuilds from. An open failure with no store on disk is not reported as a recovery, and two failures in the same second do not collide. Guards the interrupted-migration case that made the app permanently unlaunchable. |
 | High Value | RealLibraryGuardTests | 2 | Fails if the real `~/Pictures/LumiVault/catalog.json` looks like a test wrote it, and pins the two seams (`PipelinedImportCoordinator.catalogURL`, `LUMIVAULT_UITEST_LIBRARY`) that keep tests out of the real archive. Exists because two separate defects wrote there while the suite stayed green. |
 | Medium Value | CatalogBackupServiceTests | 5 | Volume backup write + decode, error on bad path, file restore round-trip, missing catalog error, orphan vol-file eviction |
 | Medium Value | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture hash verification |
@@ -110,7 +110,7 @@ README for why that differs from the Xcode figure).
 
 | Scope | Covered | Total | % |
 | --- | --- | --- | --- |
-| **Non-view** (the gated number) | 5473 | 9042 | **60.5%** |
+| **Non-view** (the gated number) | 5725 | 9290 | **61.6%** |
 | Views | 233 | 16017 | 1.5% |
 | Overall | 5706 | 25059 | 22.8% |
 
@@ -127,7 +127,7 @@ settings screen is added or removed regardless of test quality.
 | ReconciliationService | High | **Covered, 79.2%** — corruption detection plus both repair strategies (healthy replica, PAR2 recovery) and both refusal paths (mis-hashing source, traversing path). |
 | SyncCoordinator | Medium | **Partially covered, 49.6%** — catalog distribution, restore, and mutation helpers are covered via the injected init. iCloud monitoring (`startMonitoring`, metadata queries) still needs provisioning. |
 | EXIFData | Medium | **Covered, 100%** — including GPS hemisphere reconstruction. |
-| KeychainStore | Medium | **Covered locally, 94.3%** — gated off in CI where the keychain is locked. |
+| KeychainStore | Medium | **94.3%** — these run everywhere now. They used to be gated off whenever `CI` was set, on an untested assumption that the runner's keychain is locked, which meant the figure quoted here was unreproducible in the job that gates on coverage. |
 | B2Credentials | Medium | **Not covered, 0%, deliberately** — persists under a fixed keychain account, so testing save/load would overwrite the developer's real credentials. |
 | PhotosImportService | Low | **Mostly not testable, 1.7%** — requires the Photos entitlement. `StallPolicy` is extracted and covered; the `PHAssetResourceManager` loop remains manual QA. It is 1328 lines and is single-handedly the largest drag on the non-view figure. |
 | Volume sync (VolumeSyncSheet inline copy loop) | Medium | **Not unit-tested** — loop lives in a SwiftUI view. Manual QA (TC-8, TC-9). |

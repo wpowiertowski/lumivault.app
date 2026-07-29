@@ -230,25 +230,33 @@ struct SidebarView: View {
             await MainActor.run { progress.phase = .updatingCatalog }
             await syncCoordinator.removeAlbumFromCatalog(name: albumName, year: year, month: month, day: day)
 
-            // Remove thumbnails
-            let thumbSvc = thumbnailService
-            for input in imageInputs {
-                await thumbSvc.removeThumbnails(for: input.sha256)
-            }
-
             // Remove from SwiftData. The album/image relationship is many-to-many
             // with a nullify rule, so deleting the album only drops memberships —
             // it no longer cascades. An image filed in another album must survive
             // that album's deletion; one this was the last album for is now an
             // orphan with no way back into the UI, so delete it explicitly.
+            //
+            // Survivors also need the deleted album's traces pruned: its storage
+            // locations point at files that no longer exist, and its thumbnail is
+            // shared, keyed by sha256 — tearing that down for every image in the
+            // album left the surviving album showing a placeholder for a photo that
+            // is perfectly intact, and reconciliation reporting it missing.
             if selectedAlbum?.persistentModelID == album.persistentModelID {
                 selectedAlbum = nil
             }
-            for image in album.images where image.albums.count <= 1 {
-                modelContext.delete(image)
+            var deletedSHAs: [String] = []
+            for image in album.images {
+                if image.removeFromAlbum(album, context: modelContext) {
+                    deletedSHAs.append(image.sha256)
+                }
             }
             modelContext.delete(album)
             try? modelContext.save()
+
+            let thumbSvc = thumbnailService
+            for sha in deletedSHAs {
+                await thumbSvc.removeThumbnails(for: sha)
+            }
 
             await MainActor.run {
                 progress.phase = .complete

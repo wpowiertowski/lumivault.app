@@ -3061,6 +3061,146 @@ struct HydrationTests {
         #expect(primaries.first == "Alpha", "earliest by date-then-name should win")
     }
 
+    @Test func primaryAlbumFollowsTheBytesRatherThanTheEarliestDate() throws {
+        // The date-then-name tiebreak is only a tiebreak. When the record knows
+        // where its bytes were written, that album is the answer — otherwise a
+        // membership arriving from another Mac (hydration appends, it copies
+        // nothing) silently re-points every derived path at a directory with no
+        // local copy: thumbnail regeneration probes a path that does not exist and
+        // B2 verification reports a dangling id for a file that is present.
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        let trip = AlbumRecord(name: "Trip", year: "2026", month: "07", day: "28")
+        let old = AlbumRecord(name: "Old", year: "2020", month: "01", day: "01")
+        context.insert(trip)
+        context.insert(old)
+
+        let record = ImageRecord(sha256: "aa", filename: "one.heic", sizeBytes: 1)
+        record.albums = [trip, old]
+        record.storageLocations = [
+            StorageLocation(volumeID: "vol", relativePath: "2026/07/28/Trip/one.heic")
+        ]
+        context.insert(record)
+
+        // `Old` is earliest by date and would win the fallback.
+        #expect(record.primaryAlbum?.name == "Trip")
+
+        // With nothing copied yet, the deterministic fallback still applies.
+        record.storageLocations = []
+        #expect(record.primaryAlbum?.name == "Old")
+    }
+
+    @Test func hydrationPrunesAMembershipTheCatalogNoLongerDeclares() throws {
+        // Removing an image from one album on another Mac produces a catalog that
+        // simply stops listing that sha under that album — there is no tombstone,
+        // because the image still exists elsewhere. Append-only hydration therefore
+        // left the photo visible in the album it was removed from, forever.
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        let before = makeCatalog(albums: [
+            "Alpha": [image("aa", "one.heic")],
+            "Beach": [image("aa", "one.heic")]
+        ])
+        SyncCoordinator.hydrate(catalog: before, into: context)
+        let record = try #require(try context.fetch(FetchDescriptor<ImageRecord>()).first)
+        #expect(Set(record.albums.map(\.name)) == ["Alpha", "Beach"])
+
+        // The peer removed it from Beach; Alpha still lists it.
+        let after = makeCatalog(albums: ["Alpha": [image("aa", "one.heic")]])
+        SyncCoordinator.hydrate(catalog: after, into: context)
+
+        #expect(record.albums.map(\.name) == ["Alpha"])
+        let beach = try context.fetch(FetchDescriptor<AlbumRecord>())
+            .first { $0.name == "Beach" }
+        #expect(beach?.images.isEmpty ?? true, "Beach still renders the removed photo")
+    }
+
+    @Test func hydrationLeavesAnUncatalogedLocalImportAlone() throws {
+        // The pruning above must not reach a record the catalog has never seen: an
+        // import that has written its SwiftData rows but not yet saved the catalog
+        // would have the album it was just filed into stripped back off.
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        let catalog = makeCatalog(albums: ["Alpha": [image("aa", "one.heic")]])
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        let alpha = try #require(
+            try context.fetch(FetchDescriptor<AlbumRecord>()).first { $0.name == "Alpha" }
+        )
+
+        let inFlight = ImageRecord(sha256: "zz", filename: "new.heic", sizeBytes: 1)
+        inFlight.albums = [alpha]
+        context.insert(inFlight)
+
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        #expect(inFlight.albums.map(\.name) == ["Alpha"],
+                "an uncataloged local import lost its album")
+    }
+
+    @Test func anImageWithNoAlbumCountsAsStaleEvenWhenTheTotalsAgree() throws {
+        // The count check alone cannot see a store whose records all survived but
+        // whose memberships did not — the exact result of a lightweight migration
+        // that fails to infer `album` → `albums`. Totals match, hydration never
+        // runs, and every album stays empty with no way back.
+        let container = try makeContainer()
+        let context = container.mainContext
+        let catalog = makeCatalog(albums: ["Alpha": [image("aa", "one.heic")]])
+
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        #expect(!SyncCoordinator.isHydrationStale(catalog: catalog, context: context))
+
+        let record = try #require(try context.fetch(FetchDescriptor<ImageRecord>()).first)
+        record.albums = []
+        #expect(SyncCoordinator.isHydrationStale(catalog: catalog, context: context),
+                "an orphaned record should force a rehydration")
+
+        // And hydrating repairs it, so the staleness is not a permanent state.
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        #expect(record.albums.map(\.name) == ["Alpha"])
+        #expect(!SyncCoordinator.isHydrationStale(catalog: catalog, context: context))
+    }
+
+    @Test func removingAnImageFromOneAlbumKeepsItWhereItStillBelongs() throws {
+        // All three delete paths (photo grid, near-duplicates, whole album) removed
+        // one album's catalog entry and files, then deleted the whole record. An
+        // image filed elsewhere vanished from an album whose entry and bytes were
+        // untouched, and the next hydration brought it back with no thumbnail and no
+        // storage locations — so the integrity pass then reported it missing.
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        let alpha = AlbumRecord(name: "Alpha", year: "2026", month: "07", day: "28")
+        let beach = AlbumRecord(name: "Beach", year: "2026", month: "08", day: "01")
+        context.insert(alpha)
+        context.insert(beach)
+
+        let record = ImageRecord(sha256: "aa", filename: "one.heic", sizeBytes: 1)
+        record.albums = [alpha, beach]
+        record.b2FileId = "b2-object-id"
+        record.storageLocations = [
+            StorageLocation(volumeID: "vol", relativePath: "2026/07/28/Alpha/one.heic"),
+            StorageLocation(volumeID: "vol", relativePath: "2026/08/01/Beach/one.heic")
+        ]
+        context.insert(record)
+
+        let deleted = record.removeFromAlbum(alpha, context: context)
+        #expect(!deleted, "the record still belongs to Beach")
+        #expect(record.albums.map(\.name) == ["Beach"])
+        // The Alpha copy is gone, so a location pointing at it is a file
+        // reconciliation would look for and fail to find.
+        #expect(record.storageLocations.map(\.relativePath) == ["2026/08/01/Beach/one.heic"])
+        // Nothing records which album's object the id names, so after deleting
+        // Alpha's it may not resolve; a re-upload beats a false "missing from B2".
+        #expect(record.b2FileId == nil)
+
+        // Removing the last album does delete the record.
+        #expect(record.removeFromAlbum(beach, context: context))
+        try context.save()
+        #expect(try context.fetchCount(FetchDescriptor<ImageRecord>()) == 0)
+    }
+
     @Test func hydrationSkipsEntriesWithTraversingPathComponents() throws {
         let container = try makeContainer()
         let context = container.mainContext

@@ -82,11 +82,30 @@ struct SwiftDataContainer {
             // those regenerate.
             log.error("Store at \(storeURL.path, privacy: .public) could not be opened: \(error, privacy: .public)")
 
+            // Try once more before doing anything irreversible-looking. Not every
+            // failed open means a corrupt store — a second copy of the app still
+            // holding it, or a volume that has not finished mounting, fails once and
+            // succeeds immediately after. Quarantining on the first failure costs the
+            // user every VolumeRecord (and its security-scoped bookmark, so every
+            // external drive needs re-authorising), every storageLocation, and all
+            // thumbnail state — none of which hydration restores.
+            if let container = try? ModelContainer(for: schema, configurations: [config]) {
+                log.notice("Store opened on retry; no recovery needed")
+                return container
+            }
+
             do {
-                let quarantine = try quarantineStore(at: storeURL)
-                quarantinedStoreURL = quarantine
-                didRecoverFromUnopenableStore = true
-                log.warning("Quarantined the unopenable store at \(quarantine.path, privacy: .public); rebuilding from catalog.json")
+                if let quarantine = try quarantineStore(at: storeURL) {
+                    quarantinedStoreURL = quarantine
+                    didRecoverFromUnopenableStore = true
+                    log.warning("Quarantined the unopenable store at \(quarantine.path, privacy: .public); rebuilding from catalog.json")
+                } else {
+                    // Nothing on disk to move, so the failure is about the schema or
+                    // the directory, not the store file. Saying "recovered" here would
+                    // be a lie, and it used to leave an empty `Unopenable-*` directory
+                    // behind on every launch attempt.
+                    log.error("No store file to quarantine; the open failure is not about the store contents")
+                }
             } catch {
                 // Could not move it — fall through and let the retry decide. If the
                 // store is still in place the retry fails too and we stop, which is
@@ -110,17 +129,36 @@ struct SwiftDataContainer {
     /// Moved rather than deleted: it may still hold recoverable local-only state,
     /// and silently destroying a user's database on a failed open is a worse
     /// default than leaving a copy they can hand to support.
-    @discardableResult
-    private static func quarantineStore(at storeURL: URL) throws -> URL {
+    ///
+    /// - Returns: the quarantine directory, or `nil` when there was no store on disk
+    ///   to move — an open that fails with no store file is about the schema or the
+    ///   directory, and reporting that as a recovery both misleads the caller and
+    ///   litters Application Support with empty `Unopenable-*` directories.
+    /// Test seam. The only way to make `ModelContainer` fail with no store present is
+    /// to break the schema, which a test cannot do to the app's real models, so the
+    /// "nothing to move" and collision cases are exercised on the function directly.
+    static func quarantineStoreForTesting(at storeURL: URL) throws -> URL? {
+        try quarantineStore(at: storeURL)
+    }
+
+    private static func quarantineStore(at storeURL: URL) throws -> URL? {
+        let sources = storeSidecarSuffixes
+            .map { URL(fileURLWithPath: storeURL.path + $0) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard !sources.isEmpty else { return nil }
+
+        // Second-resolution timestamps collide when two opens fail inside the same
+        // second: `createDirectory` succeeds on the existing directory and the move
+        // then throws on an existing destination, so the second quarantine silently
+        // failed and left the bad store in place.
         let stamp = ISO8601DateFormatter().string(from: .now)
             .replacingOccurrences(of: ":", with: "-")
+        let unique = UUID().uuidString.prefix(8)
         let directory = storeURL.deletingLastPathComponent()
-            .appendingPathComponent("Unopenable-\(stamp)", isDirectory: true)
+            .appendingPathComponent("Unopenable-\(stamp)-\(unique)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        for suffix in storeSidecarSuffixes {
-            let source = URL(fileURLWithPath: storeURL.path + suffix)
-            guard FileManager.default.fileExists(atPath: source.path) else { continue }
+        for source in sources {
             try FileManager.default.moveItem(
                 at: source,
                 to: directory.appendingPathComponent(source.lastPathComponent)

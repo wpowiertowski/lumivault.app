@@ -98,6 +98,48 @@ struct StoreRecoveryTests {
         }
     }
 
+    @Test func anOpenFailureWithNoStoreOnDiskIsNotReportedAsRecovery() throws {
+        // A container that will not open when there is no store file is failing for
+        // some other reason — an invalid schema, an unwritable directory. Claiming
+        // recovery there is a lie, and the old code proved it by leaving an empty
+        // `Unopenable-<stamp>` directory behind on every launch attempt.
+        //
+        // Driven through `quarantineStore` rather than `create`, because the only
+        // way to make `ModelContainer` fail with no store present is to break the
+        // schema, which is not something a test can do to the app's real models.
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storeURL = dir.appendingPathComponent("LumiVault.store")
+
+        #expect(try SwiftDataContainer.quarantineStoreForTesting(at: storeURL) == nil)
+
+        let siblings = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        #expect(!siblings.contains { $0.hasPrefix("Unopenable-") },
+                "an empty quarantine directory was created for a store that does not exist")
+    }
+
+    @Test func twoQuarantinesInTheSameSecondDoNotCollide() throws {
+        // The directory name used to be a second-resolution timestamp alone, so two
+        // failures inside one second landed on the same path: `createDirectory`
+        // succeeded on the existing directory and `moveItem` then threw on the
+        // existing destination, silently leaving the second bad store in place.
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        for i in 0..<2 {
+            let storeURL = dir.appendingPathComponent("LumiVault.store")
+            try Data("garbage \(i)".utf8).write(to: storeURL)
+            let quarantine = try #require(try SwiftDataContainer.quarantineStoreForTesting(at: storeURL))
+            #expect(FileManager.default.fileExists(
+                atPath: quarantine.appendingPathComponent("LumiVault.store").path
+            ))
+        }
+
+        let quarantines = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+            .filter { $0.hasPrefix("Unopenable-") }
+        #expect(quarantines.count == 2, "the second quarantine overwrote the first")
+    }
+
     @Test func recoveryLeavesTheCatalogUntouchedSinceThatIsTheRebuildSource() throws {
         let dir = try scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
