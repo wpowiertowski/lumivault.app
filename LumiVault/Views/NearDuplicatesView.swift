@@ -136,7 +136,7 @@ struct NearDuplicatesView: View {
     private func deleteImage() {
         guard let pending = pendingDelete,
               let image = allImages.first(where: { $0.sha256 == pending.sha256 }),
-              let album = image.album else {
+              let album = image.primaryAlbum else {
             pendingDelete = nil
             return
         }
@@ -187,10 +187,18 @@ struct NearDuplicatesView: View {
             await MainActor.run { progress.phase = .updatingCatalog }
             await syncCoordinator.removeImageFromCatalog(sha256: sha256, albumName: albumName, year: year, month: month, day: day)
 
-            await thumbnailService.removeThumbnails(for: sha256)
-
-            modelContext.delete(image)
+            // Only `primaryAlbum`'s copy was deleted — catalog entry and files — so
+            // an image filed under other albums has to survive here, along with the
+            // sha-keyed thumbnail those albums render from. Deleting the record
+            // outright meant the next hydration re-created it from the catalog
+            // entries that are still there, thumbnail-less and with no storage
+            // locations: the "deleted" near-duplicate came back looking broken.
+            let recordDeleted = image.removeFromAlbum(album, context: modelContext)
             try? modelContext.save()
+
+            if recordDeleted {
+                await thumbnailService.removeThumbnails(for: sha256)
+            }
 
             if let idx = groups.firstIndex(where: { $0.id == groupID }) {
                 groups[idx].members.removeAll { $0.sha256 == sha256 }
@@ -217,7 +225,7 @@ struct NearDuplicatesView: View {
                 sha256: image.sha256,
                 filename: image.filename,
                 sizeBytes: image.sizeBytes,
-                albumName: image.album?.name ?? "Unknown",
+                albumName: image.primaryAlbum?.name ?? "Unknown",
                 hash: hash
             )
         }

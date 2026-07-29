@@ -1,0 +1,104 @@
+import Testing
+import Foundation
+@testable import LumiVault
+
+// MARK: - Guard: no test may touch the real library
+//
+// This exists because two separate defects in this test suite wrote into the
+// developer's actual `~/Pictures/LumiVault`:
+//
+//  1. A pipeline run with no reachable target volume falls back to
+//     `Constants.Paths.libraryURL` as the copy destination, so photos landed in
+//     the real archive.
+//  2. `runImportPipeline` saved `catalog.json` to
+//     `Constants.Paths.resolvedCatalogURL` regardless of the injected
+//     `CatalogService` or the target volumes — so *every* import test replaced a
+//     5,000-entry archive catalog with its own two-file one. Redirecting the
+//     file copies to a temp volume did not prevent this; the catalog save is a
+//     separate path and needed its own seam.
+//
+// Both were silent: the tests passed, and the damage was only visible by
+// looking at the real library. A green suite is not evidence that a test did
+// not scribble outside its sandbox, so assert it directly.
+
+@Suite
+@MainActor
+struct RealLibraryGuardTests {
+
+    /// Fails if the real catalog looks like it was overwritten by a test.
+    ///
+    /// The signature is unmistakable: an archive catalog holds thousands of
+    /// entries across many albums, while a test catalog holds a handful under
+    /// one album named for a fixture. This does not run *before* the suite, so
+    /// it cannot prevent the damage — it makes a recurrence impossible to miss.
+    @Test func theRealCatalogWasNotReplacedByATestCatalog() throws {
+        let url = Constants.Paths.resolveCatalogURL(override: nil)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+
+        let data = try Data(contentsOf: url)
+        guard let catalog = try? JSONDecoder.catalogDecoder.decode(Catalog.self, from: data) else {
+            return  // unreadable for unrelated reasons; not this guard's business
+        }
+
+        var albumNames: Set<String> = []
+        var entries = 0
+        for year in catalog.years.values {
+            for month in year.months.values {
+                for day in month.days.values {
+                    for (name, album) in day.albums {
+                        albumNames.insert(name)
+                        entries += album.images.count
+                    }
+                }
+            }
+        }
+
+        // Album names the fixtures use. Their presence in the *real* catalog can
+        // only mean a test wrote there.
+        let fixtureAlbums: Set<String> = ["Trip", "Beach", "Probe", "Alpha", "Zulu"]
+        let leaked = albumNames.intersection(fixtureAlbums)
+
+        // A real archive has many albums; a leaked test catalog has one or two.
+        // Only flag when the catalog is *both* tiny and fixture-named, so a
+        // developer whose genuine archive contains an album called "Trip" is not
+        // told their data was clobbered.
+        let looksLikeATestCatalog = !leaked.isEmpty && albumNames.count <= 3 && entries < 25
+        #expect(
+            !looksLikeATestCatalog,
+            """
+            The real catalog at \(url.path) appears to have been overwritten by a test \
+            (\(entries) entries across \(albumNames.sorted())). A test wrote outside its \
+            sandbox — check that every PipelinedImportCoordinator built in a test passes \
+            its own `catalogURL`, and that no import runs without a reachable target volume.
+            """
+        )
+    }
+
+    /// Pins the two seams that keep imports away from the real library, so
+    /// removing either fails here rather than silently in someone's archive.
+    @Test func theCoordinatorAndLibraryPathBothAcceptAnOverride() throws {
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("guard-\(UUID().uuidString)", isDirectory: true)
+
+        // The catalog save destination must be injectable — this is the seam whose
+        // absence let import tests overwrite the real catalog.
+        let coordinator = PipelinedImportCoordinator(
+            catalogService: CatalogService(),
+            encryptionService: EncryptionService(),
+            catalogURL: scratch.appendingPathComponent("catalog.json")
+        )
+        _ = coordinator
+
+        // And the library root must be redirectable for UI tests, which launch the
+        // real app binary against the real archive otherwise.
+        #expect(Constants.Paths.uiTestLibraryEnvKey == "LUMIVAULT_UITEST_LIBRARY")
+    }
+}
+
+private extension JSONDecoder {
+    static var catalogDecoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+}

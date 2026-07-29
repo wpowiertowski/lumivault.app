@@ -123,15 +123,18 @@ struct PhotoGridView: View {
             await MainActor.run { progress.phase = .updatingCatalog }
             await syncCoordinator.removeImageFromCatalog(sha256: sha256, albumName: albumName, year: year, month: month, day: day)
 
-            // Remove thumbnail
-            await thumbnailService.removeThumbnails(for: sha256)
-
-            // Remove from SwiftData
+            // Remove from SwiftData. Only this album's copy was deleted — its
+            // catalog entry and its files — so an image also filed elsewhere has to
+            // survive, and its shared, sha-keyed thumbnail with it.
             if selectedImage?.sha256 == sha256 {
                 selectedImage = nil
             }
-            modelContext.delete(image)
+            let recordDeleted = image.removeFromAlbum(album, context: modelContext)
             try? modelContext.save()
+
+            if recordDeleted {
+                await thumbnailService.removeThumbnails(for: sha256)
+            }
 
             await MainActor.run {
                 progress.phase = .complete

@@ -2,7 +2,7 @@
 
 ## Existing Automated Test Assessment
 
-### Summary: 281 tests across 54 suites
+### Summary: 342 tests across 62 suites
 
 | Rating | Suite | Tests | Assessment |
 | -------- | ------- | ------- | ------------ |
@@ -21,6 +21,14 @@
 | High Value | AsyncChannelTests | 5 | Bounded async channel: send/receive, backpressure blocks producer when full, finish ends consumer loop, cancel unblocks producers + terminates consumer, multi-producer/single-consumer race. |
 | High Value | AsyncSemaphoreTests | 3 | Counting semaphore: wait suspends at zero, cancelAll resumes every waiter, wait-after-cancel does not suspend. The non-suspending fast paths are reached by these same tests, so the two assertion-free tests that only walked them were dropped. |
 | Medium Value | B2ServiceHelperTests | 5 | SHA-1 known test vectors, HTTP response validation for success (299 — the range's upper edge) and error (401, 500) status codes |
+| High Value | PipelineOrchestrationTests | 13 | The real eight-stage import pipeline end to end via `importFiles`: persistence + album + catalog + bytes on the volume, PAR2 recovery volumes mirrored beside the index, ciphertext really written (not just the record flags), converted extension agreed on by record/catalog/disk, exact dedup, second-album membership, a failing volume copy reported without dropping the import, an unreadable source skipped without stopping siblings, cancellation stopping short of the backlog *and* still persisting what was already archived (with no album-less records left behind), counters reconciling with what was persisted, and both halves of the album-deletion rule. |
+| High Value | ReconciliationRepairTests | 9 | Corruption detection and auto-repair: a rotted file passes an existence scan and is caught by `verifyHashes`; repair from a healthy replica (asserted on the bytes, not the outcome enum); real PAR2 Reed-Solomon recovery; a mis-hashing replica refused; a traversing `relativePath` refused with the outside file proven untouched; unrepairable corruption reported rather than passed. |
+| High Value | SyncCoordinatorTests | 10 | Catalog distribution to every registered volume, `reloadFromDisk` true vs false picking the on-disk vs in-memory catalog, iCloud/B2 skipped when disabled, a read-only volume survived (and proven to have failed), restore-from-file landing on disk and in the live service, a failed restore leaving the existing catalog intact, a disconnected volume skipped without stopping the healthy one. |
+| High Value | EXIFExtractionTests | 7 | Real JPEGs carrying real EXIF/TIFF/GPS. The GPS hemisphere reconstruction is the point: a dropped negation files a photo on the wrong side of the equator without crashing or failing to decode. Plus capture settings (ISO from an array, vendor-padded Make/Model trimmed), the DateTimeOriginal fallback, in-memory extraction, and a non-image returning nil. |
+| Medium Value | EXIFFormattingTests | 4 | The six formatted strings: aperture/ISO/focal length incl. the 35mm equivalent, megapixels needing both axes, altitude and coordinate precision, and a latitude without a longitude not being a fix. |
+| Medium Value | KeychainStoreTests | 4 | Round-trip, update-in-place rather than duplicate, delete of an absent account, and account isolation. These used to be gated off whenever `CI` was set, on the untested assumption that a runner's keychain is locked — which made the coverage figure quoted for `KeychainStore` unreproducible in the job that gates on coverage. `B2Credentials` is deliberately uncovered: it persists under a fixed account, so testing it would overwrite real credentials. |
+| High Value | StoreRecoveryTests | 5 | An unopenable SwiftData store is quarantined (bytes preserved verbatim, `-wal`/`-shm` moved with it) and replaced rather than crashing the app on launch; a healthy store is left alone; recovery never touches `catalog.json`, which is what it rebuilds from. An open failure with no store on disk is not reported as a recovery, and two failures in the same second do not collide. Guards the interrupted-migration case that made the app permanently unlaunchable. |
+| High Value | RealLibraryGuardTests | 2 | Fails if the real `~/Pictures/LumiVault/catalog.json` looks like a test wrote it, and pins the two seams (`PipelinedImportCoordinator.catalogURL`, `LUMIVAULT_UITEST_LIBRARY`) that keep tests out of the real archive. Exists because two separate defects wrote there while the suite stayed green. |
 | Medium Value | CatalogBackupServiceTests | 5 | Volume backup write + decode, error on bad path, file restore round-trip, missing catalog error, orphan vol-file eviction |
 | Medium Value | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture hash verification |
 | Medium Value | ImageConversionTests | 6 | JPEG conversion with extension change, valid output, dimension scaling, original format pass-through, below-max preservation. Tests exercise the shared `ImageConversionService.convertImage`. |
@@ -32,7 +40,7 @@
 | Low Value | PhotosSyncSchemaTests | 4 | Lightweight-migration smoke tests for the new optional `phAssetLocalIdentifier` / `photosAlbumLocalIdentifier` fields on legacy SwiftData stores. |
 | Low Value | SnakeGameTests | 7 | Easter-egg Snake game state machine: initial segments, hold-before-start, tick movement, no-direct-reverse, wall collision, food growth/score, reset. |
 | Low Value | FlappyGameTests | 5 | Easter-egg Flappy game state machine: hover-before-flap, flap impulse, gravity, floor collision, reset. |
-| High Value | HydrationTests | 11 | Rebuilding SwiftData from `catalog.json`: empty store, idempotent upsert, local-only fields preserved, staleness detection (including the multi-album and skipped-entry catalogs where an entry-count comparison could never settle), deterministic album assignment for a multi-album image, tombstone application, and a 2,000-image pass. Guards the "restored successfully over an empty sidebar" class of bug. |
+| High Value | HydrationTests | 12 | Rebuilding SwiftData from `catalog.json`: empty store, idempotent upsert, local-only fields preserved, staleness detection (including the multi-album and skipped-entry catalogs where an entry-count comparison could never settle), deterministic album assignment for a multi-album image, tombstone application, and a 2,000-image pass. Guards the "restored successfully over an empty sidebar" class of bug. |
 | High Value | SingleImagePAR2DeletionTests | 3 | Single-image deletion removes the `.vol0+N.par2` recovery volumes, leaves siblings' PAR2 sets intact, and derives the index name when the record carries none. |
 | High Value | HealReplicasTests | 4 | Volume-to-volume replica healing: real bytes restored, failure reasons reported, traversing `relativePath` refused, unhealable discrepancy kinds ignored. |
 | High Value | PipelinePhaseRoutingTests | 6 | Stage-to-stage routing over all 16 combinations of enabled phases: never forwards into a disabled stage, always terminates at the catalog sink. |
@@ -97,17 +105,94 @@ differ only in batch size, but serve as single-file vs bulk regression guards.
 
 ### Coverage Status
 
+Measured with `swift test --enable-code-coverage` (SwiftPM, no app host — see
+README for why that differs from the Xcode figure).
+
+| Scope | Covered | Total | % |
+| --- | --- | --- | --- |
+| **Non-view** (the gated number) | 5725 | 9290 | **61.6%** |
+| Views | 233 | 16017 | 1.5% |
+| Overall | 5706 | 25059 | 22.8% |
+
+The headline number is capped at ~36% while views are untested, because SwiftUI
+view code is 64% of the target. CI gates **non-view** coverage with a floor of
+58% (`Scripts/coverage-gate.sh`) rather than the headline, which moves whenever a
+settings screen is added or removed regardless of test quality.
+
 | Area | Risk | Status |
 | ------ | ------ | -------- |
 | EncryptionService | High | **Covered** — 23 tests across 3 suites: key derivation, round-trips, wrong key/AD, nonce uniqueness, file ops, edge cases, encrypt-PAR2-decrypt integration |
-| B2Service (network layer) | High | **Covered** — 25 tests total: 5 pure helpers (SHA-1, HTTP response validation), 13 network methods via URLProtocol stub (authorize, getUploadURL, uploadFile, list pagination, fileExists, delete, retry/backoff), and 7 large-file tests (start/part/finish, cancel, size-based routing, filename encoding per route). |
-| PipelinedImportCoordinator | High | **Partially covered** — phase-skipping wiring is now exhaustively covered (PipelinePhaseRoutingTests, all 16 combinations), plus PipelineItem filename propagation, copy-stage mirroring, conversion, and the channel/semaphore primitives. Per-stage cancellation is now fenced against a real stage body (ChannelCancellationDrainTests). Full orchestration — sentinel task, `copyError` vs `error` isolation — still needs protocol-based service injection and relies on manual QA (TC-2, TC-4). |
-| CatalogBackupService | Medium | **Covered** — 6 tests: volume backup/restore round-trip, error reporting, missing catalog, happy path restore |
-| Volume sync (VolumeSyncSheet inline copy loop) | Medium | **Not unit-tested** — loop lives in a SwiftUI view. Hash-dedup + PAR2 companion behavior validated by manual QA (TC-8, TC-9). |
-| PerceptualHash | Medium | **Covered** — 8 tests across 2 suites: hammingDistance (5 pure math, including the misaligned-slice regression) + compute (3 with real images) |
-| SyncService / SyncCoordinator | Medium | **SyncService covered** — 20 tests on push/pull/merge, echo suppression, convergent merge and tombstone propagation. **SyncCoordinator hydration covered** — 11 tests drive `hydrate`/`isHydrationStale` against an in-memory ModelContainer, and 6 more cover legacy catalog migration. The remaining orchestration (iCloud monitoring, settings debounce) still requires provisioning. |
-| ThumbnailService | Low | **Partially covered** — 4 tests on the on-disk contract (Application Support root, sha-sharded layout, miss-reads-nil, removal) plus video poster frames. The NSCache layer and regeneration from a mounted source volume remain manual QA; visual correctness always was. |
-| PhotosImportService | Low | **Mostly not testable** — requires the Photos entitlement. The download watchdog's arithmetic is extracted into `StallPolicy` and covered by 6 tests; the surrounding `PHAssetResourceManager` loop remains manual QA. |
+| B2Service (network layer) | High | **Covered** — 25 tests: 5 pure helpers, 13 network methods via URLProtocol stub, 7 large-file tests. 83.7% |
+| PipelinedImportCoordinator | High | **Covered, 72.7%** — the eight-stage pipeline runs end to end in tests via `importFiles`, which reaches the same `runImportPipeline` as the Photos path. Only `PhotosImportService` (entitlement-bound) stays out. This is what caught the inert cancellation. |
+| ReconciliationService | High | **Covered, 79.2%** — corruption detection plus both repair strategies (healthy replica, PAR2 recovery) and both refusal paths (mis-hashing source, traversing path). |
+| SyncCoordinator | Medium | **Partially covered, 49.6%** — catalog distribution, restore, and mutation helpers are covered via the injected init. iCloud monitoring (`startMonitoring`, metadata queries) still needs provisioning. |
+| EXIFData | Medium | **Covered, 100%** — including GPS hemisphere reconstruction. |
+| KeychainStore | Medium | **94.3%** — these run everywhere now. They used to be gated off whenever `CI` was set, on an untested assumption that the runner's keychain is locked, which meant the figure quoted here was unreproducible in the job that gates on coverage. |
+| B2Credentials | Medium | **Not covered, 0%, deliberately** — persists under a fixed keychain account, so testing save/load would overwrite the developer's real credentials. |
+| PhotosImportService | Low | **Mostly not testable, 1.7%** — requires the Photos entitlement. `StallPolicy` is extracted and covered; the `PHAssetResourceManager` loop remains manual QA. It is 1328 lines and is single-handedly the largest drag on the non-view figure. |
+| Volume sync (VolumeSyncSheet inline copy loop) | Medium | **Not unit-tested** — loop lives in a SwiftUI view. Manual QA (TC-8, TC-9). |
+| SyncService | Medium | **Covered, 44.2%** — push/pull/merge covered; `startMonitoring`/`stopMonitoring` need iCloud. |
+| ThumbnailService | Low | **Partially covered** — on-disk contract plus video poster frames; NSCache layer is manual QA. |
+| SwiftUI views | Medium | **1.5%** — needs UI tests; see below. |
+
+### UI tests
+
+`UITests/` drives the real app binary. Each launch is given a throwaway library
+via the `LUMIVAULT_UITEST_LIBRARY` launch-environment variable, which redirects
+`Constants.Paths.libraryURL` and puts the SwiftData store in memory. That is both
+a safety requirement — without it a UI-driven import writes junk albums into the
+developer's real archive and rewrites its catalog.json — and what makes the tests
+deterministic: they previously asserted against whatever the developer happened
+to have imported, which is the real reason they were considered flaky.
+
+`UserDefaults` is isolated the same way, via launch arguments
+(`-hasSeenWelcome YES -b2Enabled NO …`). `NSArgumentDomain` outranks the app domain,
+so the pinned values apply to that process only and nothing is written to the
+developer's real defaults. This is not cosmetic: `hasSeenWelcome` selects between two
+entirely different welcome screens, and leaving it unpinned is what made
+`testWelcomeScreenRestoreButtons` pass locally and fail on CI for a week.
+
+The CI job **gates** (13 tests, `-retry-tests-on-failure -test-iterations 2`).
+XCUIAutomation was once thought unusable headless; it is not — on the macOS runners
+the suite launches and executes normally. It does fail on a local machine that has
+not granted automation/accessibility permission to the test runner, which dies with
+`Timed out while enabling automation mode` before executing a single assertion. That
+is a local TCC issue, not a CI one.
+
+Five tests were red and one was passing while asserting nothing. All six were test
+defects — the app was fine — of the same family this suite exists to eliminate:
+**assertions that depend on the developer's own machine.**
+
+| Test | Was | Cause and fix |
+| --- | --- | --- |
+| `testWelcomeScreenRestoreButtons` | red | `WelcomeView` branches on `@AppStorage("hasSeenWelcome")`, false on a fresh runner, so CI got `FirstLaunchView` — which has no restore buttons. Pinned via launch argument; the first-launch branch now has its own test. |
+| `testSidebarExists` | red | `nav.sidebar` was an identifier on `SidebarView`, which renders a bare `VStack` on an empty store — SwiftUI builds no accessibility element, so it attached to nothing. Replaced by `testSidebarShowsEmptyState`, asserting the sidebar's own content; the dead identifier was removed. |
+| `testB2CredentialFields`, `testEncryptionTabFields`, `testImportDefaultsToggles` | red | Reached the Settings window via `app.windows.element(boundBy:)`. The log proves Settings opened, but the new window sorts *ahead* of the main one, so index 1 was the main window. Now found by exclusion — the window without the main toolbar. |
+| `testSettingsTabsExist` | **falsely green** | Waited 5 s for `app.windows["Settings"]` (SwiftUI's Settings scene is not titled that on macOS 26), fell into a `guard … else { return }`, and skipped all 8 assertions on every run. Escape hatch deleted; asserts the tab controls by title. |
+
+A related defect stayed latent behind the window bug: the `settings.tab.*`
+identifiers are attached to each tab's *content* view, not its control, so clicking
+one clicks the content area and cannot change the selection. Tabs are selected by
+visible title instead — and the control is a **`Button`**, not the `RadioButton` or
+`Tab` that a `TabView` would suggest. That was established by running the candidate
+queries once on CI and reading which matched, rather than guessed at.
+
+Clicking into the B2 tab raises a system permission dialog on a fresh runner (the
+keychain read behind the credential fields). XCTest's interruption handling dismisses
+it with *Don't Allow*, which is the right answer for a test — the fields render either
+way — but it does mean the B2 tab is never exercised with credentials present.
+
+Failures now attach the accessibility hierarchy (`assertExists`), and CI uploads the
+`.xcresult` on failure. Discarding that bundle is what turned a one-run diagnosis
+into a week of reading timing lines.
+
+Known gap: the album context-menu test was removed rather than carried forward.
+It skipped unless the sidebar already had an album, which was only ever true
+because runs shared a real store; with a fresh store per launch it could only ever
+skip. Seeding is now within reach — `SyncCoordinator.setup` hydrates SwiftData from
+`catalog.json` under the overridden library, so a test can write a catalog into its
+temp directory and launch into a populated app with no app changes — but that work
+is not done, and the album, photo-grid and deletion flows stay uncovered until it is.
 
 ### Remaining Automated Test TODOs
 
@@ -161,32 +246,33 @@ a pinned SHA-256, serving as the trust anchor the same way the image fixtures do
 
 ## UI Test Automation (XCUIAutomation)
 
-### Summary: 12 UI tests in 1 suite (local environment only)
+### Summary: 13 UI tests in 1 suite (gating on CI)
 
-The `LumiVaultUITests` target uses XCUIAutomation (Xcode 26) to automate a subset of the manual test cases below. These tests are designed for **local development only** — they require a real app launch and are not suitable for headless CI.
+The `LumiVaultUITests` target uses XCUIAutomation (Xcode 26) to automate a subset of the manual test cases below. Each launch gets a throwaway library, an in-memory store and a pinned set of `UserDefaults`, so a run asserts against a known app state rather than the developer's own.
 
 | Test | Covers | What it validates |
 | ------ | -------- | ------------------- |
-| `testWelcomeScreenRestoreButtons` | TC-1 | Welcome view shows From File / From Volume restore buttons (skips if albums exist) |
-| `testSidebarExists` | TC-21 | NavigationSplitView sidebar is present |
+| `testWelcomeScreenRestoreButtons` | TC-1 | Returning user, no albums: From File / From Volume shown, From B2 hidden while B2 is off |
+| `testFirstLaunchShowsTheExplainer` | TC-1 | First-time profile gets the explainer and Get Started, *not* the restore options |
+| `testSidebarShowsEmptyState` | TC-21 | Sidebar renders its empty state on a store with no albums |
 | `testToolbarImportButton` | TC-21 | Import from Photos toolbar button is accessible |
 | `testToolbarNearDuplicatesButton` | TC-21 | Near-Duplicates toolbar button is accessible |
 | `testWindowExists` | TC-21 | App window renders successfully |
-| `testSettingsTabsExist` | TC-22 | All 8 settings tabs (General through Support) are accessible |
-| `testB2CredentialFields` | TC-22 | B2 tab shows enable toggle |
-| `testEncryptionTabFields` | TC-22 | Encryption tab shows passphrase field |
+| `testSettingsTabsExist` | TC-22 | All 8 settings tabs (General through Support) are present |
+| `testB2CredentialFields` | TC-22 | Selecting the B2 tab shows its enable toggle |
+| `testEncryptionTabFields` | TC-22 | Encryption tab shows exactly one key control for the current keychain state |
+| `testImportDefaultsToggles` | TC-22 | Import Defaults tab shows PAR2 and near-duplicate toggles |
 | `testPhotosImportOpensSheet` | TC-2 | Import button opens import sheet with cancel button |
 | `testImportCancelButtonExists` | TC-4 | Cancel and Next buttons exist; Next is disabled without album selection |
-| `testAlbumContextMenuDeleteExists` | TC-16 | Right-click album shows Delete Album context menu (skips if no albums) |
-| `testImportDefaultsToggles` | TC-22 | Import Defaults tab shows PAR2 and near-duplicate toggles |
+| `testOpenSettingsFromImportSheetActuallyOpensSettings` | TC-37 | Regression for cbf5f3a: Open Settings from inside a modal sheet |
 
 ### Accessibility Identifiers
 
 ~65 `.accessibilityIdentifier()` modifiers have been added across 14 view files. Naming convention: `area.element` (e.g., `sidebar.albumList`, `import.cancel`, `b2.testConnection`).
 
 Key identifier groups:
-- **Navigation**: `nav.sidebar`, `toolbar.importPhotos`, `toolbar.nearDuplicates`
-- **Welcome**: `welcome.restoreFile`, `welcome.restoreVolume`, `welcome.restoreB2`
+- **Navigation**: `toolbar.importPhotos`, `toolbar.nearDuplicates`
+- **Welcome**: `welcome.getStarted`, `welcome.restoreFile`, `welcome.restoreVolume`, `welcome.restoreB2`
 - **Sidebar**: `sidebar.albumList`, `sidebar.album.<name>`, `sidebar.volumeStatus`
 - **Grid**: `grid.container`, `grid.import`, `grid.photo.<sha256prefix>`
 - **Settings tabs**: `settings.tab.general` through `settings.tab.support`

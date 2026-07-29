@@ -13,6 +13,11 @@ struct ContentView: View {
     @State private var showingIntegrityAlert = false
     @State private var showingRepairNotice = false
     @State private var showingVolumes = false
+    /// Recovery from an unopenable store is automatic but not invisible: the
+    /// rebuild restores albums and photos from catalog.json and nothing else, so the
+    /// user has to be told why their volumes need re-adding. Read once at init —
+    /// the flag is set during container creation, before any view exists.
+    @State private var showingStoreRecoveryNotice = SwiftDataContainer.didRecoverFromUnopenableStore
 
     var body: some View {
         GeometryReader { proxy in
@@ -20,9 +25,14 @@ struct ContentView: View {
             let contentIdeal = max(200, proxy.size.width * 0.6)
 
             NavigationSplitView(columnVisibility: $columnVisibility) {
+                // No accessibility identifier here: with an empty store `SidebarView`
+                // is a bare `VStack`, SwiftUI builds no accessibility element for it,
+                // and an identifier applied to nothing reads as a query seam that does
+                // not exist. UI tests assert on the sidebar's own content instead; if a
+                // queryable container is ever wanted, `.accessibilityElement(children:
+                // .contain)` is what makes one.
                 SidebarView(selectedAlbum: $selectedAlbum, selectedImage: $selectedImage)
                     .navigationSplitViewColumnWidth(min: 200, ideal: sidebarIdeal, max: 320)
-                    .accessibilityIdentifier("nav.sidebar")
             } content: {
                 Group {
                     if let album = selectedAlbum {
@@ -111,6 +121,19 @@ struct ContentView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text("Corruption was detected in catalog.json and automatically repaired using PAR2 error correction data.")
+            }
+            .alert("Local Index Rebuilt", isPresented: $showingStoreRecoveryNotice) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("""
+                    LumiVault could not open its local index, so it was set aside and \
+                    rebuilt from catalog.json. Your albums and photos are intact.
+
+                    Some local-only settings do not come back: external volumes must be \
+                    added again in Settings, and thumbnails regenerate as you browse. \
+                    The old index was kept at \
+                    \(SwiftDataContainer.quarantinedStoreURL?.path ?? "Application Support").
+                    """)
             }
         }
         .frame(minWidth: 820, minHeight: 500)
@@ -228,6 +251,7 @@ private struct FirstLaunchView: View {
                 .controlSize(.large)
                 .buttonStyle(.borderedProminent)
                 .tint(Constants.Design.accentColor)
+                .accessibilityIdentifier("welcome.getStarted")
                 .padding(.top, 32)
                 .padding(.bottom, 40)
             }

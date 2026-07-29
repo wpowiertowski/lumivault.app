@@ -13,17 +13,53 @@ final class SyncCoordinator: @unchecked Sendable {
     private(set) var isICloudAvailable: Bool = false
     private(set) var catalogIntegrity: Catalog.IntegrityStatus?
 
-    private let catalogService = CatalogService()
-    private let backupService = CatalogBackupService()
+    private let catalogService: CatalogService
+    private let backupService: CatalogBackupService
     private var syncService: SyncService?
-    private let settingsSyncService = SettingsSyncService()
+    private let settingsSyncService: SettingsSyncService
     private var isSyncing = false
     private var settingsPushDebounce: Task<Void, Never>?
     private var defaultsObserver: NSObjectProtocol?
     var modelContainer: ModelContainer?
 
+    /// Where this coordinator reads and writes `catalog.json`, and which defaults
+    /// domain it consults. Injected rather than read from `Constants.Paths` /
+    /// `UserDefaults.standard` at each use site so a test can drive the real
+    /// distribution logic without touching the user's `~/Pictures/LumiVault` —
+    /// several of these paths *write* the catalog, so a global default here is a
+    /// live hazard, not just an isolation nuisance.
+    private let catalogURL: URL
+    private let defaults: UserDefaults
+
     enum SyncStatus: Sendable {
         case idle, syncing, synced, error, disabled
+    }
+
+    /// Production initializer: the real library catalog and the standard defaults.
+    init() {
+        self.catalogService = CatalogService()
+        self.backupService = CatalogBackupService()
+        self.settingsSyncService = SettingsSyncService()
+        self.catalogURL = Constants.Paths.resolvedCatalogURL
+        self.defaults = .standard
+    }
+
+    /// Test initializer. Mirrors `SettingsSyncService.init(syncURL:defaultsSuiteName:)`
+    /// and `SyncService`'s test-only init: same code path, no shared global state.
+    init(
+        catalogService: CatalogService,
+        backupService: CatalogBackupService,
+        settingsSyncService: SettingsSyncService,
+        catalogURL: URL,
+        defaults: UserDefaults,
+        syncService: SyncService? = nil
+    ) {
+        self.catalogService = catalogService
+        self.backupService = backupService
+        self.settingsSyncService = settingsSyncService
+        self.catalogURL = catalogURL
+        self.defaults = defaults
+        self.syncService = syncService
     }
 
     // MARK: - Setup
@@ -34,7 +70,6 @@ final class SyncCoordinator: @unchecked Sendable {
         migrateLegacyCatalogIfNeeded()
 
         // Load local catalog
-        let catalogURL = Constants.Paths.resolvedCatalogURL
 
         // Verify catalog integrity before loading
         if FileManager.default.fileExists(atPath: catalogURL.path) {
@@ -61,7 +96,7 @@ final class SyncCoordinator: @unchecked Sendable {
 
         // If iCloud sync is enabled, pull on launch and start monitoring
         let enabled = await MainActor.run {
-            UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
+            defaults.bool(forKey: "iCloudSyncEnabled")
         }
 
         if enabled && available {
@@ -75,7 +110,7 @@ final class SyncCoordinator: @unchecked Sendable {
         await MainActor.run {
             defaultsObserver = NotificationCenter.default.addObserver(
                 forName: UserDefaults.didChangeNotification,
-                object: UserDefaults.standard,
+                object: defaults,
                 queue: .main
             ) { [weak self] _ in
                 Task { @MainActor in
@@ -145,14 +180,14 @@ final class SyncCoordinator: @unchecked Sendable {
     func pushAfterLocalChange(reloadFromDisk: Bool = true) async {
         if reloadFromDisk {
             // Reload local catalog to pick up changes made by external CatalogService instances
-            try? await catalogService.load(from: Constants.Paths.resolvedCatalogURL)
+            try? await catalogService.load(from: catalogURL)
         }
 
         let catalog = await catalogService.currentCatalog()
 
         // Push to iCloud if enabled
         let iCloudEnabled = await MainActor.run {
-            UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
+            defaults.bool(forKey: "iCloudSyncEnabled")
         }
         if iCloudEnabled, let service = syncService {
             try? await service.pushToICloud()
@@ -169,7 +204,7 @@ final class SyncCoordinator: @unchecked Sendable {
 
         // Backup to B2 if enabled
         let b2Enabled = await MainActor.run {
-            UserDefaults.standard.bool(forKey: "b2Enabled")
+            defaults.bool(forKey: "b2Enabled")
         }
         if b2Enabled, let credentials = loadB2Credentials() {
             if let error = await backupService.backupToB2(catalog: catalog, credentials: credentials) {
@@ -191,7 +226,6 @@ final class SyncCoordinator: @unchecked Sendable {
         }
 
         // Save restored catalog locally
-        let catalogURL = Constants.Paths.resolvedCatalogURL
         try await MainActor.run {
             try catalog.save(to: catalogURL)
         }
@@ -253,7 +287,19 @@ final class SyncCoordinator: @unchecked Sendable {
     @MainActor
     static func isHydrationStale(catalog: Catalog, context: ModelContext) -> Bool {
         let recordCount = (try? context.fetchCount(FetchDescriptor<ImageRecord>())) ?? 0
-        return recordCount != hydratableAlbums(in: catalog).distinctSHACount
+        if recordCount != hydratableAlbums(in: catalog).distinctSHACount { return true }
+
+        // Counts matching is not proof the store is intact — the records can all be
+        // there with their album memberships gone. That is the exact failure mode of
+        // a lightweight migration that does not infer the `album` → `albums`
+        // relationship: every record survives, every album empties, the counts still
+        // agree, and hydration never runs to repair it. An image belonging to no
+        // album is unreachable in the UI, so treating any orphan as staleness costs
+        // one indexed count and turns a silent empty library into a self-repair.
+        let orphanCount = (try? context.fetchCount(
+            FetchDescriptor<ImageRecord>(predicate: #Predicate { $0.albums.isEmpty })
+        )) ?? 0
+        return orphanCount > 0
     }
 
     /// One album the catalog contributes to SwiftData, with its path components
@@ -280,12 +326,13 @@ final class SyncCoordinator: @unchecked Sendable {
     /// Flatten the catalog into the albums/images hydration will actually write.
     ///
     /// The nested containers are Dictionaries, so a raw walk visits albums in an
-    /// unspecified order. That matters because `ImageRecord.album` is to-one: an
-    /// image listed under two albums lands in whichever album the walk visits
-    /// last, so an unsorted walk can file it differently on each hydration and
-    /// the photo visibly jumps between albums with no user action. Sorting by
-    /// album key makes the winner stable — the last key in sort order — which is
-    /// arbitrary but at least the same on every run and every machine.
+    /// unspecified order. That used to decide which album an image ended up in:
+    /// while `ImageRecord.album` was to-one, an image listed under two albums
+    /// landed in whichever the walk visited last, and sorting only made that
+    /// arbitrary winner stable. The relationship is many-to-many now, so the
+    /// image is filed under all of them and visit order no longer changes the
+    /// result. Sorting is kept because deterministic insertion order still makes
+    /// `AlbumRecord` creation and `primaryAlbum` reproducible across machines.
     ///
     /// Shared with `isHydrationStale` so the staleness check and the work it
     /// gates agree on exactly which entries are hydratable.
@@ -366,6 +413,9 @@ final class SyncCoordinator: @unchecked Sendable {
         // deletions below never touch a path/sha the catalog still holds.
         var catalogAlbumKeys = Set<String>()
         var catalogSHAs = Set<String>()
+        // Which albums the catalog files each sha under, so memberships it no longer
+        // declares can be pruned below.
+        var catalogAlbumKeysBySHA: [String: Set<String>] = [:]
 
         let plan = hydratableAlbums(in: catalog)
         let skippedCount = plan.skippedCount
@@ -389,6 +439,7 @@ final class SyncCoordinator: @unchecked Sendable {
 
             for catalogImage in catalogAlbum.images {
                 catalogSHAs.insert(catalogImage.sha256)
+                catalogAlbumKeysBySHA[catalogImage.sha256, default: []].insert(catalogAlbum.key)
                 let nonce = catalogImage.encryptionNonce.flatMap { Data(base64Encoded: $0) }
                 let isEncrypted = catalogImage.encryptionAlgorithm != nil
                 if let existing = imagesBySHA[catalogImage.sha256] {
@@ -405,14 +456,14 @@ final class SyncCoordinator: @unchecked Sendable {
                     if let duration = catalogImage.durationSeconds {
                         existing.durationSeconds = duration
                     }
-                    // Always point the record at the album it lives in per the
-                    // catalog being hydrated. Guarding on `album == nil` would
-                    // strand the record on a stale album when a restored catalog
-                    // re-dates/renames the album (new path → new AlbumRecord),
-                    // leaving the new album rendered empty. When the catalog files
-                    // one sha under several albums the last one wins; `plan` is
-                    // sorted by album key so "last" is at least deterministic.
-                    existing.album = album
+                    // Add the membership for the album currently being hydrated.
+                    // Under the old to-one relationship this was an assignment, so
+                    // an image filed under several albums ended up in whichever one
+                    // was hydrated last — every other album rendered it missing.
+                    // Membership is additive now, so all of them are correct.
+                    if !existing.albums.contains(where: { $0 === album }) {
+                        existing.albums.append(album)
+                    }
                 } else {
                     let record = ImageRecord(
                         sha256: catalogImage.sha256,
@@ -421,7 +472,7 @@ final class SyncCoordinator: @unchecked Sendable {
                         par2Filename: catalogImage.par2Filename,
                         b2FileId: catalogImage.b2FileId,
                         addedAt: catalogAlbum.addedAt,
-                        album: album,
+                        albums: [album],
                         isEncrypted: isEncrypted,
                         encryptionKeyId: catalogImage.encryptionKeyId,
                         encryptionNonce: nonce,
@@ -431,6 +482,26 @@ final class SyncCoordinator: @unchecked Sendable {
                     context.insert(record)
                     imagesBySHA[catalogImage.sha256] = record
                 }
+            }
+        }
+
+        // Prune memberships the merged catalog no longer declares.
+        //
+        // Adding memberships is not enough on its own: removing an image from one
+        // album on another Mac produces a catalog that simply stops listing that
+        // sha under that album — there is no tombstone for it, because the image
+        // itself still exists elsewhere. Append-only hydration therefore left the
+        // photo visible in the album it was removed from, forever, on every other
+        // Mac. The old to-one `existing.album = album` assignment re-parented the
+        // record and got this right by accident.
+        //
+        // Scoped to shas the catalog knows about: a record whose sha appears
+        // nowhere in the catalog is a local import that has not been cataloged yet,
+        // and pruning its membership would delete the album it was just filed into.
+        for record in imagesBySHA.values {
+            guard let declared = catalogAlbumKeysBySHA[record.sha256] else { continue }
+            record.albums.removeAll { album in
+                !declared.contains("\(album.year)/\(album.month)/\(album.day)/\(album.name)")
             }
         }
 
@@ -488,20 +559,20 @@ final class SyncCoordinator: @unchecked Sendable {
     /// Remove an album from the catalog and save.
     func removeAlbumFromCatalog(name: String, year: String, month: String, day: String) async {
         await catalogService.removeAlbum(name: name, year: year, month: month, day: day)
-        try? await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
+        try? await catalogService.save(to: catalogURL)
     }
 
     /// Remove a single image from a catalog album and save.
     func removeImageFromCatalog(sha256: String, albumName: String, year: String, month: String, day: String) async {
         await catalogService.removeImage(sha256: sha256, fromAlbum: albumName, year: year, month: month, day: day)
-        try? await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
+        try? await catalogService.save(to: catalogURL)
     }
 
     /// Update an image's B2 fileId in the catalog and save. Used after the integrity
     /// heal pass re-uploads a file that had gone missing from B2.
     func updateImageB2FileId(sha256: String, b2FileId: String) async {
         await catalogService.updateImageB2FileId(sha256: sha256, b2FileId: b2FileId)
-        try? await catalogService.save(to: Constants.Paths.resolvedCatalogURL)
+        try? await catalogService.save(to: catalogURL)
     }
 
     /// Sync the settings document (import defaults, B2/encryption config, volume
@@ -509,7 +580,7 @@ final class SyncCoordinator: @unchecked Sendable {
     /// Views call this after mutating state that lives outside UserDefaults (volumes).
     func syncSettings() async {
         let enabled = await MainActor.run {
-            UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
+            defaults.bool(forKey: "iCloudSyncEnabled")
         }
         guard enabled, isICloudAvailable else { return }
 
@@ -563,7 +634,7 @@ final class SyncCoordinator: @unchecked Sendable {
 
         // An explicit override means the user chose where the catalog lives; never
         // move it out from under them.
-        guard UserDefaults.standard.string(
+        guard defaults.string(
             forKey: Constants.Paths.catalogPathDefaultsKey
         ) == nil else { return }
 

@@ -28,8 +28,8 @@ struct DeletedRecordGuardTests {
         let ctx = container.mainContext
         let album = AlbumRecord(name: "Grasslawn", year: "2026", month: "07", day: "24")
         ctx.insert(album)
-        let keep = ImageRecord(sha256: "keep", filename: "a.heic", sizeBytes: 1, album: album)
-        let drop = ImageRecord(sha256: "drop", filename: "b.heic", sizeBytes: 1, album: album)
+        let keep = ImageRecord(sha256: "keep", filename: "a.heic", sizeBytes: 1, albums: [album])
+        let drop = ImageRecord(sha256: "drop", filename: "b.heic", sizeBytes: 1, albums: [album])
         ctx.insert(keep)
         ctx.insert(drop)
         album.images.append(keep)

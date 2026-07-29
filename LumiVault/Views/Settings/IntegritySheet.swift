@@ -186,7 +186,7 @@ struct IntegritySheet: View {
                 par2Filename: image.par2Filename,
                 b2FileId: image.b2FileId,
                 storageLocations: image.storageLocations,
-                albumPath: image.album.map { "\($0.year)/\($0.month)/\($0.day)/\($0.name)" } ?? "",
+                albumPath: image.primaryAlbum.map { "\($0.year)/\($0.month)/\($0.day)/\($0.name)" } ?? "",
                 isEncrypted: image.isEncrypted
             )
         }
