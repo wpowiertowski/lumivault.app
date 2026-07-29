@@ -140,25 +140,20 @@ extension LumiVaultUITests {
     /// to each tab's *content* view, not to the tab control, so clicking one clicks the
     /// content area and cannot change the selection.
     ///
-    /// The control's element type is the one thing the CI log cannot settle, because the
-    /// only test that ever touched it returned before asserting. Trying the plausible
-    /// types and reporting the hierarchy on failure answers it in a single run.
-    func settingsTab(_ title: String, in window: XCUIElement) -> XCUIElement? {
-        let candidates = [
-            window.radioButtons[title],
-            window.descendants(matching: .tab)[title],
-            window.buttons[title],
-            window.descendants(matching: .any)[title],
-        ]
-        return candidates.first { $0.exists }
+    /// `Button`, established by running the query chain on CI once and reading which type
+    /// matched — the tabs are neither `RadioButton` nor `Tab`, which is what the shape of
+    /// a `TabView` would suggest.
+    func settingsTab(_ title: String, in window: XCUIElement) -> XCUIElement {
+        window.buttons[title]
     }
 
     func selectSettingsTab(_ title: String, in window: XCUIElement) throws {
         // The window is reported before its toolbar is populated; give the first lookup
         // a chance rather than racing it.
-        _ = window.radioButtons.firstMatch.waitForExistence(timeout: 3)
+        _ = window.buttons.firstMatch.waitForExistence(timeout: 3)
 
-        guard let tab = settingsTab(title, in: window) else {
+        let tab = settingsTab(title, in: window)
+        guard tab.exists else {
             throw UIStateNotReached(description: """
                 No settings tab control titled "\(title)".
 
@@ -266,10 +261,11 @@ extension LumiVaultUITests {
     /// window count check. All eight assertions were skipped on every run.
     func testSettingsTabsExist() throws {
         let settings = try openSettingsWindow()
+        _ = settings.buttons.firstMatch.waitForExistence(timeout: 3)
 
         for title in Self.settingsTabTitles {
-            XCTAssertNotNil(
-                settingsTab(title, in: settings),
+            XCTAssertTrue(
+                settingsTab(title, in: settings).exists,
                 """
                 Settings tab "\(title)" should exist.
 

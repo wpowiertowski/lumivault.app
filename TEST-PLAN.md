@@ -173,7 +173,14 @@ defects — the app was fine — of the same family this suite exists to elimina
 A related defect stayed latent behind the window bug: the `settings.tab.*`
 identifiers are attached to each tab's *content* view, not its control, so clicking
 one clicks the content area and cannot change the selection. Tabs are selected by
-visible title instead.
+visible title instead — and the control is a **`Button`**, not the `RadioButton` or
+`Tab` that a `TabView` would suggest. That was established by running the candidate
+queries once on CI and reading which matched, rather than guessed at.
+
+Clicking into the B2 tab raises a system permission dialog on a fresh runner (the
+keychain read behind the credential fields). XCTest's interruption handling dismisses
+it with *Don't Allow*, which is the right answer for a test — the fields render either
+way — but it does mean the B2 tab is never exercised with credentials present.
 
 Failures now attach the accessibility hierarchy (`assertExists`), and CI uploads the
 `.xcresult` on failure. Discarding that bundle is what turned a one-run diagnosis
@@ -239,32 +246,33 @@ a pinned SHA-256, serving as the trust anchor the same way the image fixtures do
 
 ## UI Test Automation (XCUIAutomation)
 
-### Summary: 12 UI tests in 1 suite (local environment only)
+### Summary: 13 UI tests in 1 suite (gating on CI)
 
-The `LumiVaultUITests` target uses XCUIAutomation (Xcode 26) to automate a subset of the manual test cases below. These tests are designed for **local development only** — they require a real app launch and are not suitable for headless CI.
+The `LumiVaultUITests` target uses XCUIAutomation (Xcode 26) to automate a subset of the manual test cases below. Each launch gets a throwaway library, an in-memory store and a pinned set of `UserDefaults`, so a run asserts against a known app state rather than the developer's own.
 
 | Test | Covers | What it validates |
 | ------ | -------- | ------------------- |
-| `testWelcomeScreenRestoreButtons` | TC-1 | Welcome view shows From File / From Volume restore buttons (skips if albums exist) |
-| `testSidebarExists` | TC-21 | NavigationSplitView sidebar is present |
+| `testWelcomeScreenRestoreButtons` | TC-1 | Returning user, no albums: From File / From Volume shown, From B2 hidden while B2 is off |
+| `testFirstLaunchShowsTheExplainer` | TC-1 | First-time profile gets the explainer and Get Started, *not* the restore options |
+| `testSidebarShowsEmptyState` | TC-21 | Sidebar renders its empty state on a store with no albums |
 | `testToolbarImportButton` | TC-21 | Import from Photos toolbar button is accessible |
 | `testToolbarNearDuplicatesButton` | TC-21 | Near-Duplicates toolbar button is accessible |
 | `testWindowExists` | TC-21 | App window renders successfully |
-| `testSettingsTabsExist` | TC-22 | All 8 settings tabs (General through Support) are accessible |
-| `testB2CredentialFields` | TC-22 | B2 tab shows enable toggle |
-| `testEncryptionTabFields` | TC-22 | Encryption tab shows passphrase field |
+| `testSettingsTabsExist` | TC-22 | All 8 settings tabs (General through Support) are present |
+| `testB2CredentialFields` | TC-22 | Selecting the B2 tab shows its enable toggle |
+| `testEncryptionTabFields` | TC-22 | Encryption tab shows exactly one key control for the current keychain state |
+| `testImportDefaultsToggles` | TC-22 | Import Defaults tab shows PAR2 and near-duplicate toggles |
 | `testPhotosImportOpensSheet` | TC-2 | Import button opens import sheet with cancel button |
 | `testImportCancelButtonExists` | TC-4 | Cancel and Next buttons exist; Next is disabled without album selection |
-| `testAlbumContextMenuDeleteExists` | TC-16 | Right-click album shows Delete Album context menu (skips if no albums) |
-| `testImportDefaultsToggles` | TC-22 | Import Defaults tab shows PAR2 and near-duplicate toggles |
+| `testOpenSettingsFromImportSheetActuallyOpensSettings` | TC-37 | Regression for cbf5f3a: Open Settings from inside a modal sheet |
 
 ### Accessibility Identifiers
 
 ~65 `.accessibilityIdentifier()` modifiers have been added across 14 view files. Naming convention: `area.element` (e.g., `sidebar.albumList`, `import.cancel`, `b2.testConnection`).
 
 Key identifier groups:
-- **Navigation**: `nav.sidebar`, `toolbar.importPhotos`, `toolbar.nearDuplicates`
-- **Welcome**: `welcome.restoreFile`, `welcome.restoreVolume`, `welcome.restoreB2`
+- **Navigation**: `toolbar.importPhotos`, `toolbar.nearDuplicates`
+- **Welcome**: `welcome.getStarted`, `welcome.restoreFile`, `welcome.restoreVolume`, `welcome.restoreB2`
 - **Sidebar**: `sidebar.albumList`, `sidebar.album.<name>`, `sidebar.volumeStatus`
 - **Grid**: `grid.container`, `grid.import`, `grid.photo.<sha256prefix>`
 - **Settings tabs**: `settings.tab.general` through `settings.tab.support`
