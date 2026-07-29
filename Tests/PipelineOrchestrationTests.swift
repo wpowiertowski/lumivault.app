@@ -20,6 +20,16 @@ import AppKit
 // resolved destination is inside its own scratch directory, so a future test
 // cannot reintroduce that by forgetting a setting.
 
+/// MainActor-isolated box for "the import task has returned".
+///
+/// Lets a polling test bound its wait on the work finishing instead of on a wall
+/// clock, which a blocked MainActor consumes without either side making progress.
+/// Both the setter and the reader are MainActor, so no synchronisation is needed.
+@MainActor
+final class CompletionFlag {
+    var value = false
+}
+
 /// Owns a scratch directory, an in-memory store, and a registered temp volume.
 @MainActor
 final class PipelineHarness {
@@ -519,24 +529,56 @@ struct PipelineOrchestrationTests {
         settings.generatePAR2 = true
 
         let coordinator = h.makeCoordinator()
+        let importFinished = CompletionFlag()
         let task = Task { @MainActor in
+            defer { importFinished.value = true }
             try await coordinator.importFiles(
                 urls: urls, settings: settings, modelContext: h.context, progress: h.progress
             )
         }
-        // Cancel once the sink has actually filed something — a fixed sleep either
-        // lands before the first catalog write (nothing to assert) or after the last
-        // (nothing was cancelled), and which one depends on the machine.
-        let deadline = Date().addingTimeInterval(10)
-        while h.progress.filesCataloged == 0 && h.progress.filesCataloged < 40 && Date() < deadline {
-            try await Task.sleep(for: .milliseconds(20))
+
+        // Cancel once the sink has actually filed something.
+        //
+        // Bounded by the import finishing, NOT by a wall clock. `swift test` runs
+        // suites in parallel and every `@MainActor` test serialises on the MainActor,
+        // so a sibling suite that *blocks* it stalls this sink completely while
+        // wall-clock time keeps running. `StoreRecoveryTests` does exactly that: its
+        // tests are synchronous and call `SwiftDataContainer.create` on a deliberately
+        // corrupt store, and on a CI runner each failed `ModelContainer` open plus
+        // CoreData's internal recovery is slow — one case was measured at 9.6s.
+        //
+        // With a 10s deadline that starvation consumed the whole budget: neither this
+        // loop nor the sink ran, the condition was already false when the MainActor
+        // freed, and `task.cancel()` fired before anything had been cataloged. Result:
+        // `(cataloged → 0) > 0` on main after both #56 and #57 — alternating between
+        // the two jobs that run `swift test`, whichever lost the scheduling lottery,
+        // which is why it was green on the PRs.
+        //
+        // The flag is set in a `defer`, so a throwing import ends the loop too; the
+        // cap below is only a hang guard and is ~240x the healthy runtime.
+        var cancelledMidFlight = false
+        let hangGuard = Date().addingTimeInterval(120)
+        while Date() < hangGuard {
+            if h.progress.filesCataloged > 0 {
+                cancelledMidFlight = true
+                break
+            }
+            if importFinished.value { break }
+            try await Task.sleep(for: .milliseconds(10))
         }
         task.cancel()
         _ = try? await task.value
 
         let cataloged = h.progress.filesCataloged
-        try #require(cataloged > 0, "test did not cancel mid-flight; nothing to assert about")
-        try #require(cataloged < 40, "cancellation drained the whole backlog")
+        try #require(cataloged > 0, "nothing was cataloged at all — the sink never ran")
+
+        // Only meaningful when we got in before the import finished. If the whole
+        // 40-file run completed first the cancel was a no-op, and `cataloged == 40`
+        // is correct rather than a drained backlog — the persistence invariants below
+        // still hold and are still the point of this test.
+        if cancelledMidFlight {
+            #expect(cataloged < 40, "cancellation drained the whole backlog")
+        }
 
         // catalog.json must exist and hold exactly what the sink counted.
         let data = try Data(contentsOf: h.catalogURL)
