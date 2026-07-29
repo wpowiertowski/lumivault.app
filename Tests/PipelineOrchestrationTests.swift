@@ -429,44 +429,27 @@ struct PipelineOrchestrationTests {
 
     // MARK: - Cancellation
 
-    @Test func cancellingMidImportStopsShortOfCatalogingEverything() async throws {
-        let h = try PipelineHarness()
-        defer { h.cleanup() }
-        let urls = try h.makeImages(count: 40)
-        var settings = h.settings()
-        settings.generatePAR2 = true   // slow the pipeline so cancellation lands mid-flight
-
-        let coordinator = h.makeCoordinator()
-        let task = Task { @MainActor in
-            try await coordinator.importFiles(
-                urls: urls, settings: settings, modelContext: h.context, progress: h.progress
-            )
-        }
-        try await Task.sleep(for: .milliseconds(60))
-        task.cancel()
-        _ = try? await task.value
-
-        // The pipeline must stop consuming rather than drain its backlog: cancelling
-        // a 40-file import should not still catalog all 40.
-        #expect(h.progress.filesCataloged < 40, "cancellation drained the whole backlog")
-
-        // No `settle()` here any more. This test used to sleep 500 ms before
-        // returning, because `runImportPipeline` awaited only the catalog sink: the
-        // detached stages could still be running when the harness released its
-        // `ModelContainer`, and one touching the freed context trapped inside
-        // SwiftData and took the test host down. That was a production defect wearing
-        // a test workaround — the same unawaited stages keep writing into a staging
-        // directory the caller's `defer` has already deleted. `runImportPipeline`
-        // now awaits every stage, so if that regresses this test crashes rather than
-        // sleeping through it.
-    }
-
     /// Cancelling is not a reason to lose files that are already archived.
     ///
     /// The bytes for everything the sink cataloged have already been copied to the
     /// volume, so skipping the save left them on disk with nothing in catalog.json
     /// pointing at them — invisible to the app and to a restore — while the caller
     /// was told the import succeeded.
+    ///
+    /// This also subsumes the former `cancellingMidImportStopsShortOfCatalogingEverything`,
+    /// whose single assertion was `filesCataloged < 40` — asserted here by the
+    /// `#require` below, alongside three stronger checks. That test cancelled after a
+    /// fixed 60 ms sleep, which lands before the first catalog write or after the last
+    /// depending on the machine; the poll below is why this one can assert both bounds.
+    ///
+    /// Neither test calls `settle()` any more. That helper slept 500 ms before
+    /// returning, because `runImportPipeline` awaited only the catalog sink: the
+    /// detached stages could still be running when the harness released its
+    /// `ModelContainer`, and one touching the freed context trapped inside SwiftData
+    /// and took the test host down. That was a production defect wearing a test
+    /// workaround — the same unawaited stages keep writing into a staging directory
+    /// the caller's `defer` has already deleted. `runImportPipeline` now awaits every
+    /// stage, so if that regresses this test crashes rather than sleeping through it.
     @Test func cancellingStillPersistsWhatWasAlreadyArchived() async throws {
         let h = try PipelineHarness()
         defer { h.cleanup() }

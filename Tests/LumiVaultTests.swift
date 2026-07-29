@@ -632,32 +632,39 @@ struct FilenameDisambiguationTests {
 
 @Suite @MainActor
 struct PerceptualHashTests {
-    @Test func hammingDistanceIdentical() {
-        let hash = Data([0x00, 0xFF, 0xAA, 0x55, 0x12, 0x34, 0x56, 0x78])
-        let distance = PerceptualHash.hammingDistance(hash, hash)
-        #expect(distance == 0)
-    }
-
-    @Test func hammingDistanceOpposite() {
-        let a = Data([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
-        let b = Data([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
-        let distance = PerceptualHash.hammingDistance(a, b)
-        #expect(distance == 64)
-    }
-
-    @Test func hammingDistanceKnownValue() {
-        // 0xAA = 10101010, 0x55 = 01010101 — 8 bits differ per byte
-        let a = Data([0xAA, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
-        let b = Data([0x55, 0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
-        let distance = PerceptualHash.hammingDistance(a, b)
-        #expect(distance == 16)
-    }
-
-    @Test func hammingDistanceInvalidLength() {
-        let a = Data([0x00, 0x00]) // Too short
-        let b = Data([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
-        let distance = PerceptualHash.hammingDistance(a, b)
-        #expect(distance == 64) // Returns max distance for invalid input
+    /// The value table for `hammingDistance`. Each row is the same call with different
+    /// operands; the misaligned-buffer case below is a different shape and stays its
+    /// own test.
+    @Test(arguments: [
+        (
+            name: "identical",
+            a: Data([0x00, 0xFF, 0xAA, 0x55, 0x12, 0x34, 0x56, 0x78]),
+            b: Data([0x00, 0xFF, 0xAA, 0x55, 0x12, 0x34, 0x56, 0x78]),
+            expected: 0
+        ),
+        (
+            name: "every bit differs",
+            a: Data(repeating: 0x00, count: 8),
+            b: Data(repeating: 0xFF, count: 8),
+            expected: 64
+        ),
+        (
+            // 0xAA = 10101010, 0x55 = 01010101 — 8 bits differ per byte
+            name: "known value, two bytes apart",
+            a: Data([0xAA, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+            b: Data([0x55, 0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+            expected: 16
+        ),
+        (
+            // Undersized operand: max distance, never a partial comparison.
+            name: "invalid length",
+            a: Data([0x00, 0x00]),
+            b: Data(repeating: 0x00, count: 8),
+            expected: 64
+        ),
+    ] as [(name: String, a: Data, b: Data, expected: Int)])
+    func hammingDistance(name: String, a: Data, b: Data, expected: Int) {
+        #expect(PerceptualHash.hammingDistance(a, b) == expected, "\(name)")
     }
 
     /// Hashes read back from SwiftData are often slices whose backing buffer is not
@@ -683,28 +690,26 @@ struct PerceptualHashTests {
 
 @Suite @MainActor
 struct EXIFDataFormattingTests {
-    @Test func exposureStringFormatsSubSecond() {
+    /// Every branch of `exposureString`, as one table.
+    ///
+    /// The zero row is the one with history: a corrupt/zero ExposureTime tag used to
+    /// evaluate `Int(round(1.0/0))` = `Int(.infinity)`, which traps. It must read as
+    /// absent rather than crash the inspector.
+    @Test(arguments: [
+        (exposure: 1.0 / 250.0, expected: "1/250s" as String?),
+        (exposure: 2.0, expected: "2.0s"),
+        (exposure: 0, expected: nil),
+    ] as [(exposure: Double, expected: String?)])
+    func exposureStringFormatsEveryBranch(exposure: Double, expected: String?) {
         var exif = EXIFData()
-        exif.exposureTime = 1.0 / 250.0
-        #expect(exif.exposureString == "1/250s")
+        exif.exposureTime = exposure
+        #expect(exif.exposureString == expected)
     }
 
-    @Test func exposureStringFormatsLongExposure() {
-        var exif = EXIFData()
-        exif.exposureTime = 2.0
-        #expect(exif.exposureString == "2.0s")
-    }
-
+    /// Separate from the table above: this one asserts on the *unset* property rather
+    /// than a value assigned to it, so it has no row to sit in.
     @Test func exposureStringNilWhenAbsent() {
         let exif = EXIFData()
-        #expect(exif.exposureString == nil)
-    }
-
-    /// A corrupt/zero ExposureTime tag previously evaluated Int(round(1.0/0)) = Int(.infinity),
-    /// which traps. It must now be treated as absent rather than crash the inspector.
-    @Test func exposureStringZeroDoesNotTrap() {
-        var exif = EXIFData()
-        exif.exposureTime = 0
         #expect(exif.exposureString == nil)
     }
 }
@@ -1656,45 +1661,35 @@ struct B2ServiceHelperTests {
         #expect(hash == "da39a3ee5e6b4b0d3255bfef95601890afd80709")
     }
 
-    /// 299 rather than 200: the upper edge of the accepted range is the value a
-    /// mistaken `..<` / `...` boundary would get wrong.
-    @Test func checkResponseSuccess299() throws {
+    /// Status code in, thrown `httpError` (or silence) out.
+    ///
+    /// The success row is 299 rather than 200 on purpose: the upper edge of the
+    /// accepted range is the value a mistaken `..<` / `...` boundary would get wrong.
+    /// The 500 row carries no body, which is what proves the message stays `nil`
+    /// rather than becoming an empty string.
+    @Test(arguments: [
+        (status: 299, body: nil as [String: String]?, message: nil as String?, throws: false),
+        (status: 401, body: ["message": "Unauthorized"], message: "Unauthorized", throws: true),
+        (status: 500, body: nil, message: nil, throws: true),
+    ] as [(status: Int, body: [String: String]?, message: String?, throws: Bool)])
+    func checkResponseMapsStatusToError(
+        status: Int, body: [String: String]?, message: String?, throws shouldThrow: Bool
+    ) {
         let url = URL(string: "https://api.example.com")!
-        let response = HTTPURLResponse(url: url, statusCode: 299, httpVersion: nil, headerFields: nil)!
-        try B2Service.checkResponse(response, data: nil)
-    }
-
-    @Test func checkResponseError401() {
-        let url = URL(string: "https://api.example.com")!
-        let response = HTTPURLResponse(url: url, statusCode: 401, httpVersion: nil, headerFields: nil)!
-        let body = try? JSONSerialization.data(withJSONObject: ["message": "Unauthorized"])
+        let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
+        let data = body.flatMap { try? JSONSerialization.data(withJSONObject: $0) }
 
         do {
-            try B2Service.checkResponse(response, data: body)
-            Issue.record("Expected B2Error.httpError")
+            try B2Service.checkResponse(response, data: data)
+            if shouldThrow { Issue.record("Expected B2Error.httpError for \(status)") }
         } catch let error as B2Service.B2Error {
-            if case .httpError(let code, let message) = error {
-                #expect(code == 401)
-                #expect(message == "Unauthorized")
-            } else {
-                Issue.record("Expected httpError, got \(error)")
+            guard shouldThrow else {
+                Issue.record("\(status) should have been accepted, threw \(error)")
+                return
             }
-        } catch {
-            Issue.record("Unexpected error type: \(error)")
-        }
-    }
-
-    @Test func checkResponseError500NoBody() {
-        let url = URL(string: "https://api.example.com")!
-        let response = HTTPURLResponse(url: url, statusCode: 500, httpVersion: nil, headerFields: nil)!
-
-        do {
-            try B2Service.checkResponse(response, data: nil)
-            Issue.record("Expected B2Error.httpError")
-        } catch let error as B2Service.B2Error {
-            if case .httpError(let code, let message) = error {
-                #expect(code == 500)
-                #expect(message == nil)
+            if case .httpError(let code, let text) = error {
+                #expect(code == status)
+                #expect(text == message)
             } else {
                 Issue.record("Expected httpError, got \(error)")
             }
