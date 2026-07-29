@@ -360,6 +360,67 @@ struct PipelineOrchestrationTests {
         #expect(survivors.first?.albums.map(\.name) == ["Beach"])
     }
 
+    /// The Photos re-sync removal path is the *fourth* place an image is dropped from
+    /// an album, and it kept deleting the whole record after multi-album membership
+    /// shipped — the same defect the photo-grid, near-duplicate and whole-album paths
+    /// were fixed for.
+    ///
+    /// `resyncAlbum` removes only the resynced album's catalog entry and its files
+    /// (`entireAlbum: false`). Deleting the record made the photo vanish from the
+    /// other album too, whose entry and bytes were untouched; the next hydration then
+    /// re-created it from those entries with no thumbnail and no storage locations,
+    /// and the integrity pass called it missing.
+    ///
+    /// Driven through the real `resyncAlbum`. An empty `delta.added` skips the Photos
+    /// leg entirely, so this needs no entitlement, and empty `mountedVolumes` with no
+    /// B2 credentials keeps the deletion side effect-free.
+    @Test func resyncRemovalKeepsAnImageThatStillBelongsToAnotherAlbum() async throws {
+        let h = try PipelineHarness()
+        defer { h.cleanup() }
+        let urls = try h.makeImages(count: 1)
+        let coordinator = h.makeCoordinator()
+
+        try await coordinator.importFiles(
+            urls: urls, settings: h.settings(albumName: "Trip"),
+            modelContext: h.context, progress: h.progress
+        )
+        try await coordinator.importFiles(
+            urls: urls, settings: h.settings(albumName: "Beach"),
+            modelContext: h.context, progress: h.progress
+        )
+
+        let albums = try h.context.fetch(FetchDescriptor<AlbumRecord>())
+        let trip = try #require(albums.first { $0.name == "Trip" })
+        let image = try #require(try h.records().first)
+        #expect(image.albums.count == 2, "setup failed — the image is not in both albums")
+
+        // Photos no longer has the asset backing this image, so the resync offers it
+        // for removal from Trip.
+        try await coordinator.resyncAlbum(
+            albumRecord: trip,
+            delta: AlbumDelta(added: [], removed: [image], untrackable: [], albumMissing: false),
+            settings: h.settings(albumName: "Trip"),
+            modelContext: h.context,
+            progress: h.progress
+        )
+
+        let survivors = try h.records()
+        #expect(survivors.count == 1, "the record was deleted although Beach still holds it")
+        #expect(survivors.first?.albums.map(\.name) == ["Beach"])
+
+        // Trip's copy is gone, so a location still pointing there is a file
+        // reconciliation would look for and fail to find.
+        let locations = survivors.first?.storageLocations.map(\.relativePath) ?? []
+        #expect(!locations.contains { $0.contains("/Trip/") },
+                "a storage location still points at the deleted Trip copy")
+
+        // And Beach's catalog entry is untouched — it is what a restore would rebuild from.
+        let catalog = await h.catalogService.currentCatalog()
+        let day = catalog.years["2026"]?.months["07"]?.days["28"]
+        #expect(day?.albums["Beach"]?.images.count == 1, "Beach lost its catalog entry")
+        #expect(day?.albums["Trip"]?.images.isEmpty ?? true, "Trip kept its catalog entry")
+    }
+
     @Test func deletingTheOnlyAlbumAnImageBelongsToRemovesTheImage() async throws {
         let h = try PipelineHarness()
         defer { h.cleanup() }
@@ -429,44 +490,27 @@ struct PipelineOrchestrationTests {
 
     // MARK: - Cancellation
 
-    @Test func cancellingMidImportStopsShortOfCatalogingEverything() async throws {
-        let h = try PipelineHarness()
-        defer { h.cleanup() }
-        let urls = try h.makeImages(count: 40)
-        var settings = h.settings()
-        settings.generatePAR2 = true   // slow the pipeline so cancellation lands mid-flight
-
-        let coordinator = h.makeCoordinator()
-        let task = Task { @MainActor in
-            try await coordinator.importFiles(
-                urls: urls, settings: settings, modelContext: h.context, progress: h.progress
-            )
-        }
-        try await Task.sleep(for: .milliseconds(60))
-        task.cancel()
-        _ = try? await task.value
-
-        // The pipeline must stop consuming rather than drain its backlog: cancelling
-        // a 40-file import should not still catalog all 40.
-        #expect(h.progress.filesCataloged < 40, "cancellation drained the whole backlog")
-
-        // No `settle()` here any more. This test used to sleep 500 ms before
-        // returning, because `runImportPipeline` awaited only the catalog sink: the
-        // detached stages could still be running when the harness released its
-        // `ModelContainer`, and one touching the freed context trapped inside
-        // SwiftData and took the test host down. That was a production defect wearing
-        // a test workaround — the same unawaited stages keep writing into a staging
-        // directory the caller's `defer` has already deleted. `runImportPipeline`
-        // now awaits every stage, so if that regresses this test crashes rather than
-        // sleeping through it.
-    }
-
     /// Cancelling is not a reason to lose files that are already archived.
     ///
     /// The bytes for everything the sink cataloged have already been copied to the
     /// volume, so skipping the save left them on disk with nothing in catalog.json
     /// pointing at them — invisible to the app and to a restore — while the caller
     /// was told the import succeeded.
+    ///
+    /// This also subsumes the former `cancellingMidImportStopsShortOfCatalogingEverything`,
+    /// whose single assertion was `filesCataloged < 40` — asserted here by the
+    /// `#require` below, alongside three stronger checks. That test cancelled after a
+    /// fixed 60 ms sleep, which lands before the first catalog write or after the last
+    /// depending on the machine; the poll below is why this one can assert both bounds.
+    ///
+    /// Neither test calls `settle()` any more. That helper slept 500 ms before
+    /// returning, because `runImportPipeline` awaited only the catalog sink: the
+    /// detached stages could still be running when the harness released its
+    /// `ModelContainer`, and one touching the freed context trapped inside SwiftData
+    /// and took the test host down. That was a production defect wearing a test
+    /// workaround — the same unawaited stages keep writing into a staging directory
+    /// the caller's `defer` has already deleted. `runImportPipeline` now awaits every
+    /// stage, so if that regresses this test crashes rather than sleeping through it.
     @Test func cancellingStillPersistsWhatWasAlreadyArchived() async throws {
         let h = try PipelineHarness()
         defer { h.cleanup() }

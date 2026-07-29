@@ -147,22 +147,40 @@ struct SyncCoordinatorTests {
         #expect(day?.albums["OnDiskOnly"] == nil, "reloadFromDisk: false still read from disk")
     }
 
-    @Test func pushSkipsICloudAndB2WhenBothAreDisabled() async throws {
+    /// iCloud switched on, but no `SyncService` wired up — the volume backup must
+    /// still happen and the push must not hang or throw.
+    ///
+    /// This replaces a test that set nothing and asserted only that the volume file
+    /// existed. The fixture builds a fresh UUID-scoped defaults suite, so
+    /// `iCloudSyncEnabled` and `b2Enabled` were already absent; its `removeObject`
+    /// calls removed keys that never existed and it could not fail unless
+    /// `pushDistributesTheCatalogToEveryRegisteredVolume` failed too. Setting the flag
+    /// to `true` is what makes this a distinct path: `pushAfterLocalChange` reads
+    /// `if iCloudEnabled, let service = syncService`, so with the key absent the first
+    /// condition short-circuits and `syncService` is never evaluated.
+    ///
+    /// `b2Enabled` is deliberately left off. Turning it on would send the push into
+    /// `loadB2Credentials()` → `B2Credentials.load()`, which reads the real login
+    /// keychain under a *fixed* account — on a machine with B2 configured this test
+    /// would upload a throwaway catalog to the developer's real bucket. Covering that
+    /// branch needs a credential-provider seam, not a defaults flag.
+    @Test func pushWithICloudEnabledButNoSyncServiceStillDistributesToVolumes() async throws {
         let f = try Fixture()
         defer { f.cleanup() }
         try f.seedCatalogOnDisk()
         try f.registerVolume()
 
-        // Neither flag set in this suite's defaults domain — the volume backup
-        // must still happen, and the run must not hang or throw reaching for
-        // credentials that do not exist.
-        f.defaults.removeObject(forKey: "iCloudSyncEnabled")
-        f.defaults.removeObject(forKey: "b2Enabled")
+        f.defaults.set(true, forKey: "iCloudSyncEnabled")
+        #expect(f.defaults.bool(forKey: "b2Enabled") == false,
+                "b2Enabled must stay off — see the note above")
 
         await f.makeCoordinator().pushAfterLocalChange()
 
-        #expect(FileManager.default.fileExists(
-            atPath: f.volumeURL.appendingPathComponent("catalog.json").path))
+        let onVolume = f.volumeURL.appendingPathComponent("catalog.json")
+        #expect(FileManager.default.fileExists(atPath: onVolume.path),
+                "an unconfigured iCloud leg stopped the volume backup")
+        let distributed = try Catalog.load(from: onVolume)
+        #expect(distributed.years["2026"]?.months["07"]?.days["28"]?.albums["Trip"] != nil)
     }
 
     @Test func pushSurvivesAVolumeThatCannotBeWritten() async throws {
