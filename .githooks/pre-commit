@@ -1,0 +1,41 @@
+#!/bin/sh
+#
+# Runs the unit suite before every commit.
+#
+# Several commit messages in this repo reference "the pre-commit hook runs the
+# suite", but no hook was committed — it lived only in individual clones, so the
+# convention was unenforceable and CI was the only shared gate. Enable it with:
+#
+#     git config core.hooksPath .githooks
+#
+# or `make hooks`.
+#
+# Caveat: this runs `swift test` against the working tree, not the staged
+# content, so a partial `git add` is validated against code that is not being
+# committed. It is also SwiftPM-only — the SwiftPM/Xcode isolation divergence
+# described in CLAUDE.md is caught by CI's "Unit Tests (Xcode)" job, not here.
+
+set -e
+
+# Mirror ci.yml's paths-ignore: a docs-only commit does not need the suite.
+#
+# No --diff-filter: a deletion changes the build just as much as an edit does.
+# Filtering to ACMR made `git rm Foo.swift && git commit` look like an empty (or
+# markdown-only) staging area, so the one commit shape most likely to break the
+# build was the one that skipped the tests.
+staged=$(git diff --cached --name-only)
+if [ -z "$staged" ]; then
+    exit 0
+fi
+if ! printf '%s\n' "$staged" | grep -qv '\.md$'; then
+    echo "pre-commit: markdown-only change, skipping tests."
+    exit 0
+fi
+
+if ! command -v swift >/dev/null 2>&1; then
+    echo "pre-commit: no swift toolchain found, skipping tests." >&2
+    exit 0
+fi
+
+echo "pre-commit: running swift test..."
+swift test

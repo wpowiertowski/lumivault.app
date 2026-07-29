@@ -20,7 +20,11 @@ xcodegen generate
 xcodebuild -project LumiVault.xcodeproj -scheme LumiVault -configuration Debug build
 ```
 
-The `.xcodeproj` is generated from `project.yml` by `xcodegen generate` and committed to the repo. Regenerate and commit it after any structural change (added/removed/moved files or `project.yml` edits).
+The `.xcodeproj` is generated from `project.yml` by `xcodegen generate` and **committed
+to the repo** — Xcode Cloud builds from the committed project and has no XcodeGen step,
+so it has to be there. Regenerate and commit it after any structural change
+(added/removed/moved files or `project.yml` edits); CI's **XcodeGen Drift** job
+regenerates and fails the build if the commit is stale.
 
 ## Architecture
 
@@ -58,13 +62,26 @@ The `.xcodeproj` is generated from `project.yml` by `xcodegen generate` and comm
 
 ## Testing
 
-Tests use Swift Testing (`import Testing`, `@Test`, `@Suite`). Test suite is `@MainActor` because Codable conformances require it under default isolation.
+Tests use Swift Testing (`import Testing`, `@Test`, `@Suite`). Most suites are `@MainActor`: the app target is built MainActor-by-default, so its Codable conformances, SwiftData models and most value types are MainActor-isolated. Suites that only touch `nonisolated` API (e.g. `StallPolicy`, `PipelinePhases`, `AsyncChannel`) can and do omit it.
 
 ```bash
 swift test                                    # Run all tests
 swift test --filter LumiVaultTests            # Run specific suite
-xcodebuild test -project LumiVault.xcodeproj -scheme LumiVaultTests -destination 'platform=macOS'
+xcodebuild test -project LumiVault.xcodeproj -scheme LumiVault -destination 'platform=macOS' -only-testing:LumiVaultTests
 ```
+
+Run `make hooks` once per clone to enable the committed pre-commit hook
+(`.githooks/pre-commit`), which runs `swift test` before every non-markdown commit.
+
+CI runs both `swift test` and `xcodebuild test`. They are not redundant: SwiftPM
+applies `Package.swift`'s `.defaultIsolation(MainActor)` while Xcode needs the
+explicit `OTHER_SWIFT_FLAGS` in `project.yml`, so only the xcodebuild run
+exercises the same isolation the shipped app is built with. CI also asserts that
+`-default-isolation MainActor` reaches the compiler — grepping the build log, not
+the build settings, because the setting is silently ignored by this toolchain.
+
+New test files require `xcodegen generate` + committing the regenerated project —
+the drift job fails otherwise. Adding tests to existing files avoids that step.
 
 ## Approach Guidelines
 
@@ -107,5 +124,5 @@ When asked to create a release:
 
 - **catalog.json changes require extra care** — the catalog is synced via iCloud and re-read across app versions, so any schema change must be backwards-compatible (older catalogs must still decode).
 - **Entitlements must match between Debug and Release** — both `.entitlements` files should stay in sync unless there's a specific reason to diverge.
-- **Regenerate .xcodeproj after structural changes** — if you add/remove/move Swift files or change `project.yml`, run `xcodegen generate` and verify the build.
+- **Regenerate and commit .xcodeproj after structural changes** — if you add/remove/move Swift files or change `project.yml`, run `xcodegen generate`, verify the build, and commit the result. Xcode Cloud builds from the committed project; CI's drift job fails if it is stale.
 - **Privacy descriptions in Info.plist** — any new framework requiring user permission (e.g., Contacts, Location) needs a usage description added *before* the code ships.

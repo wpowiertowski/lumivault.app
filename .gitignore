@@ -31,6 +31,9 @@ playground.xcworkspace
 
 .build/
 .swiftpm/
+# LumiVault.xcodeproj is intentionally NOT ignored: Xcode Cloud builds from the
+# committed project, so it has to be in the repo. CI's XcodeGen Drift job
+# regenerates it from project.yml and fails if the commit is stale.
 # LumiVault.xcodeproj/
 
 # CocoaPods

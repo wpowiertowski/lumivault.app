@@ -108,6 +108,40 @@ final class PhotosImportProgress: @unchecked Sendable {
     /// Multi-album tracking: files fully processed in previously completed albums.
     var completedAlbumFiles: Int = 0
 
+    // MARK: - Run/album lifecycle
+    //
+    // `fraction` is driven by counters that are reset and accumulated by hand
+    // across albums, and this object outlives a single import — the sheet holds
+    // one `@State` instance for its whole lifetime. Those resets live here rather
+    // than inline in the sheet so the sequence is unit-testable; when it lived in
+    // the view, a missed reset (5233888) could only be caught by eye.
+
+    /// Begin an import run covering `globalTotalFiles` assets in total.
+    /// Pass 0 for a single-album run: that clears the multi-album weighting so a
+    /// run earlier in the same sheet cannot leave `fraction` measuring this
+    /// import against the previous run's grand total.
+    func beginRun(globalTotalFiles: Int) {
+        self.globalTotalFiles = globalTotalFiles
+        self.completedAlbumFiles = 0
+    }
+
+    /// Reset the counters `fraction` reads per album, before importing one.
+    /// `filesCataloged` in particular must be cleared: leaking it from a larger
+    /// previous album drove the bar past 100% on the next, smaller one (5233888).
+    func beginAlbum() {
+        phase = .importing
+        currentFile = 0
+        totalFiles = 0
+        currentFilename = ""
+        filesCataloged = 0
+    }
+
+    /// Bank the album that just finished into the global position, so the next
+    /// album's progress picks up where this one left off.
+    func finishAlbum() {
+        completedAlbumFiles += totalFiles
+    }
+
     /// Text for the main import pipeline label.
     /// Multiple parallel stages running → "Processing items";
     /// exactly one → that stage's description; none → the current phase rawValue.
@@ -118,25 +152,34 @@ final class PhotosImportProgress: @unchecked Sendable {
     }
 
     var fraction: Double {
-        guard totalFiles > 0 else {
-            if globalTotalFiles > 0 {
-                return Double(completedAlbumFiles) / Double(globalTotalFiles)
+        let raw: Double
+        if totalFiles > 0 {
+            let albumFraction: Double
+            if phase == .importing {
+                albumFraction = Double(currentFile) / Double(totalFiles) * 0.1
+            } else if phase == .removing {
+                albumFraction = Double(currentFile) / Double(totalFiles)
+            } else if phase == .complete {
+                albumFraction = 1.0
+            } else {
+                albumFraction = 0.1 + Double(filesCataloged) / Double(totalFiles) * 0.9
             }
-            return 0
-        }
-
-        let albumFraction: Double
-        if phase == .importing {
-            albumFraction = Double(currentFile) / Double(totalFiles) * 0.1
-        } else if phase == .removing {
-            albumFraction = Double(currentFile) / Double(totalFiles)
-        } else if phase == .complete {
-            albumFraction = 1.0
+            raw = globalFraction(for: albumFraction)
+        } else if globalTotalFiles > 0 {
+            // Between albums: no per-album total yet, so report the global share
+            // already finished.
+            raw = Double(completedAlbumFiles) / Double(globalTotalFiles)
         } else {
-            albumFraction = 0.1 + Double(filesCataloged) / Double(totalFiles) * 0.9
+            raw = 0
         }
 
-        return globalFraction(for: albumFraction)
+        // Clamp. `filesCataloged` and `completedAlbumFiles` are counters the
+        // multi-album path resets and accumulates by hand; when `filesCataloged`
+        // leaked across albums (5233888) a later, smaller album drove the bar past
+        // 100%. Resetting is still correct, but a progress fraction outside 0...1 is
+        // never meaningful — so bound it on *every* exit, including the
+        // between-albums one, rather than depending on each caller remembering.
+        return min(max(raw, 0), 1)
     }
 
     /// Maps a per-album fraction (0–1) to a global fraction weighted by file count.

@@ -125,3 +125,67 @@ struct CatalogMergeSanitizationTests {
         #expect(images.first?.filename == "sunset.jpg")
     }
 }
+
+// MARK: - Catalog Path Resolution (regression: f3c5fae, 2f44cfb)
+//
+// Apple rejected 1.0 under guideline 2.4.5(i) because the catalog lived inside the
+// hidden sandbox container and Settings displayed that container path. The fix
+// moved it to `~/Pictures/LumiVault` and resolves symlinks so the UI shows the real
+// user-visible location — under the sandbox, `.picturesDirectory` returns a
+// container-scoped alias to `~/Pictures`.
+
+// These drive `resolveCatalogURL(override:)` rather than setting
+// `UserDefaults.standard["catalogPath"]` around each assertion. That key is
+// process-wide, and `.serialized` only orders tests *within* a suite — every
+// other suite still runs concurrently, so a temporarily overridden catalog path
+// would be visible to anything that reaches `resolvedCatalogURL` (catalogService
+// .save(to:), migrateLegacyCatalogIfNeeded) at that moment. Passing the override
+// in tests the same resolution with no shared mutable state.
+
+@Suite
+@MainActor
+struct CatalogPathResolutionTests {
+
+    @Test func defaultsToCatalogJSONInsideTheLibrary() {
+        let url = Constants.Paths.resolveCatalogURL(override: nil)
+        #expect(url.lastPathComponent == "catalog.json")
+        #expect(url.deletingLastPathComponent().path == Constants.Paths.libraryURL.path)
+    }
+
+    @Test func honoursAnExplicitOverrideAndExpandsTilde() {
+        #expect(Constants.Paths.resolveCatalogURL(override: "/Volumes/Archive/catalog.json").path
+                == "/Volumes/Archive/catalog.json")
+
+        let tilde = Constants.Paths.resolveCatalogURL(override: "~/Documents/catalog.json")
+        #expect(tilde.path == ("~/Documents/catalog.json" as NSString).expandingTildeInPath)
+        #expect(!tilde.path.hasPrefix("~"))
+    }
+
+    @Test func theLiveAccessorReadsTheOverrideKeyItDocuments() {
+        // The split above is only safe while `resolvedCatalogURL` still feeds the
+        // same key into the same function, so pin that wiring — without leaving a
+        // mutated global behind for a concurrently running suite to trip over.
+        let key = Constants.Paths.catalogPathDefaultsKey
+        #expect(key == "catalogPath")
+        let expected = Constants.Paths.resolveCatalogURL(
+            override: UserDefaults.standard.string(forKey: key)
+        )
+        #expect(Constants.Paths.resolvedCatalogURL == expected)
+    }
+
+    @Test func libraryPathIsSymlinkResolvedAndUserVisible() {
+        let library = Constants.Paths.libraryURL
+        // Resolving is what keeps a container alias out of the Settings UI.
+        #expect(library.path == library.resolvingSymlinksInPath().path)
+        #expect(library.lastPathComponent == "LumiVault")
+    }
+
+    @Test func legacyContainerCatalogPathIsDistinctFromTheLibrary() {
+        // Migration only makes sense while these two differ; if they ever collide
+        // the launch-time move would be a no-op that silently strands a catalog.
+        let legacy = Constants.Paths.legacyContainerCatalogURL
+        #expect(legacy.lastPathComponent == "catalog.json")
+        #expect(legacy.deletingLastPathComponent().path != Constants.Paths.libraryURL.path)
+        #expect(!legacy.path.hasPrefix("~"))
+    }
+}

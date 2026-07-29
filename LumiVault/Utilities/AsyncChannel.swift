@@ -11,7 +11,12 @@ protocol CancellableChannel: Sendable {
 /// Producers block when the buffer is full; consumers iterate via AsyncStream.
 /// All operations are nonisolated so producers/consumers can run on any actor.
 struct AsyncChannel<Element: Sendable>: Sendable, CancellableChannel {
-    let stream: AsyncStream<Element>
+    /// Explicitly `nonisolated`, like every other member here. Under the app
+    /// target's MainActor-by-default isolation this stored property is otherwise
+    /// MainActor-isolated, and only an intra-module inference lets the nonisolated
+    /// pipeline stages iterate it — the same access from another module (a test
+    /// bundle) fails to compile. Being explicit matches the contract stated above.
+    nonisolated let stream: AsyncStream<Element>
     private let continuation: AsyncStream<Element>.Continuation
     private let semaphore: AsyncSemaphore
 

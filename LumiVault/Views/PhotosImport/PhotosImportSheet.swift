@@ -641,8 +641,7 @@ struct PhotosImportSheet: View {
             if selectedAlbumIds.count > 1 {
                 // Multi-album import — use the user-confirmed values from pendingImports.
                 totalImportAlbums = pendingImports.count
-                progress.globalTotalFiles = pendingImports.reduce(0) { $0 + $1.assetCount }
-                progress.completedAlbumFiles = 0
+                progress.beginRun(globalTotalFiles: pendingImports.reduce(0) { $0 + $1.assetCount })
 
                 for (index, pending) in pendingImports.enumerated() {
                     currentImportAlbumIndex = index + 1
@@ -654,12 +653,7 @@ struct PhotosImportSheet: View {
                     albumSettings.month = pending.month
                     albumSettings.day = pending.day
 
-                    // Reset per-album progress fields
-                    progress.phase = .importing
-                    progress.currentFile = 0
-                    progress.totalFiles = 0
-                    progress.currentFilename = ""
-                    progress.filesCataloged = 0
+                    progress.beginAlbum()
 
                     do {
                         try await coordinator.importAlbum(
@@ -669,13 +663,13 @@ struct PhotosImportSheet: View {
                             progress: progress
                         )
                         // Accumulate completed files for smooth global progress
-                        progress.completedAlbumFiles += progress.totalFiles
+                        progress.finishAlbum()
                     } catch is CancellationError {
                         progress.phase = .failed
                         progress.errors.append("Import cancelled")
                         break
                     } catch {
-                        progress.completedAlbumFiles += progress.totalFiles
+                        progress.finishAlbum()
                         progress.errors.append("Import failed for \"\(pending.albumName)\": \(error.localizedDescription)")
                     }
                 }
@@ -684,6 +678,14 @@ struct PhotosImportSheet: View {
             } else {
                 // Single album import
                 guard let albumId = selectedAlbumIds.first else { return }
+
+                // `progress` lives for the whole sheet, so a multi-album run
+                // earlier in this session would otherwise leave `fraction`
+                // weighting this import against that run's grand total — with
+                // `completedAlbumFiles` already at that total, the bar would sit
+                // pinned at 100% for the whole import. 0 = single-album mode.
+                progress.beginRun(globalTotalFiles: 0)
+                progress.beginAlbum()
 
                 do {
                     try await coordinator.importAlbum(

@@ -1,7 +1,17 @@
-.PHONY: xcode test clean prune-branches
+.PHONY: generate xcode test hooks clean prune-branches
 
-xcode:
+# LumiVault.xcodeproj is generated from project.yml but *committed* — Xcode Cloud
+# builds from the committed project and has no XcodeGen step. Run this after
+# adding/removing/moving files or editing project.yml, then commit the result;
+# CI's XcodeGen Drift job fails if the commit is stale.
+generate:
 	xcodegen generate
+
+hooks:
+	git config core.hooksPath .githooks
+	@echo "pre-commit hook enabled (runs swift test)."
+
+xcode: generate
 	open LumiVault.xcodeproj
 
 test:

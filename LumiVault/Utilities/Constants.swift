@@ -45,10 +45,20 @@ enum Constants {
             URL(fileURLWithPath: ("~/.lumivault/catalog.json" as NSString).expandingTildeInPath)
         }
 
+        /// UserDefaults key for the user-configured catalog location.
+        nonisolated static let catalogPathDefaultsKey = "catalogPath"
+
         /// Resolves the catalog file URL — the user-configured override if set, otherwise
         /// `~/Pictures/LumiVault/catalog.json`. Safe to call from any isolation context.
         nonisolated static var resolvedCatalogURL: URL {
-            if let raw = UserDefaults.standard.string(forKey: "catalogPath") {
+            resolveCatalogURL(override: UserDefaults.standard.string(forKey: catalogPathDefaultsKey))
+        }
+
+        /// The resolution itself, with the override passed in. Split out so tests
+        /// can exercise it without writing to `UserDefaults.standard` — a
+        /// process-wide global that every concurrently running test shares.
+        nonisolated static func resolveCatalogURL(override raw: String?) -> URL {
+            if let raw {
                 return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
             }
             return libraryURL.appendingPathComponent("catalog.json")

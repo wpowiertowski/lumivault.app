@@ -6,6 +6,59 @@ import CryptoKit
 import UniformTypeIdentifiers
 import os
 
+/// Which optional pipeline phases are active for one import, and therefore where
+/// each stage forwards its items.
+///
+/// Every stage sends to the *next enabled* stage, so a disabled phase must be
+/// skipped over rather than fed. Keeping that routing as a pure function makes it
+/// testable across all 16 combinations; expressed inline it was a nested ternary
+/// chain per stage, where a mistake sends items into a channel nobody consumes and
+/// the import wedges on backpressure instead of failing.
+nonisolated struct PipelinePhases: Sendable {
+    let encryption: Bool
+    let par2: Bool
+    let copy: Bool
+    let upload: Bool
+
+    /// Stages that can receive items. Conversion is upstream of hashing and always
+    /// forwards there; cataloging is the terminal sink and always runs.
+    enum Stage: Sendable, Equatable {
+        case hashing, encryption, par2, copy, upload, catalog
+    }
+
+    /// The optional stages, in pipeline order.
+    private static let optionalOrder: [Stage] = [.encryption, .par2, .copy, .upload]
+
+    /// Whether `stage` runs for this import. Hashing and cataloging always do.
+    func isEnabled(_ stage: Stage) -> Bool {
+        switch stage {
+        case .encryption: encryption
+        case .par2: par2
+        case .copy: copy
+        case .upload: upload
+        case .hashing, .catalog: true
+        }
+    }
+
+    /// Where `stage` forwards its output: the next enabled stage, or the catalog
+    /// sink when nothing downstream is active.
+    func next(after stage: Stage) -> Stage {
+        let order = Self.optionalOrder
+        let start: Int
+        if let index = order.firstIndex(of: stage) {
+            start = index + 1
+        } else {
+            // `.hashing` feeds the whole optional chain; `.catalog` is terminal.
+            guard stage != .catalog else { return .catalog }
+            start = 0
+        }
+        for candidate in order[start...] where isEnabled(candidate) {
+            return candidate
+        }
+        return .catalog
+    }
+}
+
 /// Wrapper to pass MainActor-isolated values into Task closures
 /// where the compiler can't prove isolation safety. Always read `.value`
 /// from inside `MainActor.run { … }`.
@@ -224,12 +277,31 @@ class PipelinedImportCoordinator: @unchecked Sendable {
         let uploadCh = AsyncChannel<PipelineItem>(bufferSize: 4)
         let catalogCh = AsyncChannel<PipelineItem>(bufferSize: 4)
 
-        // Wire channels: each phase sends to the next active phase
+        // Wire channels: each phase sends to the next active phase. The routing
+        // itself lives in `PipelinePhases` so it can be unit-tested across every
+        // combination of enabled phases — a mis-wired hand-rolled ternary chain
+        // silently drops items into a stage nobody is consuming.
+        let phases = PipelinePhases(
+            encryption: needsEncryption,
+            par2: needsPAR2,
+            copy: needsCopy,
+            upload: needsUpload
+        )
+        func channel(for stage: PipelinePhases.Stage) -> AsyncChannel<PipelineItem> {
+            switch stage {
+            case .hashing: hashingCh
+            case .encryption: encryptionCh
+            case .par2: par2Ch
+            case .copy: copyCh
+            case .upload: uploadCh
+            case .catalog: catalogCh
+            }
+        }
         let postConversion = hashingCh
-        let postHashing: AsyncChannel<PipelineItem> = needsEncryption ? encryptionCh : (needsPAR2 ? par2Ch : (needsCopy ? copyCh : (needsUpload ? uploadCh : catalogCh)))
-        let postEncryption: AsyncChannel<PipelineItem> = needsPAR2 ? par2Ch : (needsCopy ? copyCh : (needsUpload ? uploadCh : catalogCh))
-        let postPAR2: AsyncChannel<PipelineItem> = needsCopy ? copyCh : (needsUpload ? uploadCh : catalogCh)
-        let postCopy: AsyncChannel<PipelineItem> = needsUpload ? uploadCh : catalogCh
+        let postHashing = channel(for: phases.next(after: .hashing))
+        let postEncryption = channel(for: phases.next(after: .encryption))
+        let postPAR2 = channel(for: phases.next(after: .par2))
+        let postCopy = channel(for: phases.next(after: .copy))
         let postUpload = catalogCh
 
         // Pre-fetch near-duplicate candidates
@@ -704,7 +776,13 @@ class PipelinedImportCoordinator: @unchecked Sendable {
     }
 
     /// Decodes/re-encodes/resizes images. CPU-heavy work runs off-main.
-    private nonisolated func runConversionStage(
+    ///
+    /// Internal (not private) so the cancellation contract every stage shares can
+    /// be unit-tested against a real stage body. All eight stages use the same
+    /// `for await … if Task.isCancelled { break }` shape; this is the cheapest one
+    /// to drive from a test (channels, settings, a staging directory — no Photos,
+    /// SwiftData, or network), and `break` vs `continue` is what abe7b51 fixed.
+    nonisolated func runConversionStage(
         inputCh: AsyncChannel<PipelineItem>,
         outputCh: AsyncChannel<PipelineItem>,
         settings: ImportSettings,
@@ -1160,7 +1238,11 @@ class PipelinedImportCoordinator: @unchecked Sendable {
     /// copy of *this* file to replace, never a different asset to clobber. Throws
     /// if the copy ultimately fails so the caller records a real per-volume error
     /// instead of a phantom success.
-    private nonisolated static func ensureFileMirrored(from source: URL, to dest: URL) throws {
+    ///
+    /// Internal (not private) so the copy stage's idempotency can be unit-tested —
+    /// it is what makes a re-run of an interrupted import cheap instead of
+    /// duplicating work, and what stops a truncated file from being kept.
+    nonisolated static func ensureFileMirrored(from source: URL, to dest: URL) throws {
         let fm = FileManager.default
         let sourceSize = (try fm.attributesOfItem(atPath: source.path)[.size] as? NSNumber)?.int64Value
         if fm.fileExists(atPath: dest.path) {

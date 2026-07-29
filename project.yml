@@ -14,7 +14,7 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_TREAT_WARNINGS_AS_ERRORS: true
     PRODUCT_NAME: LumiVault
-    MARKETING_VERSION: "1.1.1"
+    MARKETING_VERSION: "1.1.2"
     CURRENT_PROJECT_VERSION: "1"
     GENERATE_INFOPLIST_FILE: true
     ARCHS: arm64
@@ -31,6 +31,12 @@ schemes:
       config: Debug
     test:
       config: Debug
+      # Coverage is scoped to the app target: the test bundles' own line counts
+      # are noise (a test file is 100% covered by definition of having run), and
+      # including them inflates the headline number.
+      gatherCoverageData: true
+      coverageTargets:
+        - LumiVault
       targets:
         - LumiVaultTests
         - LumiVaultUITests

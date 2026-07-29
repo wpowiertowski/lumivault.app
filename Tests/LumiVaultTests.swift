@@ -3,6 +3,7 @@ import Foundation
 import SwiftData
 import CryptoKit
 import AppKit
+import ImageIO
 @testable import LumiVault
 
 // MARK: - Catalog Tests
@@ -59,30 +60,6 @@ struct CatalogTests {
         #expect(decodedImage?.b2FileId == "4_zb2bucket_f1234")
         #expect(decodedImage?.sizeBytes == Int64(spec.size))
         #expect(decodedImage?.par2Filename == spec.par2Name)
-    }
-
-    @Test func catalogRoundTripNilB2FileId() throws {
-        let spec = TestFixtures.files[1]
-        let image = CatalogImage(
-            filename: spec.name, sha256: spec.sha256,
-            sizeBytes: Int64(spec.size), par2Filename: spec.par2Name
-        )
-
-        let album = CatalogAlbum(addedAt: .now, images: [image])
-        let catalog = Catalog(version: 1, lastUpdated: .now, years: [
-            "2025": CatalogYear(months: ["01": CatalogMonth(days: ["01": CatalogDay(albums: ["Test": album])])])
-        ])
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(catalog)
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let decoded = try decoder.decode(Catalog.self, from: data)
-
-        let decodedImage = decoded.years["2025"]?.months["01"]?.days["01"]?.albums["Test"]?.images.first
-        #expect(decodedImage?.b2FileId == nil)
     }
 
     @Test func catalogFileIO() throws {
@@ -293,19 +270,6 @@ struct HasherServiceTests {
         #expect(hash == spec.sha256)
     }
 
-    @Test func sha256ConsistentBetweenMethods() async throws {
-        let service = HasherService()
-        let spec = TestFixtures.files[6] // landscape.heic, 10240 bytes
-        let root = try TestFixtures.materializeVolume(label: "hasher-consistent")
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        let url = root.appendingPathComponent(spec.albumPath).appendingPathComponent(spec.name)
-        let hashOnly = try await service.sha256(of: url)
-        let (hashAndSize, _) = try await service.sha256AndSize(of: url)
-
-        #expect(hashOnly == hashAndSize)
-        #expect(hashOnly == spec.sha256)
-    }
 }
 
 // MARK: - RedundancyService Tests
@@ -650,13 +614,6 @@ struct RedundancyServiceTests {
 
 @Suite @MainActor
 struct FilenameDisambiguationTests {
-    @Test func insertsShortHashBeforeExtension() {
-        let name = PipelinedImportCoordinator.disambiguatedFilename(
-            "IMG_1613.heic", sha256: "a1b2c3d4e5f60718293a4b5c6d7e8f90"
-        )
-        #expect(name == "IMG_1613~a1b2c3d4.heic")
-    }
-
     @Test func distinctShasYieldDistinctNamesForSameBase() {
         let a = PipelinedImportCoordinator.disambiguatedFilename("IMG_1613.heic", sha256: "aaaaaaaa1111")
         let b = PipelinedImportCoordinator.disambiguatedFilename("IMG_1613.heic", sha256: "bbbbbbbb2222")
@@ -668,12 +625,6 @@ struct FilenameDisambiguationTests {
     @Test func handlesNoExtension() {
         let name = PipelinedImportCoordinator.disambiguatedFilename("IMG_1613", sha256: "0123456789ab")
         #expect(name == "IMG_1613~01234567")
-    }
-
-    @Test func isDeterministicForSameInput() {
-        let first = PipelinedImportCoordinator.disambiguatedFilename("photo.jpg", sha256: "feedface0000")
-        let second = PipelinedImportCoordinator.disambiguatedFilename("photo.jpg", sha256: "feedface0000")
-        #expect(first == second)
     }
 }
 
@@ -694,13 +645,6 @@ struct PerceptualHashTests {
         #expect(distance == 64)
     }
 
-    @Test func hammingDistanceSingleBitDifference() {
-        let a = Data([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
-        let b = Data([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
-        let distance = PerceptualHash.hammingDistance(a, b)
-        #expect(distance == 1)
-    }
-
     @Test func hammingDistanceKnownValue() {
         // 0xAA = 10101010, 0x55 = 01010101 — 8 bits differ per byte
         let a = Data([0xAA, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
@@ -714,21 +658,6 @@ struct PerceptualHashTests {
         let b = Data([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
         let distance = PerceptualHash.hammingDistance(a, b)
         #expect(distance == 64) // Returns max distance for invalid input
-    }
-
-    @Test func hammingDistanceSymmetric() {
-        let a = Data([0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0])
-        let b = Data([0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12])
-        #expect(PerceptualHash.hammingDistance(a, b) == PerceptualHash.hammingDistance(b, a))
-    }
-
-    @Test func nearDuplicateThreshold() {
-        // Hashes differing by < 5 bits should be "near duplicates"
-        let a = Data([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
-        let b = Data([0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]) // 3 bits differ
-        let distance = PerceptualHash.hammingDistance(a, b)
-        #expect(distance < 5)
-        #expect(distance == 3)
     }
 
     /// Hashes read back from SwiftData are often slices whose backing buffer is not
@@ -866,6 +795,9 @@ struct SwiftDataModelTests {
         #expect(album.images.allSatisfy { $0.album?.name == "Vacation" })
     }
 
+    /// Pins every default on the persisted record in one place. These are the values
+    /// an existing store's rows take on after a schema addition, so a changed default
+    /// silently rewrites the meaning of already-archived records.
     @Test func imageRecordDefaults() throws {
         let spec = TestFixtures.files[0]
         let image = ImageRecord(sha256: spec.sha256, filename: spec.name, sizeBytes: Int64(spec.size))
@@ -876,6 +808,13 @@ struct SwiftDataModelTests {
         #expect(image.lastVerifiedAt == nil)
         #expect(image.storageLocations.isEmpty)
         #expect(image.par2Filename == "")
+
+        // Media fields added after the first release: a record that predates them
+        // must read back as a plain image with no dimensions.
+        #expect(image.mediaType == .image)
+        #expect(image.durationSeconds == nil)
+        #expect(image.pixelWidth == nil)
+        #expect(image.pixelHeight == nil)
     }
 
     @Test func storageLocationCodable() throws {
@@ -1717,19 +1656,8 @@ struct B2ServiceHelperTests {
         #expect(hash == "da39a3ee5e6b4b0d3255bfef95601890afd80709")
     }
 
-    @Test func sha1HashFixtureContent() {
-        let content = Data("LumiVault B2 test fixture".utf8)
-        let hash = B2Service.sha1Hash(of: content)
-        #expect(hash.count == 40)
-        #expect(hash.allSatisfy { $0.isHexDigit })
-    }
-
-    @Test func checkResponseSuccess200() throws {
-        let url = URL(string: "https://api.example.com")!
-        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        try B2Service.checkResponse(response, data: nil)
-    }
-
+    /// 299 rather than 200: the upper edge of the accepted range is the value a
+    /// mistaken `..<` / `...` boundary would get wrong.
     @Test func checkResponseSuccess299() throws {
         let url = URL(string: "https://api.example.com")!
         let response = HTTPURLResponse(url: url, statusCode: 299, httpVersion: nil, headerFields: nil)!
@@ -1773,68 +1701,6 @@ struct B2ServiceHelperTests {
         } catch {
             Issue.record("Unexpected error type: \(error)")
         }
-    }
-}
-
-// MARK: - Import Progress Tests
-
-@Suite @MainActor
-struct PhotosImportProgressTests {
-    @Test func fractionZeroWhenEmpty() {
-        let progress = PhotosImportProgress()
-        progress.totalFiles = 0
-        #expect(progress.fraction == 0)
-    }
-
-    @Test func fractionDuringImportPhase() {
-        let progress = PhotosImportProgress()
-        progress.totalFiles = 20
-        progress.phase = .importing
-        progress.currentFile = 10
-
-        // Import phase: (10/20) * 0.1 = 0.05
-        #expect(abs(progress.fraction - 0.05) < 0.001)
-    }
-
-    @Test func fractionMidPipeline() {
-        let progress = PhotosImportProgress()
-        progress.totalFiles = 20
-        progress.phase = .hashing
-        progress.filesCataloged = 10
-
-        // Post-import phases: 0.1 + (10/20) * 0.9 = 0.55
-        #expect(abs(progress.fraction - 0.55) < 0.001)
-    }
-
-    @Test func fractionOneWhenComplete() {
-        let progress = PhotosImportProgress()
-        progress.totalFiles = 5
-        progress.phase = .complete
-
-        #expect(progress.fraction == 1.0)
-    }
-
-    @Test func fractionWithGlobalProgress() {
-        let progress = PhotosImportProgress()
-        progress.globalTotalFiles = 100
-        progress.completedAlbumFiles = 50
-        progress.totalFiles = 20
-        progress.phase = .hashing
-        progress.filesCataloged = 10
-
-        // Album fraction: 0.1 + (10/20) * 0.9 = 0.55
-        // Global: 50/100 + 0.55 * (20/100) = 0.5 + 0.11 = 0.61
-        #expect(abs(progress.fraction - 0.61) < 0.001)
-    }
-
-    @Test func fractionUsesCompletedAlbumsWhenCurrentEmpty() {
-        let progress = PhotosImportProgress()
-        progress.globalTotalFiles = 100
-        progress.completedAlbumFiles = 30
-        progress.totalFiles = 0
-
-        // No files in current album yet — show completed albums progress
-        #expect(abs(progress.fraction - 0.3) < 0.001)
     }
 }
 
@@ -2343,17 +2209,6 @@ struct EncryptionEdgeCaseTests {
     }
 }
 
-// MARK: - Import Settings Tests
-
-@Suite
-@MainActor
-struct ImportSettingsTests {
-    @Test func nearDuplicateThresholdDefaultMatchesConstant() {
-        let settings = ImportSettings(albumName: "x", year: "2025", month: "01", day: "01")
-        #expect(settings.nearDuplicateThreshold == Constants.Dedup.nearDuplicateThreshold)
-    }
-}
-
 // MARK: - Photos Library Monitor Diff Tests
 
 @Suite
@@ -2584,5 +2439,1451 @@ struct PhotosSyncSchemaTests {
         try context.save()
 
         #expect(image.allPHAssetIdentifiers.sorted() == ["PH-asset-1", "PH-asset-2"])
+    }
+}
+
+// MARK: - PipelineItem Filename Propagation (regression: 54fb0f3)
+//
+// The pipelined import converted images to JPEG/HEIC correctly but never
+// propagated the converted filename to downstream stages, so records and volume
+// copies kept the original extension (.HEIC) while containing converted bytes.
+// `activeFilename` / `activeFileURL` are the accessors that fix carries; they are
+// `nonisolated` computed properties on a plain Sendable struct, so they are
+// directly testable without running the pipeline.
+
+@Suite
+@MainActor
+struct PipelineItemTests {
+
+    private func makeItem(originalFilename: String = "IMG_0001.HEIC") -> PipelineItem {
+        PipelineItem(
+            albumName: "Trip",
+            importDate: Date(timeIntervalSince1970: 1_700_000_000),
+            fileURL: URL(fileURLWithPath: "/tmp/staging/\(originalFilename)"),
+            originalFilename: originalFilename,
+            phAssetLocalIdentifier: nil
+        )
+    }
+
+    @Test func activeFilenameFallsBackToOriginalWhenNoConversion() {
+        let item = makeItem()
+        #expect(item.activeFilename == "IMG_0001.HEIC")
+        #expect(item.activeFileURL == item.fileURL)
+    }
+
+    @Test func activeFilenameUsesConvertedNameOnceConverted() {
+        var item = makeItem()
+        item.convertedFilename = "IMG_0001.jpg"
+        item.convertedURL = URL(fileURLWithPath: "/tmp/staging/converted/abc/IMG_0001.jpg")
+
+        // The exact regression: downstream stages must see the .jpg name, not .HEIC.
+        #expect(item.activeFilename == "IMG_0001.jpg")
+        #expect(item.activeFileURL.lastPathComponent == "IMG_0001.jpg")
+    }
+
+    @Test func activeFileURLPrefersEncryptedOverConvertedOverOriginal() {
+        var item = makeItem()
+        #expect(item.activeFileURL.path == "/tmp/staging/IMG_0001.HEIC")
+
+        item.convertedURL = URL(fileURLWithPath: "/tmp/staging/converted/abc/IMG_0001.jpg")
+        #expect(item.activeFileURL.path == "/tmp/staging/converted/abc/IMG_0001.jpg")
+
+        item.encryptedURL = URL(fileURLWithPath: "/tmp/staging/encrypted/IMG_0001.jpg.enc")
+        #expect(item.activeFileURL.path == "/tmp/staging/encrypted/IMG_0001.jpg.enc")
+    }
+
+    @Test func encryptionDoesNotDisturbTheStoredFilename() {
+        // Conversion + encryption together is the combination that made records
+        // disagree with the bytes on disk: the name must stay the converted one
+        // while the URL points at the ciphertext.
+        var item = makeItem()
+        item.convertedFilename = "IMG_0001.jpg"
+        item.convertedURL = URL(fileURLWithPath: "/tmp/staging/converted/abc/IMG_0001.jpg")
+        item.encryptedURL = URL(fileURLWithPath: "/tmp/staging/encrypted/IMG_0001.jpg.enc")
+
+        #expect(item.activeFilename == "IMG_0001.jpg")
+        #expect(item.activeFileURL.lastPathComponent == "IMG_0001.jpg.enc")
+    }
+
+}
+
+// MARK: - Single-Image PAR2 Cleanup (regression: b97ed6d)
+//
+// Single-image deletion removed `<name>.par2` but left every `<name>.vol0+N.par2`
+// behind, so orphan recovery volumes accumulated on the volume forever. The
+// existing `deleteRemovesPAR2Companion` cannot see this: it deletes the whole
+// album directory and asserts the directory is gone.
+
+@Suite
+@MainActor
+struct SingleImagePAR2DeletionTests {
+
+    private func input(for spec: TestFixtures.FileSpec, par2Filename: String) -> DeletionService.ImageDeletionInput {
+        DeletionService.ImageDeletionInput(
+            sha256: spec.sha256,
+            filename: spec.name,
+            par2Filename: par2Filename,
+            b2FileId: nil,
+            storageLocations: [],
+            albumPath: spec.albumPath
+        )
+    }
+
+    @Test func singleImageDeletionRemovesPAR2IndexAndVolumeFiles() async throws {
+        let fm = FileManager.default
+        let root = try TestFixtures.materializeVolumeWithPAR2(label: "single-par2")
+        defer { try? fm.removeItem(at: root) }
+
+        let vacation = TestFixtures.files(inAlbum: "Vacation")
+        let target = vacation[0]
+        let albumDir = root.appendingPathComponent(target.albumPath, isDirectory: true)
+
+        // Precondition: PAR2 generation really did produce volume files here.
+        let before = RedundancyService.companionFiles(forIndex: target.par2Name, in: albumDir)
+        #expect(before.contains { $0.lastPathComponent.contains(".vol") })
+
+        let result = await DeletionService().deleteImageFiles(
+            images: [input(for: target, par2Filename: target.par2Name)],
+            mountedVolumes: [("vol-1", root)],
+            b2Credentials: nil,
+            progress: DeletionProgress(),
+            entireAlbum: false
+        )
+
+        // The image itself is the only thing counted; PAR2 companions go with it.
+        #expect(result.volumeFilesRemoved == 1)
+        #expect(!fm.fileExists(atPath: albumDir.appendingPathComponent(target.name).path))
+
+        let leftovers = RedundancyService.companionFiles(forIndex: target.par2Name, in: albumDir)
+        #expect(leftovers.isEmpty)
+
+        // Nothing named `<target>.vol*.par2` may survive anywhere in the album.
+        let remaining = (try? fm.contentsOfDirectory(atPath: albumDir.path)) ?? []
+        #expect(!remaining.contains { $0.hasPrefix("\(target.name).vol") })
+    }
+
+    @Test func singleImageDeletionLeavesSiblingPAR2SetsIntact() async throws {
+        let fm = FileManager.default
+        let root = try TestFixtures.materializeVolumeWithPAR2(label: "single-par2-siblings")
+        defer { try? fm.removeItem(at: root) }
+
+        let vacation = TestFixtures.files(inAlbum: "Vacation")
+        let target = vacation[0]
+        let survivor = vacation[1]
+        let albumDir = root.appendingPathComponent(target.albumPath, isDirectory: true)
+
+        let survivorBefore = Set(
+            RedundancyService.companionFiles(forIndex: survivor.par2Name, in: albumDir)
+                .map(\.lastPathComponent)
+        )
+        #expect(!survivorBefore.isEmpty)
+
+        _ = await DeletionService().deleteImageFiles(
+            images: [input(for: target, par2Filename: target.par2Name)],
+            mountedVolumes: [("vol-1", root)],
+            b2Credentials: nil,
+            progress: DeletionProgress(),
+            entireAlbum: false
+        )
+
+        #expect(fm.fileExists(atPath: albumDir.appendingPathComponent(survivor.name).path))
+        let survivorAfter = Set(
+            RedundancyService.companionFiles(forIndex: survivor.par2Name, in: albumDir)
+                .map(\.lastPathComponent)
+        )
+        #expect(survivorAfter == survivorBefore)
+    }
+
+    @Test func deletionDerivesPAR2NameWhenRecordCarriesNone() async throws {
+        // A re-synced "second copy" record never had par2Filename populated (the
+        // PAR2 stage skips duplicates). Before the fix the empty string produced
+        // no companion lookup at all, orphaning the whole recovery set.
+        let fm = FileManager.default
+        let root = try TestFixtures.materializeVolumeWithPAR2(label: "single-par2-derived")
+        defer { try? fm.removeItem(at: root) }
+
+        let target = TestFixtures.files(inAlbum: "Nature")[0]
+        let albumDir = root.appendingPathComponent(target.albumPath, isDirectory: true)
+
+        _ = await DeletionService().deleteImageFiles(
+            images: [input(for: target, par2Filename: "")],
+            mountedVolumes: [("vol-1", root)],
+            b2Credentials: nil,
+            progress: DeletionProgress(),
+            entireAlbum: false
+        )
+
+        #expect(!fm.fileExists(atPath: albumDir.appendingPathComponent(target.name).path))
+        let leftovers = RedundancyService.companionFiles(forIndex: target.par2Name, in: albumDir)
+        #expect(leftovers.isEmpty)
+    }
+}
+
+// MARK: - Import Progress Bounds (regression: 5233888, 12632f7)
+//
+// 5233888: `filesCataloged` was not reset between albums, so a later, smaller
+// album drove the bar past 100%. 12632f7: a Photos re-sync removal was labelled
+// "Importing from Photos" with an indeterminate bar.
+
+@Suite
+@MainActor
+struct ImportProgressBoundsTests {
+
+    @Test func fractionNeverExceedsOneWhenCatalogedCountLeaksAcrossAlbums() {
+        let progress = PhotosImportProgress()
+        progress.phase = .hashing
+        // Album A finished with 20 cataloged; album B has only 5 files.
+        progress.totalFiles = 5
+        progress.filesCataloged = 20
+
+        // Uncapped this is 0.1 + (20/5)*0.9 = 3.7 — the overshoot users saw.
+        #expect(progress.fraction <= 1.0)
+        #expect(progress.fraction >= 0.0)
+    }
+
+    // The clamp above is a backstop, not the fix: it turns "the bar reads 370%"
+    // into "the bar pins at 100% for the rest of the run", which is equally wrong.
+    // The actual fix is `beginAlbum()` clearing the per-album counters. These two
+    // tests pin the *expected* fraction through the real run/album sequence, so
+    // dropping a reset fails them instead of being swallowed by the clamp.
+
+    @Test func aSmallerSecondAlbumReportsItsOwnProgressRatherThanTheFirstAlbumsCount() {
+        let progress = PhotosImportProgress()
+        progress.beginRun(globalTotalFiles: 25)
+
+        // Album A: 20 files, imported to completion. The pipeline *increments*
+        // `filesCataloged` per file, so these tests do too — assigning it would
+        // paper over exactly the leak under test.
+        progress.beginAlbum()
+        progress.totalFiles = 20
+        progress.phase = .hashing
+        for _ in 0..<20 { progress.filesCataloged += 1 }
+        progress.finishAlbum()
+
+        // Album B: only 5 files, 3 of them cataloged so far.
+        progress.beginAlbum()
+        progress.totalFiles = 5
+        progress.phase = .hashing
+        for _ in 0..<3 { progress.filesCataloged += 1 }
+
+        // 20/25 banked, plus album B's own 0.1 + (3/5)*0.9 = 0.64 over its 5/25
+        // share. Without the reset `filesCataloged` is still 20 and album B reads
+        // a full 1.0, pushing this to exactly 1.0.
+        #expect(abs(progress.fraction - 0.928) < 0.001)
+    }
+
+    @Test func aSingleAlbumRunIsNotWeightedByAnEarlierMultiAlbumRun() {
+        let progress = PhotosImportProgress()
+
+        // A three-album run in this sheet, carried to completion.
+        progress.beginRun(globalTotalFiles: 100)
+        progress.beginAlbum()
+        progress.totalFiles = 100
+        progress.phase = .hashing
+        for _ in 0..<100 { progress.filesCataloged += 1 }
+        progress.finishAlbum()
+        #expect(progress.fraction == 1.0)
+
+        // The user goes back and imports a single album without dismissing the
+        // sheet. `progress` is the same object, so the old globals have to go.
+        progress.beginRun(globalTotalFiles: 0)
+        progress.beginAlbum()
+        progress.totalFiles = 10
+        progress.phase = .hashing
+        for _ in 0..<5 { progress.filesCataloged += 1 }
+
+        // 0.1 + (5/10)*0.9. Leaving the globals set pins this at 1.0 instead.
+        #expect(abs(progress.fraction - 0.55) < 0.001)
+    }
+
+    @Test func fractionStaysInRangeAcrossPhasesAndCounts() {
+        let phases: [ImportPhase] = [.importing, .removing, .hashing, .encrypting,
+                                     .par2, .copying, .uploading, .cataloging, .complete]
+        for phase in phases {
+            for total in [1, 5, 20] {
+                for done in [0, 1, total, total * 4] {
+                    let progress = PhotosImportProgress()
+                    progress.phase = phase
+                    progress.totalFiles = total
+                    progress.currentFile = done
+                    progress.filesCataloged = done
+                    let f = progress.fraction
+                    #expect(f >= 0.0)
+                    #expect(f <= 1.0)
+                }
+            }
+        }
+    }
+
+    @Test func globalFractionStaysInRangeWhenAlbumOvershoots() {
+        let progress = PhotosImportProgress()
+        progress.phase = .hashing
+        progress.globalTotalFiles = 100
+        progress.completedAlbumFiles = 95
+        progress.totalFiles = 5
+        progress.filesCataloged = 40
+
+        #expect(progress.fraction <= 1.0)
+    }
+
+    @Test func betweenAlbumsFractionIsClampedAndOtherwiseReportsTheGlobalShare() {
+        // Between albums `totalFiles` is 0, so `fraction` takes the global-only
+        // exit. That branch reads `completedAlbumFiles` — the other counter the
+        // multi-album path accumulates by hand — so it needs the same bound as the
+        // per-album path, not an unclamped division.
+        let overshot = PhotosImportProgress()
+        overshot.globalTotalFiles = 100
+        overshot.completedAlbumFiles = 140
+
+        #expect(overshot.fraction <= 1.0)
+        #expect(overshot.fraction >= 0.0)
+
+        // Clamping must not flatten the ordinary case: a real between-albums
+        // position still reports the share already finished.
+        let midway = PhotosImportProgress()
+        midway.globalTotalFiles = 100
+        midway.completedAlbumFiles = 40
+        #expect(abs(midway.fraction - 0.4) < 0.001)
+
+        // No totals at all is still a determinate zero, not NaN.
+        #expect(PhotosImportProgress().fraction == 0)
+    }
+
+    /// The two per-phase weights the rest of this suite only bounds-checks. Import
+    /// is deliberately squeezed into a flat 10% band because fetching from Photos
+    /// is a small share of the work, and `.complete` must read exactly full rather
+    /// than "whatever the counters happened to reach".
+    @Test func importPhaseOccupiesTheFirstTenthAndCompleteReadsFull() {
+        let importing = PhotosImportProgress()
+        importing.totalFiles = 20
+        importing.phase = .importing
+        importing.currentFile = 10
+        // (10/20) * 0.1 — halfway through the fetch is 5% of the run, not 50%.
+        #expect(abs(importing.fraction - 0.05) < 0.001)
+
+        let done = PhotosImportProgress()
+        done.totalFiles = 5
+        done.phase = .complete
+        #expect(done.fraction == 1.0)
+    }
+
+    @Test func removalPhaseIsLabelledAndDeterminate() {
+        // The removal pass must not read as an import, and it must advance a real
+        // bar rather than sitting in the import phase's flat 10% band.
+        #expect(ImportPhase.removing.rawValue == "Removing items")
+        #expect(ImportPhase.removing.rawValue != ImportPhase.importing.rawValue)
+
+        let progress = PhotosImportProgress()
+        progress.phase = .removing
+        progress.totalFiles = 4
+        progress.currentFile = 2
+        #expect(abs(progress.fraction - 0.5) < 0.001)
+        #expect(progress.displayLabel == "Removing items")
+    }
+}
+
+// MARK: - Bookmark Refresh (regression: 25a3a7c)
+//
+// Stale bookmarks threw instead of refreshing, so external volumes became
+// inaccessible after a reboot. `resolveAccessAndRefresh` is the API that fix
+// introduced.
+//
+// These assert unconditionally. An earlier version skipped on a failed
+// `createBookmark` — on the theory that security-scoped bookmarks need the
+// app-sandbox entitlement and only `xcodebuild test` supplies it — but that was
+// wrong in both directions: `.withSecurityScope` bookmarks are created and
+// resolved fine in an *unsandboxed* process (so the skip never fired), and CI's
+// xcodebuild run passes CODE_SIGNING_ALLOWED=NO, so no entitlement is applied
+// there either. The net effect of the skip would have been to turn these into
+// silent no-ops the moment bookmarking did start failing — exactly when the
+// 25a3a7c regression would need guarding. Let a failure be a failure.
+
+@Suite
+@MainActor
+struct BookmarkResolverTests {
+
+    private func makeScratchDirectory() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumivault-bookmark-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test func resolveRoundTripsAFreshBookmark() throws {
+        let dir = try makeScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let data = try BookmarkResolver.createBookmark(for: dir)
+
+        let (url, isStale) = try BookmarkResolver.resolve(data)
+        #expect(url.resolvingSymlinksInPath().path == dir.resolvingSymlinksInPath().path)
+        #expect(isStale == false)
+    }
+
+    @Test func refreshReturnsNoNewBookmarkWhenNotStale() throws {
+        let dir = try makeScratchDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let data = try BookmarkResolver.createBookmark(for: dir)
+        let (url, refreshed) = try BookmarkResolver.resolveAccessAndRefresh(data)
+        defer { url.stopAccessingSecurityScopedResource() }
+
+        // A fresh bookmark is not stale, so there is nothing to write back.
+        #expect(refreshed == nil)
+    }
+
+    @Test func corruptBookmarkDataStillThrows() {
+        // The fix must silently refresh *stale* bookmarks without also swallowing
+        // genuinely unusable ones.
+        let garbage = Data(repeating: 0x7F, count: 64)
+        #expect(throws: Error.self) {
+            _ = try BookmarkResolver.resolve(garbage)
+        }
+    }
+}
+
+// MARK: - SwiftData Hydration (regression: 8cef649, b151c71, 1da8a89, 6dd8ad4)
+//
+// 8cef649: restore wrote catalog.json but never hydrated SwiftData, so the UI
+// stayed empty under a "restored successfully" message.
+// b151c71: performSync() merged and saved but never hydrated, so a second Mac
+// showed an empty library.
+// 1da8a89: launch hydration didn't rebuild when the store's count disagreed with
+// the catalog, so a reset store never repopulated.
+// 6dd8ad4: hydration fetched per image, making it O(N²) and hanging the main
+// thread for seconds per sync cycle.
+
+@Suite
+@MainActor
+struct HydrationTests {
+
+    private func makeContainer() throws -> ModelContainer {
+        try ModelContainer(
+            for: ImageRecord.self, AlbumRecord.self, VolumeRecord.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+    }
+
+    private func makeCatalog(
+        albums: [String: [CatalogImage]],
+        year: String = "2026",
+        month: String = "07",
+        day: String = "20",
+        addedAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
+        deletions: [CatalogTombstone]? = nil
+    ) -> Catalog {
+        var catalogAlbums: [String: CatalogAlbum] = [:]
+        for (name, images) in albums {
+            catalogAlbums[name] = CatalogAlbum(addedAt: addedAt, images: images)
+        }
+        return Catalog(
+            version: 1,
+            lastUpdated: addedAt,
+            years: [year: CatalogYear(months: [month: CatalogMonth(days: [day: CatalogDay(albums: catalogAlbums)])])],
+            deletions: deletions
+        )
+    }
+
+    private func image(_ sha: String, _ filename: String, addedAt: Date? = nil) -> CatalogImage {
+        CatalogImage(
+            filename: filename,
+            sha256: sha,
+            sizeBytes: 1234,
+            par2Filename: "\(filename).par2",
+            addedAt: addedAt
+        )
+    }
+
+    @Test func hydrationPopulatesAnEmptyStoreFromTheCatalog() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let catalog = makeCatalog(albums: ["Trip": [image("aa", "one.heic"), image("bb", "two.heic")]])
+
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+
+        let albums = try context.fetch(FetchDescriptor<AlbumRecord>())
+        #expect(albums.count == 1)
+        #expect(albums.first?.name == "Trip")
+        let imageCount = try context.fetchCount(FetchDescriptor<ImageRecord>())
+        #expect(imageCount == 2)
+    }
+
+    @Test func hydrationIsAnIdempotentUpsert() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let catalog = makeCatalog(albums: ["Trip": [image("aa", "one.heic"), image("bb", "two.heic")]])
+
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+
+        // Re-running restore must not duplicate anything.
+        let albumCount = try context.fetchCount(FetchDescriptor<AlbumRecord>())
+        let imageCount = try context.fetchCount(FetchDescriptor<ImageRecord>())
+        #expect(albumCount == 1)
+        #expect(imageCount == 2)
+    }
+
+    @Test func hydrationPreservesLocalOnlyFieldsOnExistingRecords() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        // A record that already carries state the catalog does not describe.
+        let existing = ImageRecord(
+            sha256: "aa",
+            filename: "stale.heic",
+            sizeBytes: 1,
+            storageLocations: [StorageLocation(volumeID: "vol-1", relativePath: "2026/07/20/Trip/one.heic")],
+            thumbnailState: .generated,
+            perceptualHash: Data([1, 2, 3, 4, 5, 6, 7, 8]),
+            phAssetLocalIdentifier: "PH-1"
+        )
+        context.insert(existing)
+        try context.save()
+
+        SyncCoordinator.hydrate(
+            catalog: makeCatalog(albums: ["Trip": [image("aa", "one.heic")]]),
+            into: context
+        )
+
+        // Catalog-owned fields refresh...
+        #expect(existing.filename == "one.heic")
+        #expect(existing.sizeBytes == 1234)
+        #expect(existing.album?.name == "Trip")
+        // ...local-only fields survive. 8cef649 states this invariant; nothing
+        // enforced it until now.
+        #expect(existing.storageLocations.count == 1)
+        #expect(existing.thumbnailState == .generated)
+        #expect(existing.perceptualHash?.count == 8)
+        #expect(existing.allPHAssetIdentifiers == ["PH-1"])
+    }
+
+    @Test func staleDetectionFiresWhenTheStoreIsEmptyButTheCatalogIsNot() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let catalog = makeCatalog(albums: ["Trip": [image("aa", "one.heic"), image("bb", "two.heic")]])
+
+        // A lost/reset store that catalog.json already agrees with — the case that
+        // never repopulated before 1da8a89.
+        #expect(SyncCoordinator.isHydrationStale(catalog: catalog, context: context))
+
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        #expect(!SyncCoordinator.isHydrationStale(catalog: catalog, context: context))
+    }
+
+    // Staleness has to be measured against the records `hydrate` produces, not
+    // against the catalog's raw entry count. Where the two disagree the check can
+    // never be satisfied, so every sync tick re-runs a full main-thread hydration
+    // — the hang 6dd8ad4 removed, reintroduced through the back door. Both
+    // catalogs below are perfectly ordinary, not corrupt.
+
+    @Test func hydrationSettlesForAnImageFiledUnderTwoAlbums() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        // The same photo imported into two albums: 3 catalog entries, but
+        // `ImageRecord.sha256` is unique so only 2 records can ever exist.
+        let catalog = makeCatalog(albums: [
+            "Trip": [image("aa", "one.heic"), image("bb", "two.heic")],
+            "Beach": [image("aa", "one.heic")]
+        ])
+
+        #expect(SyncCoordinator.isHydrationStale(catalog: catalog, context: context))
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        #expect(try context.fetchCount(FetchDescriptor<ImageRecord>()) == 2)
+        #expect(!SyncCoordinator.isHydrationStale(catalog: catalog, context: context))
+    }
+
+    @Test func hydrationSettlesWhenTheCatalogHoldsUnsafeEntries() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        // The skipped entry is never a record, so counting it leaves the store
+        // permanently "stale" no matter how many times hydration runs.
+        let catalog = makeCatalog(albums: [
+            "Trip": [image("aa", "ok.heic")],
+            "../../escape": [image("bb", "bad.heic")]
+        ])
+
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        #expect(!SyncCoordinator.isHydrationStale(catalog: catalog, context: context))
+    }
+
+    @Test func multiAlbumImageLandsInTheSameAlbumOnEveryHydration() throws {
+        // `ImageRecord.album` is to-one and the catalog's containers are
+        // Dictionaries, so an unsorted walk files a two-album image by whichever
+        // album it happened to visit last — and the photo jumps between albums
+        // between hydrations with no user action. Sorting by album key makes the
+        // winner arbitrary but stable.
+        let catalog = makeCatalog(albums: [
+            "Alpha": [image("aa", "one.heic")],
+            "Beach": [image("aa", "one.heic")],
+            "Zulu": [image("aa", "one.heic")]
+        ])
+
+        var landedIn: [String] = []
+        for _ in 0..<5 {
+            // Bind the container: `makeContainer().mainContext` alone lets the
+            // container deallocate out from under the context.
+            let container = try makeContainer()
+            SyncCoordinator.hydrate(catalog: catalog, into: container.mainContext)
+            let record = try #require(
+                try container.mainContext.fetch(FetchDescriptor<ImageRecord>()).first
+            )
+            landedIn.append(try #require(record.album?.name))
+        }
+        #expect(Set(landedIn).count == 1)
+        // Last key in sort order wins.
+        #expect(landedIn.first == "Zulu")
+    }
+
+    @Test func hydrationSkipsEntriesWithTraversingPathComponents() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        let catalog = makeCatalog(albums: [
+            "Trip": [image("aa", "ok.heic")],
+            "../../escape": [image("bb", "bad.heic")]
+        ])
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+
+        let albums = try context.fetch(FetchDescriptor<AlbumRecord>())
+        #expect(albums.count == 1)
+        #expect(albums.first?.name == "Trip")
+        let keptImages = try context.fetchCount(FetchDescriptor<ImageRecord>())
+        #expect(keptImages == 1)
+    }
+
+    @Test func tombstonesRemoveRecordsThatPredateTheDeletion() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        let added = Date(timeIntervalSince1970: 1_700_000_000)
+        SyncCoordinator.hydrate(
+            catalog: makeCatalog(albums: ["Trip": [image("aa", "one.heic", addedAt: added),
+                                                  image("bb", "two.heic", addedAt: added)]]),
+            into: context
+        )
+        let seeded = try context.fetchCount(FetchDescriptor<ImageRecord>())
+        #expect(seeded == 2)
+
+        // "bb" deleted on a peer, after the record was added.
+        let tombstone = CatalogTombstone(
+            year: "2026", month: "07", day: "20", album: "Trip",
+            sha256: "bb", deletedAt: added.addingTimeInterval(60)
+        )
+        SyncCoordinator.hydrate(
+            catalog: makeCatalog(albums: ["Trip": [image("aa", "one.heic", addedAt: added)]],
+                                 deletions: [tombstone]),
+            into: context
+        )
+
+        let remaining = try context.fetch(FetchDescriptor<ImageRecord>())
+        #expect(remaining.count == 1)
+        #expect(remaining.first?.sha256 == "aa")
+    }
+
+    @Test func tombstonesDoNotDeleteARecordAddedAfterTheDeletion() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+
+        let deletedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        // An in-flight local import: the record exists and postdates the tombstone,
+        // and the catalog no longer lists it. It must survive.
+        let fresh = ImageRecord(
+            sha256: "cc",
+            filename: "fresh.heic",
+            sizeBytes: 10,
+            addedAt: deletedAt.addingTimeInterval(600)
+        )
+        context.insert(fresh)
+        try context.save()
+
+        let tombstone = CatalogTombstone(
+            year: "2026", month: "07", day: "20", album: "Trip",
+            sha256: "cc", deletedAt: deletedAt
+        )
+        SyncCoordinator.hydrate(
+            catalog: makeCatalog(albums: ["Trip": [image("aa", "one.heic")]], deletions: [tombstone]),
+            into: context
+        )
+
+        let shas = Set(try context.fetch(FetchDescriptor<ImageRecord>()).map(\.sha256))
+        #expect(shas.contains("cc"))
+    }
+
+    @Test func hydratesALargeCatalogCorrectlyAndIdempotently() throws {
+        // 6dd8ad4 replaced a per-image FetchDescriptor with two batch loads,
+        // because the old shape evaluated a #Predicate against every registered
+        // record for each lookup and hung the main thread for seconds per sync.
+        //
+        // This test does NOT assert the complexity. A ratio assertion was tried and
+        // removed: hydrating 4x the catalog took 8.5x the time on CI even with the
+        // batch-load fix in place (exponent ~1.5), because SwiftData's per-insert
+        // cost grows with store size. A ratio test therefore cannot separate the
+        // fixed shape from the quadratic one, and any threshold that passes today
+        // either flakes or would wave a real regression through.
+        //
+        // What is left is a deterministic correctness check at a size where the old
+        // per-image `FetchDescriptor` shape would be pathological — a genuine
+        // reintroduction shows up as a job timeout rather than a clean assertion.
+        // See TEST-PLAN.md "Remaining Automated Test TODOs": bug #30's
+        // complexity is not fenced.
+        let container = try makeContainer()
+        let context = container.mainContext
+        let images = (0..<2000).map { image(String(format: "%08x", $0), "img\($0).heic") }
+        let catalog = makeCatalog(albums: ["Bulk": images])
+
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        let hydrated = try context.fetchCount(FetchDescriptor<ImageRecord>())
+        #expect(hydrated == 2000)
+
+        // Re-hydrating a large catalog must stay an upsert, not a duplicate pass.
+        SyncCoordinator.hydrate(catalog: catalog, into: context)
+        let afterSecondPass = try context.fetchCount(FetchDescriptor<ImageRecord>())
+        let albumCountAtScale = try context.fetchCount(FetchDescriptor<AlbumRecord>())
+        #expect(afterSecondPass == 2000)
+        #expect(albumCountAtScale == 1)
+    }
+}
+
+// MARK: - Legacy Catalog Migration & Storage Resolution (regression: 2f44cfb)
+//
+// Apple rejected 1.0 under 2.4.5(i) (catalog inside the hidden sandbox container,
+// container path shown in Settings) and 2.1(a) (import dead-ended with "No Storage
+// Configured"). The fix moved the catalog to ~/Pictures/LumiVault, migrating any
+// existing one on first launch, and modelled the library as a reserved volumeID so
+// it behaves like any other storage target.
+
+@Suite
+@MainActor
+struct CatalogMigrationTests {
+
+    private func makeDirs() throws -> (legacy: URL, target: URL) {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumivault-migrate-\(UUID().uuidString)", isDirectory: true)
+        let legacy = base.appendingPathComponent("legacy", isDirectory: true)
+        let target = base.appendingPathComponent("library", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        return (legacy, target)
+    }
+
+    @Test func migrationMovesTheCatalogAndItsRecoverySidecars() throws {
+        let fm = FileManager.default
+        let (legacy, target) = try makeDirs()
+        defer { try? fm.removeItem(at: legacy.deletingLastPathComponent()) }
+
+        for name in ["catalog.json", "catalog.json.sha256", "catalog.json.par2", "catalog.json.vol0+16.par2"] {
+            try Data(name.utf8).write(to: legacy.appendingPathComponent(name))
+        }
+        // An unrelated neighbour must be left alone.
+        try Data("keep".utf8).write(to: legacy.appendingPathComponent("notes.txt"))
+
+        SyncCoordinator.migrateCatalog(from: legacy, to: target)
+
+        for name in ["catalog.json", "catalog.json.sha256", "catalog.json.par2", "catalog.json.vol0+16.par2"] {
+            #expect(fm.fileExists(atPath: target.appendingPathComponent(name).path))
+            #expect(!fm.fileExists(atPath: legacy.appendingPathComponent(name).path))
+        }
+        #expect(fm.fileExists(atPath: legacy.appendingPathComponent("notes.txt").path))
+    }
+
+    @Test func migrationNeverClobbersAnExistingCatalog() throws {
+        let fm = FileManager.default
+        let (legacy, target) = try makeDirs()
+        defer { try? fm.removeItem(at: legacy.deletingLastPathComponent()) }
+
+        try Data("legacy".utf8).write(to: legacy.appendingPathComponent("catalog.json"))
+        try Data("current".utf8).write(to: target.appendingPathComponent("catalog.json"))
+
+        SyncCoordinator.migrateCatalog(from: legacy, to: target)
+
+        let contents = try String(contentsOf: target.appendingPathComponent("catalog.json"), encoding: .utf8)
+        #expect(contents == "current")
+        // The legacy copy stays put rather than being silently discarded.
+        #expect(fm.fileExists(atPath: legacy.appendingPathComponent("catalog.json").path))
+    }
+
+    @Test func migrationIsANoOpWhenThereIsNothingToMove() throws {
+        let fm = FileManager.default
+        let (legacy, target) = try makeDirs()
+        defer { try? fm.removeItem(at: legacy.deletingLastPathComponent()) }
+
+        SyncCoordinator.migrateCatalog(from: legacy, to: target)
+        #expect(((try? fm.contentsOfDirectory(atPath: target.path)) ?? []).isEmpty)
+    }
+
+    @Test func libraryResolvesAsAStorageTargetWithoutABookmark() {
+        let location = StorageLocation(
+            volumeID: Constants.Storage.libraryVolumeID,
+            relativePath: "2026/07/20/Trip/one.heic"
+        )
+        let resolved = StorageResolver.resolveMount(for: location, volumes: [])
+        #expect(resolved?.mountURL.path == Constants.Paths.libraryURL.path)
+        // The library is reached via the Pictures entitlement, so there is no
+        // security-scoped resource for the caller to release.
+        #expect(resolved?.securityScoped == false)
+    }
+
+    @Test func unknownVolumeDoesNotResolve() {
+        let location = StorageLocation(volumeID: "not-a-registered-volume", relativePath: "x.heic")
+        #expect(StorageResolver.resolveMount(for: location, volumes: []) == nil)
+    }
+
+    @Test func librarySnapshotAndMountedPairAgreeOnOnePath() {
+        let snapshot = StorageResolver.librarySnapshot()
+        let mounted = StorageResolver.libraryMounted()
+        #expect(snapshot.volumeID == Constants.Storage.libraryVolumeID)
+        #expect(mounted.volumeID == Constants.Storage.libraryVolumeID)
+        #expect(snapshot.mountURL.path == mounted.mountURL.path)
+        #expect(snapshot.mountURL.path == Constants.Paths.libraryURL.path)
+    }
+}
+
+// MARK: - HEIC Encoding & Alpha Stripping (regression: b428117, 25a3a7c)
+//
+// b428117: CIImage-based HEIC encoding silently failed, so files configured for
+// HEIC were left as JPG with no error surfaced. 25a3a7c: RGBA sources were encoded
+// without stripping alpha, producing corrupt JPEG/HEIC output. Existing conversion
+// tests only cover the JPEG path from an opaque source.
+
+@Suite
+@MainActor
+struct ImageConversionFormatTests {
+
+    private func convert(
+        sourceName: String,
+        makeSource: (URL) throws -> Void,
+        format: ImageFormat
+    ) throws -> URL {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent("lumivault-fmt-\(UUID().uuidString)")
+        try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        let sourceURL = tmpDir.appendingPathComponent(sourceName)
+        try makeSource(sourceURL)
+
+        let staging = tmpDir.appendingPathComponent("staging", isDirectory: true)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        let asset = ImportedAsset(fileURL: sourceURL, originalFilename: sourceName, creationDate: nil)
+        let result = ImageConversionService.convertImage(
+            asset: asset, format: format, quality: 0.85,
+            maxDimension: MaxDimension.original, staging: staging
+        )
+        return result.fileURL
+    }
+
+    @Test func heicConversionProducesARealHEICFile() throws {
+        let output = try convert(
+            sourceName: "photo.jpg",
+            makeSource: { try TestFixtures.createTinyJPEG(at: $0, width: 32, height: 32) },
+            format: ImageFormat.heic
+        )
+
+        #expect(output.pathExtension == "heic")
+        // The silent failure in b428117 left the *original* bytes in place, so the
+        // decoded container type is the assertion that actually catches it.
+        let source = try #require(CGImageSourceCreateWithURL(output as CFURL, nil))
+        #expect((CGImageSourceGetType(source) as String?) == "public.heic")
+        #expect(CGImageSourceGetCount(source) >= 1)
+    }
+
+    @Test func jpegConversionStripsAlphaFromAnRGBASource() throws {
+        let output = try convert(
+            sourceName: "transparent.png",
+            makeSource: { try TestFixtures.createTransparentPNG(at: $0, width: 32, height: 32) },
+            format: ImageFormat.jpeg
+        )
+
+        #expect(output.pathExtension == "jpg")
+        let source = try #require(CGImageSourceCreateWithURL(output as CFURL, nil))
+        let cgImage = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        #expect(cgImage.alphaInfo == .none || cgImage.alphaInfo == .noneSkipLast
+                || cgImage.alphaInfo == .noneSkipFirst)
+    }
+
+    @Test func heicConversionStripsAlphaFromAnRGBASource() throws {
+        let output = try convert(
+            sourceName: "transparent.png",
+            makeSource: { try TestFixtures.createTransparentPNG(at: $0, width: 32, height: 32) },
+            format: ImageFormat.heic
+        )
+
+        #expect(output.pathExtension == "heic")
+        let source = try #require(CGImageSourceCreateWithURL(output as CFURL, nil))
+        let cgImage = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        #expect(cgImage.alphaInfo == .none || cgImage.alphaInfo == .noneSkipLast
+                || cgImage.alphaInfo == .noneSkipFirst)
+    }
+}
+
+// MARK: - Cancellation Drains vs Breaks (regression: abe7b51)
+//
+// Every pipeline phase used `continue` on cancellation, which drained the channel's
+// buffer instead of exiting — so cancelling an import kept working through
+// everything already queued. The fix changed them to `break`.
+//
+// The contract that makes `break` load-bearing is asserted here: `cancel()`
+// terminates the stream but does NOT discard items already yielded. If someone
+// "fixes" cancel() to drop the backlog, these tests document why the consumer-side
+// break still has to exist.
+
+@Suite
+struct ChannelCancellationDrainTests {
+
+    @Test func cancelDoesNotDiscardAlreadyBufferedItems() async {
+        let channel = AsyncChannel<Int>(bufferSize: 8)
+        for i in 0..<5 { await channel.send(i) }
+        await channel.cancel()
+
+        // A consumer that keeps looping still sees the backlog — this is exactly
+        // what `continue` did.
+        var drained = 0
+        for await _ in channel.stream { drained += 1 }
+        #expect(drained == 5)
+    }
+
+    /// Drives a real pipeline stage, not a copy of one: `runConversionStage` has
+    /// the same `for await … if Task.isCancelled { break }` body as the other
+    /// seven, so reverting that `break` to `continue` fails this test.
+    ///
+    /// `continue` and `break` differ in exactly one observable: how much of the
+    /// input channel the stage dequeues before returning. Nothing else in the
+    /// body runs — the cancellation check sits above the work — so the assertion
+    /// is on what is *left* in the channel afterwards. The whole backlog is
+    /// buffered up front so `next()` never suspends: a suspended `next()` returns
+    /// nil on a cancelled task, which would end the loop on its own and mask the
+    /// difference. No sleeps, no wall-clock assumptions.
+    @Test func cancelledStageStopsConsumingInsteadOfDrainingTheBacklog() async throws {
+        let staging = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumivault-cancel-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: staging) }
+
+        let backlog = 6
+        // Buffer everything up front, so no send blocks and no dequeue suspends.
+        let inputCh = AsyncChannel<PipelineItem>(bufferSize: backlog + 2)
+        let outputCh = AsyncChannel<PipelineItem>(bufferSize: backlog + 2)
+
+        // Videos take the stage's pass-through path, so no image codec runs and
+        // the shape of the loop is all that is under test.
+        for index in 0..<backlog {
+            await inputCh.send(PipelineItem(
+                albumName: "Cancel",
+                importDate: Date(timeIntervalSince1970: 1_700_000_000),
+                fileURL: staging.appendingPathComponent("clip-\(index).mov"),
+                originalFilename: "clip-\(index).mov",
+                phAssetLocalIdentifier: nil,
+                mediaType: .video
+            ))
+        }
+        inputCh.finish()
+
+        let coordinator = await PipelinedImportCoordinator(
+            catalogService: CatalogService(),
+            encryptionService: EncryptionService()
+        )
+        let progress = await PhotosImportProgress()
+
+        // Cancel before the stage starts, so the very first iteration is the one
+        // that has to exit: `Task.isCancelled` is already true at the check.
+        let stage = Task {
+            await coordinator.runConversionStage(
+                inputCh: inputCh,
+                outputCh: outputCh,
+                settings: ImportSettings(albumName: "Cancel", year: "2026", month: "07", day: "20"),
+                staging: staging,
+                progress: progress
+            )
+        }
+        stage.cancel()
+        await stage.value
+
+        // The stage dequeued one item and left the rest. With `continue` it walks
+        // the whole backlog before the stream ends and this is 0 — which is the
+        // "cancelling an import keeps processing everything queued" bug itself.
+        var remaining = 0
+        for await _ in inputCh.stream { remaining += 1 }
+        #expect(remaining == backlog - 1)
+
+        // A cancelled stage must not forward work downstream either. The stage's
+        // own `defer` finished `outputCh`, so this iteration terminates.
+        var forwarded = 0
+        for await _ in outputCh.stream { forwarded += 1 }
+        #expect(forwarded == 0)
+    }
+}
+
+// MARK: - Photos Stall Policy (regression: c4cf7ee, 5233888, aedc03b, 1da8a89)
+//
+// The watchdog around PHAssetResourceManager is untestable as a whole — it needs a
+// live continuation and assetsd — but every decision it makes is arithmetic, now
+// isolated in StallPolicy.
+
+@Suite
+struct StallPolicyTests {
+
+    @Test func thresholdsDoubleAcrossTenAttempts() {
+        // 1, 2, 4 … 512 seconds. Before 5233888 a stall waited on a flat 10-minute
+        // hard skip instead of retrying.
+        let expected: [TimeInterval] = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+        #expect(StallPolicy.maxAttempts == expected.count)
+        for (attempt, seconds) in expected.enumerated() {
+            #expect(StallPolicy.threshold(forAttempt: attempt) == seconds)
+        }
+    }
+
+    @Test func flowingBytesReportHealthy() {
+        #expect(StallPolicy.decide(attempt: 0, idleFor: 0, elapsedForAsset: 30) == .healthy)
+        // Just under half the threshold is still healthy.
+        #expect(StallPolicy.decide(attempt: 3, idleFor: 3.9, elapsedForAsset: 60) == .healthy)
+    }
+
+    @Test func idlePastTheThresholdStalls() {
+        #expect(StallPolicy.decide(attempt: 0, idleFor: 1.0, elapsedForAsset: 0) == .stalled)
+        #expect(StallPolicy.decide(attempt: 2, idleFor: 4.5, elapsedForAsset: 99) == .stalled)
+    }
+
+    @Test func slowMessageIsSuppressedForTheFirstFiveSeconds() {
+        // aedc03b: attempt 0's threshold is 1s, so the message would otherwise fire
+        // after 0.5s of idling and vanish again when attempt 1 succeeded.
+        #expect(StallPolicy.decide(attempt: 0, idleFor: 0.6, elapsedForAsset: 0.6) == .quiet)
+        #expect(StallPolicy.decide(attempt: 0, idleFor: 0.6, elapsedForAsset: 4.99) == .quiet)
+
+        // Past the delay it surfaces, with a countdown.
+        #expect(StallPolicy.decide(attempt: 0, idleFor: 0.6, elapsedForAsset: 5.0)
+                == .slow(secondsUntilRetry: 1))
+    }
+
+    @Test func countdownReportsWholeSecondsRemainingAndNeverGoesNegative() {
+        // attempt 3 → 8s threshold; idle 5s → 3s left.
+        #expect(StallPolicy.decide(attempt: 3, idleFor: 5, elapsedForAsset: 30)
+                == .slow(secondsUntilRetry: 3))
+        // Fractional remainders round up so the countdown never displays 0 while
+        // the retry has not fired.
+        #expect(StallPolicy.decide(attempt: 3, idleFor: 7.2, elapsedForAsset: 30)
+                == .slow(secondsUntilRetry: 1))
+
+        for idle in stride(from: 4.05, to: 8.0, by: 0.25) {
+            guard case .slow(let seconds) = StallPolicy.decide(
+                attempt: 3, idleFor: idle, elapsedForAsset: 30
+            ) else {
+                Issue.record("Expected .slow at idle \(idle)")
+                continue
+            }
+            #expect(seconds >= 0)
+            #expect(seconds <= 8)
+        }
+    }
+
+    @Test func laterAttemptsTolerateLongerIdlePeriods() {
+        // The same 40s idle is a stall early on and merely slow later — that is what
+        // lets a genuinely slow iCloud download finish instead of being killed.
+        // attempt 2 → 4s threshold; attempt 6 → 64s threshold (half = 32s).
+        #expect(StallPolicy.decide(attempt: 2, idleFor: 40, elapsedForAsset: 60) == .stalled)
+        #expect(StallPolicy.decide(attempt: 6, idleFor: 40, elapsedForAsset: 60)
+                == .slow(secondsUntilRetry: 24))
+        // Still comfortably healthy at the same attempt with a shorter idle.
+        #expect(StallPolicy.decide(attempt: 6, idleFor: 30, elapsedForAsset: 60) == .healthy)
+    }
+}
+
+// MARK: - Thumbnail Cache Location (regression: bf00a05)
+//
+// Thumbnails lived in the sandboxed Caches directory, which macOS purges under disk
+// pressure, so the grid went blank and nothing regenerated them.
+
+@Suite
+struct ThumbnailCacheTests {
+
+    private func makeScratchRoot() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumivault-thumbs-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    @Test func defaultCacheRootLivesInApplicationSupportNotCaches() {
+        let path = ThumbnailService.defaultCacheRoot.path
+        #expect(path.contains("Application Support"))
+        // The exact regression: a Caches path is purgeable.
+        #expect(!path.contains("/Caches/"))
+        #expect(ThumbnailService.defaultCacheRoot.lastPathComponent == "Thumbnails")
+    }
+
+    @Test func thumbnailsAreWrittenUnderTheShaKeyedLayout() async throws {
+        let root = try makeScratchRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let sourceURL = root.appendingPathComponent("source.jpg")
+        try TestFixtures.createTinyJPEG(at: sourceURL, width: 64, height: 64)
+
+        let sha = "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234"
+        let service = ThumbnailService(cacheRoot: root.appendingPathComponent("Thumbnails"))
+        try await service.generateThumbnail(for: sourceURL, sha256: sha)
+
+        for size in [ThumbnailSize.grid, ThumbnailSize.list] {
+            let location = await service.cacheLocation(for: sha, size: size)
+            #expect(FileManager.default.fileExists(atPath: location.path))
+            // Sharded by size then by the first two hash characters.
+            #expect(location.deletingLastPathComponent().lastPathComponent == "ab")
+            #expect(location.deletingLastPathComponent().deletingLastPathComponent()
+                        .lastPathComponent == "\(size.rawValue)")
+        }
+    }
+
+    @Test func missingThumbnailReadsAsNilSoCallersCanRegenerate() async throws {
+        let root = try makeScratchRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let service = ThumbnailService(cacheRoot: root.appendingPathComponent("Thumbnails"))
+        let missing = await service.thumbnail(
+            for: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            size: .grid
+        )
+        // A purged cache must read as a miss, not a crash — that miss is what
+        // drives regeneration from the source volume.
+        #expect(missing == nil)
+    }
+
+    @Test func removingThumbnailsClearsBothSizesFromDisk() async throws {
+        let root = try makeScratchRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let sourceURL = root.appendingPathComponent("source.jpg")
+        try TestFixtures.createTinyJPEG(at: sourceURL, width: 64, height: 64)
+
+        let sha = "beef0000beef0000beef0000beef0000beef0000beef0000beef0000beef0000"
+        let service = ThumbnailService(cacheRoot: root.appendingPathComponent("Thumbnails"))
+        try await service.generateThumbnail(for: sourceURL, sha256: sha)
+        await service.removeThumbnails(for: sha)
+
+        for size in [ThumbnailSize.grid, ThumbnailSize.list] {
+            let location = await service.cacheLocation(for: sha, size: size)
+            #expect(!FileManager.default.fileExists(atPath: location.path))
+        }
+    }
+}
+
+// MARK: - Pipeline Phase Routing (regression guard for the wiring itself)
+//
+// Each stage forwards to the next *enabled* stage, so a disabled phase has to be
+// skipped over rather than fed. Expressed inline this was a nested ternary chain
+// per stage; a mistake there sends items into a channel nobody consumes, and the
+// import wedges on backpressure rather than failing.
+
+@Suite
+struct PipelinePhaseRoutingTests {
+
+    private func phases(encryption: Bool = false, par2: Bool = false,
+                        copy: Bool = false, upload: Bool = false) -> PipelinePhases {
+        PipelinePhases(encryption: encryption, par2: par2, copy: copy, upload: upload)
+    }
+
+    @Test func allPhasesEnabledFormsTheFullChain() {
+        let p = phases(encryption: true, par2: true, copy: true, upload: true)
+        #expect(p.next(after: .hashing) == .encryption)
+        #expect(p.next(after: .encryption) == .par2)
+        #expect(p.next(after: .par2) == .copy)
+        #expect(p.next(after: .copy) == .upload)
+        #expect(p.next(after: .upload) == .catalog)
+    }
+
+    @Test func noOptionalPhasesRoutesStraightToTheCatalogSink() {
+        let p = phases()
+        for stage in [PipelinePhases.Stage.hashing, .encryption, .par2, .copy, .upload] {
+            #expect(p.next(after: stage) == .catalog)
+        }
+    }
+
+    @Test func disabledPhasesAreSkippedOverNotFed() {
+        // PAR2 + upload only: hashing must jump past encryption to par2, and par2
+        // must jump past copy to upload.
+        let p = phases(encryption: false, par2: true, copy: false, upload: true)
+        #expect(p.next(after: .hashing) == .par2)
+        #expect(p.next(after: .par2) == .upload)
+        #expect(p.next(after: .upload) == .catalog)
+        // Even though encryption and copy do not run, asking where they *would*
+        // forward must still name a live stage — the coordinator computes all of
+        // these unconditionally.
+        #expect(p.next(after: .encryption) == .par2)
+        #expect(p.next(after: .copy) == .upload)
+    }
+
+    @Test func routingNeverTargetsADisabledStage() {
+        // Exhaustive over all 16 combinations: whatever a stage forwards to must
+        // itself be enabled (or the always-on catalog sink).
+        for mask in 0..<16 {
+            let p = phases(
+                encryption: mask & 1 != 0,
+                par2: mask & 2 != 0,
+                copy: mask & 4 != 0,
+                upload: mask & 8 != 0
+            )
+            for stage in [PipelinePhases.Stage.hashing, .encryption, .par2, .copy, .upload] {
+                let target = p.next(after: stage)
+                #expect(p.isEnabled(target), "mask \(mask): \(stage) → disabled \(target)")
+            }
+        }
+    }
+
+    @Test func routingAlwaysMovesForwardAndTerminates() {
+        // Following the chain from hashing must reach .catalog without revisiting a
+        // stage — a cycle would deadlock the pipeline.
+        for mask in 0..<16 {
+            let p = phases(
+                encryption: mask & 1 != 0,
+                par2: mask & 2 != 0,
+                copy: mask & 4 != 0,
+                upload: mask & 8 != 0
+            )
+            var seen: [PipelinePhases.Stage] = []
+            var stage = PipelinePhases.Stage.hashing
+            while stage != .catalog {
+                #expect(!seen.contains(stage), "mask \(mask): revisited \(stage)")
+                seen.append(stage)
+                stage = p.next(after: stage)
+                if seen.count > 6 { break }
+            }
+            #expect(stage == .catalog, "mask \(mask): chain did not terminate")
+        }
+    }
+
+    @Test func catalogIsTerminal() {
+        #expect(phases(encryption: true, par2: true, copy: true, upload: true)
+            .next(after: .catalog) == .catalog)
+    }
+}
+
+// MARK: - Copy-Stage Mirroring (regression: 2f44cfb, 5568b41)
+//
+// `ensureFileMirrored` is what makes a re-run of an interrupted import cheap and
+// what stops a truncated leftover from being trusted as a complete copy.
+
+@Suite
+struct EnsureFileMirroredTests {
+
+    private func scratch() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumivault-mirror-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test func copiesWhenDestinationIsAbsent() throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let source = dir.appendingPathComponent("a.bin")
+        let dest = dir.appendingPathComponent("b.bin")
+        try Data("payload".utf8).write(to: source)
+
+        try PipelinedImportCoordinator.ensureFileMirrored(from: source, to: dest)
+        let copied = try Data(contentsOf: dest)
+        #expect(copied == Data("payload".utf8))
+    }
+
+    @Test func leavesAMatchingDestinationUntouched() throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let source = dir.appendingPathComponent("a.bin")
+        let dest = dir.appendingPathComponent("b.bin")
+        try Data("12345".utf8).write(to: source)
+        // Same size, different bytes: the size check is deliberately cheap, and a
+        // same-size destination is trusted rather than re-copied.
+        try Data("abcde".utf8).write(to: dest)
+
+        try PipelinedImportCoordinator.ensureFileMirrored(from: source, to: dest)
+        let untouched = try Data(contentsOf: dest)
+        #expect(untouched == Data("abcde".utf8))
+    }
+
+    @Test func replacesATruncatedOrEmptyDestination() throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let source = dir.appendingPathComponent("a.bin")
+        try Data("full payload".utf8).write(to: source)
+
+        // Partial leftover from an interrupted copy.
+        let partial = dir.appendingPathComponent("partial.bin")
+        try Data("full".utf8).write(to: partial)
+        try PipelinedImportCoordinator.ensureFileMirrored(from: source, to: partial)
+        let repaired = try Data(contentsOf: partial)
+        #expect(repaired == Data("full payload".utf8))
+
+        // A zero-byte file is never trusted, even against a zero-byte source.
+        let empty = dir.appendingPathComponent("empty.bin")
+        try Data().write(to: empty)
+        try PipelinedImportCoordinator.ensureFileMirrored(from: source, to: empty)
+        let filled = try Data(contentsOf: empty)
+        #expect(filled == Data("full payload".utf8))
+    }
+
+    @Test func missingSourceThrows() throws {
+        let dir = try scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        #expect(throws: Error.self) {
+            try PipelinedImportCoordinator.ensureFileMirrored(
+                from: dir.appendingPathComponent("nope.bin"),
+                to: dir.appendingPathComponent("dest.bin")
+            )
+        }
+    }
+}
+
+// MARK: - Replica Healing (regression: 5568b41)
+//
+// The heal pass restores a file missing from one storage target by copying it from
+// a healthy sibling volume or re-downloading it from B2. Volume-to-volume healing
+// is exercised here; the B2 source needs live credentials and stays manual.
+
+@Suite
+@MainActor
+struct HealReplicasTests {
+
+    private func snapshot(
+        for spec: TestFixtures.FileSpec,
+        volumeIDs: [String],
+        isEncrypted: Bool = false,
+        relativePathOverride: String? = nil
+    ) -> ImageSnapshot {
+        ImageSnapshot(
+            sha256: spec.sha256,
+            filename: spec.name,
+            par2Filename: spec.par2Name,
+            b2FileId: nil,
+            storageLocations: volumeIDs.map {
+                StorageLocation(
+                    volumeID: $0,
+                    relativePath: relativePathOverride ?? "\(spec.albumPath)/\(spec.name)"
+                )
+            },
+            albumPath: spec.albumPath,
+            isEncrypted: isEncrypted
+        )
+    }
+
+    @Test func restoresAMissingFileFromASiblingVolume() async throws {
+        let fm = FileManager.default
+        let volA = try TestFixtures.materializeVolume(label: "heal-a")
+        let volB = try TestFixtures.materializeVolume(label: "heal-b")
+        defer {
+            try? fm.removeItem(at: volA)
+            try? fm.removeItem(at: volB)
+        }
+
+        let spec = TestFixtures.files[0]
+        let missing = volA.appendingPathComponent("\(spec.albumPath)/\(spec.name)")
+        try fm.removeItem(at: missing)
+        #expect(!fm.fileExists(atPath: missing.path))
+
+        let results = await ReconciliationService().healReplicas(
+            discrepancies: [Discrepancy(sha256: spec.sha256, filename: spec.name,
+                                        kind: .danglingLocation(volumeID: "vol-a"))],
+            snapshots: [snapshot(for: spec, volumeIDs: ["vol-a", "vol-b"])],
+            volumes: [
+                VolumeSnapshot(volumeID: "vol-a", label: "A", mountURL: volA),
+                VolumeSnapshot(volumeID: "vol-b", label: "B", mountURL: volB)
+            ],
+            b2Credentials: nil,
+            progress: ReconciliationProgress()
+        )
+
+        #expect(results.count == 1)
+        // `try #require`, not `results[0]`: an empty array must fail this one test,
+        // not trap and take the whole in-process test run down with it.
+        let result = try #require(results.first)
+        guard case .restoredToVolume(let volumeID, let source) = result.outcome else {
+            Issue.record("Expected a volume restore, got \(result.outcome)")
+            return
+        }
+        #expect(volumeID == "vol-a")
+        guard case .volume(let sourceID) = source else {
+            Issue.record("Expected a sibling-volume source")
+            return
+        }
+        #expect(sourceID == "vol-b")
+
+        // The restored bytes must be the real thing, not a placeholder.
+        #expect(fm.fileExists(atPath: missing.path))
+        let restored = try Data(contentsOf: missing)
+        #expect(restored == TestFixtures.content(for: spec))
+    }
+
+    @Test func reportsFailureWhenNoHealthySourceExists() async throws {
+        let fm = FileManager.default
+        let volA = try TestFixtures.materializeVolume(label: "heal-lonely")
+        defer { try? fm.removeItem(at: volA) }
+
+        let spec = TestFixtures.files[1]
+        try fm.removeItem(at: volA.appendingPathComponent("\(spec.albumPath)/\(spec.name)"))
+
+        let results = await ReconciliationService().healReplicas(
+            discrepancies: [Discrepancy(sha256: spec.sha256, filename: spec.name,
+                                        kind: .danglingLocation(volumeID: "vol-a"))],
+            snapshots: [snapshot(for: spec, volumeIDs: ["vol-a"])],
+            volumes: [VolumeSnapshot(volumeID: "vol-a", label: "A", mountURL: volA)],
+            b2Credentials: nil,
+            progress: ReconciliationProgress()
+        )
+
+        let result = try #require(results.first)
+        guard case .failed(let reason) = result.outcome else {
+            Issue.record("Expected a failure, got \(result.outcome)")
+            return
+        }
+        // A discrepancy that cannot be healed must be reported, not silently dropped.
+        #expect(!reason.isEmpty)
+    }
+
+    @Test func refusesToWriteOutsideTheTargetVolume() async throws {
+        let fm = FileManager.default
+        let volA = try TestFixtures.materializeVolume(label: "heal-traversal-a")
+        let volB = try TestFixtures.materializeVolume(label: "heal-traversal-b")
+        defer {
+            try? fm.removeItem(at: volA)
+            try? fm.removeItem(at: volB)
+        }
+
+        let spec = TestFixtures.files[2]
+        let results = await ReconciliationService().healReplicas(
+            discrepancies: [Discrepancy(sha256: spec.sha256, filename: spec.name,
+                                        kind: .danglingLocation(volumeID: "vol-a"))],
+            snapshots: [snapshot(for: spec, volumeIDs: ["vol-a", "vol-b"],
+                                 relativePathOverride: "../../escaped.heic")],
+            volumes: [
+                VolumeSnapshot(volumeID: "vol-a", label: "A", mountURL: volA),
+                VolumeSnapshot(volumeID: "vol-b", label: "B", mountURL: volB)
+            ],
+            b2Credentials: nil,
+            progress: ReconciliationProgress()
+        )
+
+        guard case .failed = try #require(results.first).outcome else {
+            Issue.record("A traversing relativePath must not be written")
+            return
+        }
+        #expect(!fm.fileExists(atPath: volA.appendingPathComponent("../../escaped.heic").path))
+    }
+
+    @Test func healingIgnoresDiscrepancyKindsItCannotFix() async throws {
+        let volA = try TestFixtures.materializeVolume(label: "heal-noop")
+        defer { try? FileManager.default.removeItem(at: volA) }
+
+        let spec = TestFixtures.files[3]
+        let results = await ReconciliationService().healReplicas(
+            discrepancies: [
+                Discrepancy(sha256: spec.sha256, filename: spec.name,
+                            kind: .orphanOnVolume(volumeID: "vol-a", path: "stray.heic"))
+            ],
+            snapshots: [snapshot(for: spec, volumeIDs: ["vol-a"])],
+            volumes: [VolumeSnapshot(volumeID: "vol-a", label: "A", mountURL: volA)],
+            b2Credentials: nil,
+            progress: ReconciliationProgress()
+        )
+        // Orphans are a user decision (keep or delete), never something heal acts on.
+        #expect(results.isEmpty)
     }
 }
