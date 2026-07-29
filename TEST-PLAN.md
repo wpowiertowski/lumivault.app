@@ -2,7 +2,7 @@
 
 ## Existing Automated Test Assessment
 
-### Summary: 328 tests across 60 suites
+### Summary: 333 tests across 62 suites
 
 | Rating | Suite | Tests | Assessment |
 | -------- | ------- | ------- | ------------ |
@@ -27,6 +27,8 @@
 | High Value | EXIFExtractionTests | 7 | Real JPEGs carrying real EXIF/TIFF/GPS. The GPS hemisphere reconstruction is the point: a dropped negation files a photo on the wrong side of the equator without crashing or failing to decode. Plus capture settings (ISO from an array, vendor-padded Make/Model trimmed), the DateTimeOriginal fallback, in-memory extraction, and a non-image returning nil. |
 | Medium Value | EXIFFormattingTests | 4 | The six formatted strings: aperture/ISO/focal length incl. the 35mm equivalent, megapixels needing both axes, altitude and coordinate precision, and a latitude without a longitude not being a fix. |
 | Medium Value | KeychainStoreTests | 4 | Round-trip, update-in-place rather than duplicate, delete of an absent account, and account isolation. Gated with `.enabled(if:)` on the `CI` env var — a CI runner's keychain is typically locked. `B2Credentials` is deliberately uncovered: it persists under a fixed account, so testing it would overwrite real credentials. |
+| High Value | StoreRecoveryTests | 3 | An unopenable SwiftData store is quarantined (bytes preserved verbatim, `-wal`/`-shm` moved with it) and replaced rather than crashing the app on launch; a healthy store is left alone; recovery never touches `catalog.json`, which is what it rebuilds from. Guards the interrupted-migration case that made the app permanently unlaunchable. |
+| High Value | RealLibraryGuardTests | 2 | Fails if the real `~/Pictures/LumiVault/catalog.json` looks like a test wrote it, and pins the two seams (`PipelinedImportCoordinator.catalogURL`, `LUMIVAULT_UITEST_LIBRARY`) that keep tests out of the real archive. Exists because two separate defects wrote there while the suite stayed green. |
 | Medium Value | CatalogBackupServiceTests | 5 | Volume backup write + decode, error on bad path, file restore round-trip, missing catalog error, orphan vol-file eviction |
 | Medium Value | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture hash verification |
 | Medium Value | ImageConversionTests | 6 | JPEG conversion with extension change, valid output, dimension scaling, original format pass-through, below-max preservation. Tests exercise the shared `ImageConversionService.convertImage`. |

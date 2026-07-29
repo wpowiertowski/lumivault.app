@@ -124,7 +124,7 @@ LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool
 
 ## Testing
 
-328 unit tests across 60 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
+333 unit tests across 62 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 12 UI tests via XCUIAutomation (Xcode 26) for local development.
 
 ```bash
 swift test                                    # Run all unit tests
@@ -236,6 +236,8 @@ gap is `PhotosImportService` (1.7% of 1,328 lines), which needs the Photos entit
 | EXIFExtractionTests | 7 | Real EXIF/TIFF/GPS parsing incl. hemisphere sign reconstruction, ISO-from-array, DateTimeOriginal fallback, in-memory extraction |
 | EXIFFormattingTests | 4 | Aperture/ISO/focal length, megapixels, altitude and coordinate formatting |
 | KeychainStoreTests | 4 | Secret round-trip, update-in-place, absent-account delete, account isolation (local only; skipped in CI) |
+| StoreRecoveryTests | 3 | Unopenable store is quarantined and replaced instead of crashing the app; healthy store untouched; catalog left alone |
+| RealLibraryGuardTests | 2 | Fails if a test wrote to the real catalog; pins the seams that keep tests out of the real archive |
 | **LumiVaultUITests** | **12** | **XCUIAutomation (local only): welcome screen, navigation, settings tabs, import flow, deletion context menu** |
 
 ## Requirements
