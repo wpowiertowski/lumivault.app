@@ -124,7 +124,7 @@ LumiVault reads and writes the same `catalog.json` format as the legacy CLI tool
 
 ## Testing
 
-334 unit tests across 62 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 13 UI tests via XCUIAutomation (Xcode 26), which gate CI.
+335 unit tests across 62 suites covering core logic, using a shared synthetic dataset of 8 deterministic files (512 B to 10 KB) with precomputed SHA-256 hashes. Plus 13 UI tests via XCUIAutomation (Xcode 26), which gate CI.
 
 ```bash
 swift test                                    # Run all unit tests

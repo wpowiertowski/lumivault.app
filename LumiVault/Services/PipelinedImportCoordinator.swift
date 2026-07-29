@@ -739,20 +739,41 @@ class PipelinedImportCoordinator: @unchecked Sendable {
                 progress.errors.append(err)
             }
 
-            // Catalog + SwiftData cleanup
+            // Catalog + SwiftData cleanup.
+            //
+            // Only *this* album's catalog entry and files were removed above
+            // (`entireAlbum: false`), so an image also filed under another album has
+            // to survive here — along with its thumbnail, which is keyed by sha256
+            // and shared by every album showing it. Deleting the record outright
+            // made the photo vanish from an album whose entry and bytes were
+            // untouched, and the next hydration re-created it from those still-present
+            // entries with no thumbnail and no storage locations, at which point the
+            // integrity pass reported it missing.
+            //
+            // This is the same cardinality rule the photo-grid, near-duplicate and
+            // whole-album delete paths apply via `removeFromAlbum`; this fourth path
+            // was missed when membership became many-to-many.
+            var deletedSHAs: [String] = []
             for image in delta.removed {
+                let sha = image.sha256
                 await catalogService.removeImage(
-                    sha256: image.sha256,
+                    sha256: sha,
                     fromAlbum: albumRecord.name,
                     year: albumRecord.year,
                     month: albumRecord.month,
                     day: albumRecord.day
                 )
-                await thumbnailService.removeThumbnails(for: image.sha256)
-                modelContext.delete(image)
+                if image.removeFromAlbum(albumRecord, context: modelContext) {
+                    deletedSHAs.append(sha)
+                }
                 await MainActor.run { progress.currentFile += 1 }
             }
             try? modelContext.save()
+
+            // Only for records that are actually gone — see above.
+            for sha in deletedSHAs {
+                await thumbnailService.removeThumbnails(for: sha)
+            }
         }
 
         // 2. Additions through the standard pipeline.

@@ -360,6 +360,67 @@ struct PipelineOrchestrationTests {
         #expect(survivors.first?.albums.map(\.name) == ["Beach"])
     }
 
+    /// The Photos re-sync removal path is the *fourth* place an image is dropped from
+    /// an album, and it kept deleting the whole record after multi-album membership
+    /// shipped — the same defect the photo-grid, near-duplicate and whole-album paths
+    /// were fixed for.
+    ///
+    /// `resyncAlbum` removes only the resynced album's catalog entry and its files
+    /// (`entireAlbum: false`). Deleting the record made the photo vanish from the
+    /// other album too, whose entry and bytes were untouched; the next hydration then
+    /// re-created it from those entries with no thumbnail and no storage locations,
+    /// and the integrity pass called it missing.
+    ///
+    /// Driven through the real `resyncAlbum`. An empty `delta.added` skips the Photos
+    /// leg entirely, so this needs no entitlement, and empty `mountedVolumes` with no
+    /// B2 credentials keeps the deletion side effect-free.
+    @Test func resyncRemovalKeepsAnImageThatStillBelongsToAnotherAlbum() async throws {
+        let h = try PipelineHarness()
+        defer { h.cleanup() }
+        let urls = try h.makeImages(count: 1)
+        let coordinator = h.makeCoordinator()
+
+        try await coordinator.importFiles(
+            urls: urls, settings: h.settings(albumName: "Trip"),
+            modelContext: h.context, progress: h.progress
+        )
+        try await coordinator.importFiles(
+            urls: urls, settings: h.settings(albumName: "Beach"),
+            modelContext: h.context, progress: h.progress
+        )
+
+        let albums = try h.context.fetch(FetchDescriptor<AlbumRecord>())
+        let trip = try #require(albums.first { $0.name == "Trip" })
+        let image = try #require(try h.records().first)
+        #expect(image.albums.count == 2, "setup failed — the image is not in both albums")
+
+        // Photos no longer has the asset backing this image, so the resync offers it
+        // for removal from Trip.
+        try await coordinator.resyncAlbum(
+            albumRecord: trip,
+            delta: AlbumDelta(added: [], removed: [image], untrackable: [], albumMissing: false),
+            settings: h.settings(albumName: "Trip"),
+            modelContext: h.context,
+            progress: h.progress
+        )
+
+        let survivors = try h.records()
+        #expect(survivors.count == 1, "the record was deleted although Beach still holds it")
+        #expect(survivors.first?.albums.map(\.name) == ["Beach"])
+
+        // Trip's copy is gone, so a location still pointing there is a file
+        // reconciliation would look for and fail to find.
+        let locations = survivors.first?.storageLocations.map(\.relativePath) ?? []
+        #expect(!locations.contains { $0.contains("/Trip/") },
+                "a storage location still points at the deleted Trip copy")
+
+        // And Beach's catalog entry is untouched — it is what a restore would rebuild from.
+        let catalog = await h.catalogService.currentCatalog()
+        let day = catalog.years["2026"]?.months["07"]?.days["28"]
+        #expect(day?.albums["Beach"]?.images.count == 1, "Beach lost its catalog entry")
+        #expect(day?.albums["Trip"]?.images.isEmpty ?? true, "Trip kept its catalog entry")
+    }
+
     @Test func deletingTheOnlyAlbumAnImageBelongsToRemovesTheImage() async throws {
         let h = try PipelineHarness()
         defer { h.cleanup() }
