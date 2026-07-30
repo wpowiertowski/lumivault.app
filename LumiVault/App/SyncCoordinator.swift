@@ -632,6 +632,14 @@ final class SyncCoordinator: @unchecked Sendable {
     private func migrateLegacyCatalogIfNeeded() {
         StorageResolver.ensureLibraryExists()
 
+        // Never run outside production. This *moves* `~/.lumivault/catalog.json` and its
+        // `.sha256`/`.par2` sidecars into `libraryURL`, so with the library redirected it
+        // becomes a relocator of real user data: on a machine that still holds a legacy
+        // catalog, a test run would carry it into a throwaway directory that teardown
+        // then deletes. Redirecting the library makes this path *more* dangerous, not
+        // less, so the guard has to be here rather than implied by the redirect.
+        guard Constants.Paths.resolvesProductionLibrary else { return }
+
         // An explicit override means the user chose where the catalog lives; never
         // move it out from under them.
         guard defaults.string(

@@ -39,23 +39,127 @@ enum Constants {
             return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
         }
 
-        /// The user-accessible archive folder, `~/Pictures/LumiVault`. Reachable directly
-        /// (no security-scoped bookmark) thanks to the `assets.pictures.read-write` entitlement.
-        /// This is the default home for both imported photos and `catalog.json` — see
-        /// `resolvedCatalogURL`.
+        // MARK: Sandbox isolation
+        //
+        // Production paths used to be the default and isolation something each test had
+        // to remember. That cost the real archive three times: an import with no target
+        // volume falls back to `libraryURL`, every import test rewrote the real
+        // catalog.json, and a store rebuild lost every VolumeRecord. Each was patched
+        // individually; this reverses the default instead.
+
+        /// True when this process is a test runner rather than the app.
+        ///
+        /// Two signals, because the runners differ and neither covers both:
+        ///
+        /// - `xcodebuild test` hosts the tests *inside* the app, so `Bundle.main` is the
+        ///   app and carries its identifier; XCTest sets `XCTestConfigurationFilePath`.
+        /// - `swift test` runs them in `swiftpm-testing-helper`, which has no bundle
+        ///   identifier at all and sets no such variable.
+        ///
+        /// Measured, not assumed. Under `swift test` on this repo, `XCTest` and
+        /// `XCTestCase` are both absent from the ObjC runtime, `Bundle.allBundles` holds
+        /// no `.xctest`, and `XCTestConfigurationFilePath` is unset — `otool -L` shows the
+        /// test binary links only `Testing.framework`, because SwiftPM does not link
+        /// XCTest into a Swift Testing bundle. Detecting the *test framework* therefore
+        /// cannot work here; detecting the absence of an *app identity* does.
+        ///
+        /// Anything unrecognised reads as a test and lands in a sandbox, so the failure
+        /// direction is a redirected developer rather than a clobbered archive.
+        nonisolated static var isTestProcess: Bool {
+            ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+                || Bundle.main.bundleIdentifier == nil
+        }
+
+        /// Whether this process may resolve the real `~/Pictures/LumiVault`.
+        nonisolated static var resolvesProductionLibrary: Bool {
+            uiTestLibraryOverride == nil && !isTestProcess
+        }
+
+        /// Per-process sandbox root, stable for the process lifetime.
+        ///
+        /// A `static let` so every accessor in one run agrees on the directory; the pid
+        /// and UUID keep concurrent runs (SwiftPM and xcodebuild in the same CI job)
+        /// apart. Created here so a redirected `applicationSupportURL` exists before
+        /// SwiftData tries to open a store inside it.
+        nonisolated static let sandboxRootURL: URL = {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "LumiVault-Sandbox-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            for sub in ["Library", "Application Support"] {
+                try? FileManager.default.createDirectory(
+                    at: root.appendingPathComponent(sub, isDirectory: true),
+                    withIntermediateDirectories: true
+                )
+            }
+            return root
+        }()
+
+        /// Where a redirected process keeps its library, or `nil` in production.
+        ///
+        /// `#if DEBUG` is belt-and-braces, not the mechanism: the test bundle and a
+        /// developer's Debug app are both Debug and need opposite answers, which is why
+        /// `isTestProcess` does the real work. But a Release binary that never compiles
+        /// this branch cannot redirect a user's archive on a false positive, and that is
+        /// worth the two lines. (A `swift test -c release` run would therefore reach
+        /// production — `RealLibraryGuardTests` asserts against that rather than trusting
+        /// it not to happen.)
+        nonisolated static var sandboxLibraryURL: URL? {
+            #if DEBUG
+            guard uiTestLibraryOverride == nil, isTestProcess else { return nil }
+            return sandboxRootURL.appendingPathComponent("Library", isDirectory: true)
+            #else
+            return nil
+            #endif
+        }
+
+        /// The real archive folder, `~/Pictures/LumiVault`, with no redirect applied.
+        ///
+        /// Split out from `libraryURL` so the production resolution stays assertable from
+        /// a test process that is itself redirected — and so guards that must inspect the
+        /// *user's* archive (`RealLibraryGuardTests`) cannot be quietly pointed at a
+        /// sandbox and keep passing.
         ///
         /// Under the sandbox, `.picturesDirectory` returns the container-scoped path
         /// (`~/Library/Containers/…/Data/Pictures`), which is a symlink to the real
         /// `~/Pictures`. Resolve it so the app stores, displays, and reveals the real
         /// user-visible location — surfacing a container path in the UI is precisely
         /// what App Review rejected under guideline 2.4.5(i).
-        nonisolated static var libraryURL: URL {
-            if let override = uiTestLibraryOverride { return override }
+        nonisolated static var productionLibraryURL: URL {
             let base = (try? FileManager.default.url(
                 for: .picturesDirectory, in: .userDomainMask, appropriateFor: nil, create: false
             )) ?? URL(fileURLWithPath: ("~/Pictures" as NSString).expandingTildeInPath)
             return base.resolvingSymlinksInPath()
                 .appendingPathComponent("LumiVault", isDirectory: true)
+        }
+
+        /// The archive folder this process should use. Reachable directly (no
+        /// security-scoped bookmark) thanks to the `assets.pictures.read-write`
+        /// entitlement. Default home for both imported photos and `catalog.json` — see
+        /// `resolvedCatalogURL`.
+        nonisolated static var libraryURL: URL {
+            if let override = uiTestLibraryOverride { return override }
+            if let sandbox = sandboxLibraryURL { return sandbox }
+            return productionLibraryURL
+        }
+
+        /// Application Support for this process, redirected under test.
+        ///
+        /// `SwiftDataContainer` and `ThumbnailService` both used
+        /// `URL.applicationSupportDirectory` directly. That was isolated only by accident
+        /// — an unsandboxed test process resolves it outside the app's container — and
+        /// not at all for UI tests, where the app *is* sandboxed and a UI-driven import
+        /// wrote thumbnails into the developer's real cache.
+        nonisolated static var applicationSupportURL: URL {
+            if let override = uiTestLibraryOverride {
+                let dir = override.appendingPathComponent("Application Support", isDirectory: true)
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                return dir
+            }
+            if sandboxLibraryURL != nil {
+                return sandboxRootURL.appendingPathComponent("Application Support", isDirectory: true)
+            }
+            return URL.applicationSupportDirectory
         }
 
         /// The legacy catalog location inside the sandbox container (`~/.lumivault/catalog.json`).
@@ -78,7 +182,8 @@ enum Constants {
         nonisolated static var resolvedCatalogURL: URL {
             resolveCatalogURL(
                 override: UserDefaults.standard.string(forKey: catalogPathDefaultsKey),
-                uiTestLibrary: uiTestLibraryOverride
+                uiTestLibrary: uiTestLibraryOverride,
+                sandboxLibrary: sandboxLibraryURL
             )
         }
 
@@ -86,13 +191,21 @@ enum Constants {
         /// can exercise it without writing to `UserDefaults.standard` or the process
         /// environment — both process-wide globals that every concurrently running
         /// test shares.
-        nonisolated static func resolveCatalogURL(override raw: String?, uiTestLibrary: URL? = nil) -> URL {
-            // The UI-test library wins over the user's `catalogPath`, and has to: a
-            // developer who has pointed that default at their real archive would
-            // otherwise have it rewritten by a UI-driven import even with the library
-            // redirected — the exact hazard the override exists to prevent.
+        nonisolated static func resolveCatalogURL(
+            override raw: String?, uiTestLibrary: URL? = nil, sandboxLibrary: URL? = nil
+        ) -> URL {
+            // Both redirects outrank the user's `catalogPath`, and have to. Redirecting
+            // `libraryURL` alone does *not* close this path: the override is consulted
+            // first, so a developer who has pointed `catalogPath` at their real archive
+            // keeps writing to it no matter where the library resolves. That is the
+            // hazard the UI-test override was added for, and it is why the sandbox needs
+            // the same precedence position rather than relying on derivation from
+            // `libraryURL` further down.
             if let uiTestLibrary {
                 return uiTestLibrary.appendingPathComponent("catalog.json")
+            }
+            if let sandboxLibrary {
+                return sandboxLibrary.appendingPathComponent("catalog.json")
             }
             if let raw {
                 return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)

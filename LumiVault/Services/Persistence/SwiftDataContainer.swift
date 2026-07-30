@@ -21,8 +21,13 @@ struct SwiftDataContainer {
     /// Where the quarantined store was moved, when recovery happened.
     private(set) nonisolated(unsafe) static var quarantinedStoreURL: URL?
 
+    /// Via `Constants.Paths.applicationSupportURL`, not `URL.applicationSupportDirectory`,
+    /// so a test process cannot open the real store. It was previously isolated only by
+    /// accident — an unsandboxed test process resolves Application Support outside the
+    /// sandboxed app's container — which is exactly the kind of accidental isolation the
+    /// sandbox work replaces with a guarantee.
     static var defaultStoreURL: URL {
-        URL.applicationSupportDirectory.appendingPathComponent("LumiVault.store")
+        Constants.Paths.applicationSupportURL.appendingPathComponent("LumiVault.store")
     }
 
     static func create() -> ModelContainer {

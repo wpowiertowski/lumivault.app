@@ -39,8 +39,12 @@ actor ThumbnailService {
     /// caches directory under disk pressure, which silently emptied the grid
     /// (regression: bf00a05). `cacheRoot` is injectable so tests can exercise the
     /// on-disk layout without touching the real container.
+    /// Via `Constants.Paths.applicationSupportURL` so a redirected process gets a
+    /// redirected cache. The UI-test library override did not cover this: the app under
+    /// UI test is sandboxed, so a UI-driven import wrote sha-keyed thumbnails into the
+    /// developer's real `Application Support/Thumbnails` and nothing cleaned them up.
     nonisolated static var defaultCacheRoot: URL {
-        URL.applicationSupportDirectory
+        Constants.Paths.applicationSupportURL
             .appendingPathComponent("Thumbnails", isDirectory: true)
     }
 

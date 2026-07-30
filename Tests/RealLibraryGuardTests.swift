@@ -32,7 +32,11 @@ struct RealLibraryGuardTests {
     /// one album named for a fixture. This does not run *before* the suite, so
     /// it cannot prevent the damage — it makes a recurrence impossible to miss.
     @Test func theRealCatalogWasNotReplacedByATestCatalog() throws {
-        let url = Constants.Paths.resolveCatalogURL(override: nil)
+        // Explicitly the production path. This used to read
+        // `resolveCatalogURL(override: nil)`, which now follows the sandbox redirect —
+        // the guard would have inspected its own throwaway catalog and passed
+        // unconditionally, which is a worse outcome than not having it.
+        let url = Constants.Paths.productionLibraryURL.appendingPathComponent("catalog.json")
         guard FileManager.default.fileExists(atPath: url.path) else { return }
 
         let data = try Data(contentsOf: url)
@@ -92,6 +96,55 @@ struct RealLibraryGuardTests {
         // And the library root must be redirectable for UI tests, which launch the
         // real app binary against the real archive otherwise.
         #expect(Constants.Paths.uiTestLibraryEnvKey == "LUMIVAULT_UITEST_LIBRARY")
+    }
+
+    // MARK: - Sandbox isolation
+    //
+    // The predicate below is the single thing the whole sandbox layer rests on, and it
+    // fails *open* — a toolchain change that stops `isTestProcess` firing puts every
+    // subsequent run back on the production archive, silently. So it is asserted
+    // directly rather than inferred from the redirects working.
+
+    @Test func thisProcessIsRecognisedAsATestRunner() {
+        #expect(
+            Constants.Paths.isTestProcess,
+            """
+            Test-process detection has stopped working. Every path below resolves to the \
+            real archive until it is fixed. Under `swift test` this relies on \
+            `Bundle.main.bundleIdentifier` being nil (the host is swiftpm-testing-helper); \
+            under `xcodebuild test` on XCTestConfigurationFilePath being set.
+            """
+        )
+        #expect(!Constants.Paths.resolvesProductionLibrary)
+    }
+
+    @Test func everyWritableRootResolvesInsideTheSandbox() {
+        let production = Constants.Paths.productionLibraryURL.path
+
+        // One assertion per root. Covering only the library would leave the two that
+        // reached `URL.applicationSupportDirectory` directly unguarded — they were
+        // isolated by accident, and the accident is what this replaces.
+        #expect(Constants.Paths.libraryURL.path != production,
+                "libraryURL resolves to the real archive")
+        #expect(!Constants.Paths.resolvedCatalogURL.path.hasPrefix(production),
+                "resolvedCatalogURL points inside the real archive")
+        #expect(Constants.Paths.applicationSupportURL != URL.applicationSupportDirectory,
+                "applicationSupportURL is the real one — the store and thumbnail cache follow it")
+        #expect(SwiftDataContainer.defaultStoreURL.path
+                    .hasPrefix(Constants.Paths.sandboxRootURL.path),
+                "the SwiftData store would open outside the sandbox")
+        #expect(ThumbnailService.defaultCacheRoot.path
+                    .hasPrefix(Constants.Paths.sandboxRootURL.path),
+                "thumbnails would be written outside the sandbox")
+    }
+
+    @Test func theSandboxRootIsStableWithinTheProcess() {
+        // Accessors must agree on one directory; a computed property returning a fresh
+        // UUID each call would scatter the store, catalog and thumbnails across
+        // unrelated temp directories and make the guards above pass while nothing lined
+        // up.
+        #expect(Constants.Paths.sandboxRootURL == Constants.Paths.sandboxRootURL)
+        #expect(Constants.Paths.libraryURL == Constants.Paths.libraryURL)
     }
 }
 

@@ -2,7 +2,7 @@
 
 ## Existing Automated Test Assessment
 
-### Summary: 335 tests across 62 suites
+### Summary: 340 tests across 62 suites
 
 | Rating | Suite | Tests | Assessment |
 | -------- | ------- | ------- | ------------ |
@@ -28,7 +28,7 @@
 | Medium Value | EXIFFormattingTests | 4 | The six formatted strings: aperture/ISO/focal length incl. the 35mm equivalent, megapixels needing both axes, altitude and coordinate precision, and a latitude without a longitude not being a fix. |
 | Medium Value | KeychainStoreTests | 4 | Round-trip, update-in-place rather than duplicate, delete of an absent account, and account isolation. These used to be gated off whenever `CI` was set, on the untested assumption that a runner's keychain is locked — which made the coverage figure quoted for `KeychainStore` unreproducible in the job that gates on coverage. `B2Credentials` is deliberately uncovered: it persists under a fixed account, so testing it would overwrite real credentials. |
 | High Value | StoreRecoveryTests | 5 | An unopenable SwiftData store is quarantined (bytes preserved verbatim, `-wal`/`-shm` moved with it) and replaced rather than crashing the app on launch; a healthy store is left alone; recovery never touches `catalog.json`, which is what it rebuilds from. An open failure with no store on disk is not reported as a recovery, and two failures in the same second do not collide. Guards the interrupted-migration case that made the app permanently unlaunchable. |
-| High Value | RealLibraryGuardTests | 2 | Fails if the real `~/Pictures/LumiVault/catalog.json` looks like a test wrote it, and pins the two seams (`PipelinedImportCoordinator.catalogURL`, `LUMIVAULT_UITEST_LIBRARY`) that keep tests out of the real archive. Exists because two separate defects wrote there while the suite stayed green. |
+| High Value | RealLibraryGuardTests | 5 | Fails if the real `~/Pictures/LumiVault/catalog.json` looks like a test wrote it (checked against `productionLibraryURL`, so the sandbox redirect cannot make the guard inspect its own throwaway copy), pins the two injection seams, and asserts the sandbox itself: that this process is recognised as a test runner, and that all five writable roots — library, catalog, Application Support, SwiftData store, thumbnail cache — resolve inside it. The detection predicate fails *open*, so it is asserted directly rather than inferred from the redirects working. |
 | Medium Value | CatalogBackupServiceTests | 5 | Volume backup write + decode, error on bad path, file restore round-trip, missing catalog error, orphan vol-file eviction |
 | Medium Value | CatalogBackupRestoreTests | 1 | Volume restore happy path with full fixture hash verification |
 | Medium Value | ImageConversionTests | 6 | JPEG conversion with extension change, valid output, dimension scaling, original format pass-through, below-max preservation. Tests exercise the shared `ImageConversionService.convertImage`. |
@@ -50,7 +50,7 @@
 | High Value | ImportProgressBoundsTests | 8 | Progress fraction stays within 0…1 across every phase and on the between-albums exit, and the removal phase is labelled and determinate. Two tests pin the *expected* fraction through the real `beginRun`/`beginAlbum`/`finishAlbum` sequence, so a dropped counter reset fails rather than being swallowed by the clamp. |
 | Medium Value | ThumbnailCacheTests | 4 | Cache root is Application Support and not the purgeable `Caches`; sha-sharded layout for both sizes, miss reads nil, removal clears disk. |
 | Medium Value | EnsureFileMirroredTests | 4 | Copy-stage mirroring skips a same-size destination and replaces truncated or empty leftovers. |
-| Medium Value | CatalogPathResolutionTests | 5 | Catalog path override and tilde expansion via `resolveCatalogURL(override:)` — no writes to the process-wide `catalogPath` default — plus the wiring that accessor depends on, and the symlink-resolved library path that keeps container paths out of the UI. |
+| Medium Value | CatalogPathResolutionTests | 7 | Catalog path override and tilde expansion via `resolveCatalogURL(override:)` — no writes to the process-wide `catalogPath` default — plus the wiring that accessor depends on, and the symlink-resolved library path (asserted against `productionLibraryURL`, since a test process is itself redirected). Also the redirect precedence: both the UI-test override and the sandbox outrank a user-configured `catalogPath`, which redirecting `libraryURL` alone does *not* achieve because the override is consulted first. |
 | Medium Value | ImageConversionFormatTests | 3 | HEIC output really decodes as `public.heic`; alpha stripped from RGBA sources for both JPEG and HEIC. |
 | Medium Value | BookmarkResolverTests | 3 | Bookmark round-trip, no rewrite when not stale, corrupt data still throws. Asserts unconditionally — security-scoped bookmarks resolve fine in an unsandboxed test process. |
 | High Value | ChannelCancellationDrainTests | 2 | `cancel()` does not discard buffered items, and a cancelled `runConversionStage` stops consuming instead of draining the backlog. The second drives a real pipeline stage, so reverting any stage's `break` to `continue` fails it. |
