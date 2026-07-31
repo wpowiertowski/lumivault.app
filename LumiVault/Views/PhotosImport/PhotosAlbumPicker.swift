@@ -1,10 +1,18 @@
 import SwiftUI
 import Photos
 
+/// Raw values are persisted under `AlbumPickerDefaults.sortOrder` and double as the
+/// segmented-control labels, so renaming a case resets a stored preference to `.name`
+/// rather than migrating it.
 private enum AlbumSortOrder: String, CaseIterable {
     case name = "Name"
     case date = "Date"
     case count = "Count"
+}
+
+private enum AlbumPickerDefaults {
+    static let sortOrder = "albumPicker.sortOrder"
+    static let sortAscending = "albumPicker.sortAscending"
 }
 
 enum AlbumSyncStatus {
@@ -31,8 +39,8 @@ struct PhotosAlbumPicker: View {
     /// tracked in the catalog. Computed on load; `syncStatus` reads it.
     @State private var importedCounts: [String: Int] = [:]
     @State private var searchText = ""
-    @State private var sortOrder: AlbumSortOrder = .name
-    @State private var sortAscending = true
+    @AppStorage(AlbumPickerDefaults.sortOrder) private var sortOrder: AlbumSortOrder = .name
+    @AppStorage(AlbumPickerDefaults.sortAscending) private var sortAscending = true
     @State private var authStatus: PHAuthorizationStatus = .notDetermined
     @State private var isLoading = false
     @AppStorage(ImportSettings.includeVideosDefaultsKey) private var includeVideosDefault = true
