@@ -169,9 +169,34 @@ struct CatalogPathResolutionTests {
         #expect(key == "catalogPath")
         let expected = Constants.Paths.resolveCatalogURL(
             override: UserDefaults.standard.string(forKey: key),
-            uiTestLibrary: Constants.Paths.uiTestLibraryOverride
+            uiTestLibrary: Constants.Paths.uiTestLibraryOverride,
+            sandboxLibrary: Constants.Paths.sandboxLibraryURL
         )
         #expect(Constants.Paths.resolvedCatalogURL == expected)
+    }
+
+    @Test func theSandboxBeatsTheUserConfiguredCatalogPath() {
+        // The case the sandbox plan believed was already closed "because
+        // resolvedCatalogURL derives from libraryURL". It does not: the `catalogPath`
+        // override is consulted first, so redirecting the library alone leaves a
+        // developer who set that default still writing to their real catalog.
+        let sandbox = URL(fileURLWithPath: "/tmp/lumivault-sandbox/Library")
+        let url = Constants.Paths.resolveCatalogURL(
+            override: "~/Pictures/LumiVault/catalog.json",
+            sandboxLibrary: sandbox
+        )
+        #expect(url.path == "/tmp/lumivault-sandbox/Library/catalog.json")
+    }
+
+    @Test func theUITestOverrideOutranksTheSandbox() {
+        // Both redirects are safe; the order only has to be *fixed*, so a UI test that
+        // sets an explicit library gets that library rather than a per-process temp dir.
+        let url = Constants.Paths.resolveCatalogURL(
+            override: nil,
+            uiTestLibrary: URL(fileURLWithPath: "/tmp/uitest"),
+            sandboxLibrary: URL(fileURLWithPath: "/tmp/sandbox")
+        )
+        #expect(url.path == "/tmp/uitest/catalog.json")
     }
 
     @Test func theUITestLibraryBeatsTheUserConfiguredCatalogPath() {
@@ -188,7 +213,11 @@ struct CatalogPathResolutionTests {
     }
 
     @Test func libraryPathIsSymlinkResolvedAndUserVisible() {
-        let library = Constants.Paths.libraryURL
+        // `productionLibraryURL`, not `libraryURL`: this process is a test runner, so
+        // `libraryURL` resolves into a sandbox by design. The property under test —
+        // that the *shipping* path is symlink-resolved and user-visible — still needs
+        // asserting, and it is only reachable through the unredirected accessor.
+        let library = Constants.Paths.productionLibraryURL
         // Resolving is what keeps a container alias out of the Settings UI.
         #expect(library.path == library.resolvingSymlinksInPath().path)
         #expect(library.lastPathComponent == "LumiVault")
